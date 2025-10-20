@@ -9,7 +9,7 @@
 #SBATCH -e exatensor-profile-all-%j.out
 
 module load PrgEnv-nvidia
-cd /global/homes/j/jhdavis/scratch/llms4hpc/GPA-Benchmark/ExaTensor
+cd /global/homes/j/jhdavis/scratch/llms4hpc/GPA-Benchmark/ExaTENSOR
 srun dcgmi profile --pause
 
 subdirs=("exatensor" "exatensor-opt1" "exatensor-opt2" "exatensor-opt3" "exatensor-opt4")
