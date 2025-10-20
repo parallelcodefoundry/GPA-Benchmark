@@ -10,3 +10,6 @@
 [submodule "Castro"]
 	path = Castro
 	url = https://github.com/AMReX-Astro/Castro.git
+[submodule "Quicksilver"]
+	path = Quicksilver
+	url = https://github.com/Jokeren/Quicksilver
