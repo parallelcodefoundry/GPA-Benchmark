@@ -1,5 +1,5 @@
 [submodule "Quicksilver"]
-	path = Quicksilver
+	path = Quicksilver-opt
 	url = https://github.com/Jokeren/Quicksilver.git
 [submodule "PeleC"]
 	path = PeleC
@@ -7,3 +7,6 @@
 [submodule "gpa-minimod-artifacts"]
 	path = gpa-minimod-artifacts
 	url = https://github.com/rsrice/gpa-minimod-artifacts.git
+[submodule "Castro"]
+	path = Castro
+	url = https://github.com/AMReX-Astro/Castro.git
