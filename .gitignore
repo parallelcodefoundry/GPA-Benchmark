@@ -42,3 +42,11 @@ rodinia/rodinia-profile-all.sbatch
 rodinia/srad/srad_v1-opt/srad
 rodinia/streamcluster-opt/sc_gpu
 rodinia/streamcluster/sc_gpu
+rodinia/cfd-opt/density
+rodinia/cfd-opt/density_energy
+rodinia/cfd-opt/momentum
+rodinia/cfd/density
+rodinia/cfd/density_energy
+rodinia/cfd/momentum
+rodinia/pathfinder-opt/result.txt
+rodinia/pathfinder/result.txt
