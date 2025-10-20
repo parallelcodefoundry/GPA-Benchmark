@@ -76,7 +76,8 @@ cd ..
 
 cd gaussian-opt/
 ./gaussian -f ../../data/gaussian/matrix4.txt
-./gaussian -s 16cd ..
+./gaussian -s 16
+cd ..
 
 
 cd heartwall/
@@ -120,11 +121,13 @@ cd ..
 
 
 cd lavaMD/
-./lavaMD -boxes1d 10cd ..
+./lavaMD -boxes1d 10
+cd ..
 
 
 cd lavaMD-opt/
-./lavaMD -boxes1d 10cd ..
+./lavaMD -boxes1d 10
+cd ..
 
 
 cd lud/
@@ -181,11 +184,13 @@ cd ..
 
 
 cd pathfinder/
-./pathfinder 100000 100 20 > result.txtcd ..
+./pathfinder 100000 100 20 > result.txt
+cd ..
 
 
 cd pathfinder-opt/
-./pathfinder 100000 100 20 > result.txtcd ..
+./pathfinder 100000 100 20 > result.txt
+cd ..
 
 
 cd srad/srad_v1/
@@ -199,7 +204,8 @@ cd ../..
 
 
 cd srad/srad_v2/
-./srad 2048 2048 0 127 0 127 0.5 2cd ../..
+./srad 2048 2048 0 127 0 127 0.5 2
+cd ../..
 
 
 cd streamcluster/
