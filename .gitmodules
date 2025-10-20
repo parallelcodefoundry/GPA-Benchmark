@@ -1,4 +1,4 @@
-[submodule "Quicksilver"]
+[submodule "Quicksilver-opt"]
 	path = Quicksilver-opt
 	url = https://github.com/Jokeren/Quicksilver.git
 [submodule "PeleC"]
