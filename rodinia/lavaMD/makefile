@@ -32,7 +32,7 @@ a.out:		main.o \
 			./util/timer/timer.o \
 			./util/device/device.o \
 			-lm \
-			-L/usr/local/cuda/lib64 \
+			-L$(CUDA_DIR)/lib64 \
 			-lcuda -lcudart \
 			$(OMP_LIB) \
 			-o lavaMD
