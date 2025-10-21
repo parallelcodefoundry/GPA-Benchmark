@@ -50,3 +50,4 @@ rodinia/cfd/density_energy
 rodinia/cfd/momentum
 rodinia/pathfinder-opt/result.txt
 rodinia/pathfinder/result.txt
+image_out.pgm
