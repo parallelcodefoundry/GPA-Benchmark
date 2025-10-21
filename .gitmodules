@@ -13,3 +13,6 @@
 [submodule "Quicksilver"]
 	path = Quicksilver
 	url = https://github.com/Jokeren/Quicksilver
+[submodule "LULESH"]
+	path = LULESH
+	url = https://github.com/LLNL/LULESH
