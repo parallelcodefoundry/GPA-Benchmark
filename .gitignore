@@ -51,3 +51,7 @@ rodinia/cfd/momentum
 rodinia/pathfinder-opt/result.txt
 rodinia/pathfinder/result.txt
 image_out.pgm
+rodinia/kmeans-opt/obj/
+rodinia/kmeans/obj/
+rodinia/lavaMD-opt/lavaMD
+rodinia/lavaMD/lavaMD
