@@ -55,3 +55,5 @@ rodinia/kmeans-opt/obj/
 rodinia/kmeans/obj/
 rodinia/lavaMD-opt/lavaMD
 rodinia/lavaMD/lavaMD
+rodinia/streamcluster-opt/output.txt
+rodinia/streamcluster/output.txt
