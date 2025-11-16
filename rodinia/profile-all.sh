@@ -1,35 +1,35 @@
 cd b+tree/
-ncu -f -o rodinia_b+tree_b+tree.out_file__data_b+tree_mil_txt_command__data_b+tree_command_txt --set full --import-source=yes ./b+tree.out file ../data/b+tree/mil.txt command ../data/b+tree/command.txt
+ncu -f -o rodinia_b+tree_b+tree.out_file__data_b+tree_mil_txt_command__data_b+tree_command_txt --set full --import-source=yes --kernel-name findRangeK ./b+tree.out file ../data/b+tree/mil.txt command ../data/b+tree/command.txt
 cd ..
 
 
 cd b+tree-opt/
-ncu -f -o rodinia_b+tree-opt_b+tree.out_file__data_b+tree_mil_txt_command__data_b+tree_command_txt --set full --import-source=yes ./b+tree.out file ../data/b+tree/mil.txt command ../data/b+tree/command.txt
+ncu -f -o rodinia_b+tree-opt_b+tree.out_file__data_b+tree_mil_txt_command__data_b+tree_command_txt --set full --import-source=yes --kernel-name findRangeK ./b+tree.out file ../data/b+tree/mil.txt command ../data/b+tree/command.txt
 cd ..
 
 
 cd backprop/
-ncu -f -o rodinia_backprop_backprop_65536 --set full --import-source=yes ./backprop 65536
+ncu -f -o rodinia_backprop_backprop_65536 --set full --import-source=yes --kernel-name bpnn_layerforward_CUDA ./backprop 65536
 cd ..
 
 
 cd backprop-opt1/
-ncu -f -o rodinia_backprop-opt1_backprop_65536 --set full --import-source=yes ./backprop 65536
+ncu -f -o rodinia_backprop-opt1_backprop_65536 --set full --import-source=yes --kernel-name bpnn_layerforward_CUDA ./backprop 65536
 cd ..
 
 
 cd backprop-opt2/
-ncu -f -o rodinia_backprop-opt2_backprop_65536 --set full --import-source=yes ./backprop 65536
+ncu -f -o rodinia_backprop-opt2_backprop_65536 --set full --import-source=yes --kernel-name bpnn_layerforward_CUDA ./backprop 65536
 cd ..
 
 
 cd bfs/
-ncu -f -o rodinia_bfs_bfs__data_bfs_graph1MW_6_txt --set full --import-source=yes ./bfs ../data/bfs/graph1MW_6.txt
+ncu -f -o rodinia_bfs_bfs__data_bfs_graph1MW_6_txt --set full --import-source=yes --kernel-name Kernel --kernel-id 9 ./bfs ../data/bfs/graph1MW_6.txt
 cd ..
 
 
 cd bfs-opt/
-ncu -f -o rodinia_bfs-opt_bfs__data_bfs_graph1MW_6_txt --set full --import-source=yes ./bfs ../data/bfs/graph1MW_6.txt
+ncu -f -o rodinia_bfs-opt_bfs__data_bfs_graph1MW_6_txt --set full --import-source=yes --kernel-name Kernel --kernel-id 9 ./bfs ../data/bfs/graph1MW_6.txt
 cd ..
 
 # skipped, not in paper
@@ -72,7 +72,7 @@ cd ..
 
 
 cd gaussian/
-ncu -f -o rodinia_gaussian_gaussian_-s_1024 --set full --import-source=yes -k "Fan2" --launch-skip 250 --launch-count 50 ./gaussian -s 1024
+ncu -f -o rodinia_gaussian_gaussian_-s_1024 --set full --import-source=yes -k "Fan2" --launch-skip 250 --launch-count 1 ./gaussian -s 1024
 cd ..
 
 
@@ -83,7 +83,7 @@ cd ..
 
 
 cd heartwall/
-ncu -f -o rodinia_heartwall_heartwall__data_heartwall_test_avi_10 --set full --import-source=yes ./heartwall ../data/heartwall/test.avi 10
+ncu -f -o rodinia_heartwall_heartwall__data_heartwall_test_avi_10 --set full --import-source=yes --kernel-id 4 ./heartwall ../data/heartwall/test.avi 10
 cd ..
 
 
@@ -104,23 +104,23 @@ cd ..
 
 
 cd huffman/
-ncu -f -o rodinia_huffman_pavle__data_huffman_test1024_H2_206587175259_in --set full --import-source=yes ./pavle ../data/huffman/test1024_H2.206587175259.in 
+ncu -f -o rodinia_huffman_pavle__data_huffman_test1024_H2_206587175259_in --set full --import-source=yes --kernel-name vlc_encode_kernel_sm64huff --kernel-id 4 ./pavle ../data/huffman/test1024_H2.206587175259.in
 cd ..
 
 
 cd huffman-opt/
-ncu -f -o rodinia_huffman-opt_pavle__data_huffman_test1024_H2_206587175259_in --set full --import-source=yes ./pavle ../data/huffman/test1024_H2.206587175259.in 
+ncu -f -o rodinia_huffman-opt_pavle__data_huffman_test1024_H2_206587175259_in --set full --import-source=yes --kernel-name vlc_encode_kernel_sm64huff --kernel-id 4 ./pavle ../data/huffman/test1024_H2.206587175259.in
 cd ..
 
 
 # skipped, uses legacy texture references that no longer compile
 #cd kmeans/
-#ncu -f -o rodinia_kmeans_kmeans_-o_-i__data_kmeans_kdd_cup --set full --import-source=yes ./kmeans -o -i ../data/kmeans/kdd_cup 
+#ncu -f -o rodinia_kmeans_kmeans_-o_-i__data_kmeans_kdd_cup --set full --import-source=yes ./kmeans -o -i ../data/kmeans/kdd_cup
 #cd ..
 #
 #
 #cd kmeans-opt/
-#ncu -f -o rodinia_kmeans-opt_kmeans_-o_-i__data_kmeans_kdd_cup --set full --import-source=yes ./kmeans -o -i ../data/kmeans/kdd_cup 
+#ncu -f -o rodinia_kmeans-opt_kmeans_-o_-i__data_kmeans_kdd_cup --set full --import-source=yes ./kmeans -o -i ../data/kmeans/kdd_cup
 #cd ..
 
 
@@ -135,12 +135,12 @@ cd ..
 
 
 cd lud/
-ncu -f -o rodinia_lud_lud_cuda_-s_256_-v --set full --import-source=yes ./cuda/lud_cuda -s 256 -v
+ncu -f -o rodinia_lud_lud_cuda_-s_256_-v --set full --import-source=yes --kernel-name lud_diagonal --kernel-id 8 ./cuda/lud_cuda -s 256 -v
 cd ..
 
 
 cd lud-opt/
-ncu -f -o rodinia_lud-opt_lud_cuda_-s_256_-v --set full --import-source=yes ./cuda/lud_cuda -s 256 -v
+ncu -f -o rodinia_lud-opt_lud_cuda_-s_256_-v --set full --import-source=yes --kernel-name lud_diagonal --kernel-id 8 ./cuda/lud_cuda -s 256 -v
 cd ..
 
 
@@ -165,42 +165,42 @@ cd ..
 
 
 cd nw/
-ncu -f -o rodinia_nw_needle_2048_10 --set full --import-source=yes ./needle 2048 10
+ncu -f -o rodinia_nw_needle_2048_10 --set full --import-source=yes --kernel-name needle_cuda_shared_1 --kernel-id 128 ./needle 2048 10
 cd ..
 
 
 cd nw-opt/
-ncu -f -o rodinia_nw-opt_needle_2048_10 --set full --import-source=yes ./needle 2048 10
+ncu -f -o rodinia_nw-opt_needle_2048_10 --set full --import-source=yes --kernel-name needle_cuda_shared_1 --kernel-id 128 ./needle 2048 10
 cd ..
 
 
 cd particlefilter/
-ncu -f -o rodinia_particlefilter_particlefilter_float_-x_128_-y_128_-z_10_-np_1000 --set full --import-source=yes ./particlefilter_float -x 128 -y 128 -z 10 -np 1000
+ncu -f -o rodinia_particlefilter_particlefilter_float_-x_128_-y_128_-z_10_-np_1000 --set full --import-source=yes --kernel-name likelihood_kernel --kernel-id 5 ./particlefilter_float -x 128 -y 128 -z 10 -np 1000
 cd ..
 
 
 cd particlefilter-opt/
-ncu -f -o rodinia_particlefilter-opt_particlefilter_float_-x_128_-y_128_-z_10_-np_1000 --set full --import-source=yes ./particlefilter_float -x 128 -y 128 -z 10 -np 1000
+ncu -f -o rodinia_particlefilter-opt_particlefilter_float_-x_128_-y_128_-z_10_-np_1000 --set full --import-source=yes --kernel-name likelihood_kernel --kernel-id 5 ./particlefilter_float -x 128 -y 128 -z 10 -np 1000
 cd ..
 
 
 cd pathfinder/
-ncu -f -o rodinia_pathfinder_pathfinder_100000_100_20_>_result_txt --set full --import-source=yes ./pathfinder 100000 100 20 > result.txt
+ncu -f -o rodinia_pathfinder_pathfinder_100000_100_20_>_result_txt --set full --import-source=yes --kernel-id 3 ./pathfinder 100000 100 20 > result.txt
 cd ..
 
 
 cd pathfinder-opt/
-ncu -f -o rodinia_pathfinder-opt_pathfinder_100000_100_20_>_result_txt --set full --import-source=yes ./pathfinder 100000 100 20 > result.txt
+ncu -f -o rodinia_pathfinder-opt_pathfinder_100000_100_20_>_result_txt --set full --import-source=yes --kernel-id 3 ./pathfinder 100000 100 20 > result.txt
 cd ..
 
 
 cd srad/srad_v1/
-ncu -f -o rodinia_srad_srad_100_0_5_502_458 --set full --import-source=yes -k "reduce" ./srad 100 0.5 502 458
+ncu -f -o rodinia_srad_srad_100_0_5_502_458 --set full --import-source=yes -k "reduce" --kernel-id 100 ./srad 100 0.5 502 458
 cd ../..
 
 
 cd srad/srad_v1-opt/
-ncu -f -o rodinia_srad_srad_100_0_5_502_458 --set full --import-source=yes -k "reduce" ./srad 100 0.5 502 458
+ncu -f -o rodinia_srad_srad_100_0_5_502_458 --set full --import-source=yes -k "reduce" --kernel-id 100 ./srad 100 0.5 502 458
 cd ../..
 
 
@@ -211,10 +211,10 @@ cd ../..
 
 
 cd streamcluster/
-ncu -f -o rodinia_streamcluster_sc_gpu_10_20_256_1024_1024_1000_none_output_txt_1 --set full --import-source=yes --launch-skip 200 --launch-count 200 ./sc_gpu 10 20 256 1024 1024 1000 none output.txt 1
+ncu -f -o rodinia_streamcluster_sc_gpu_10_20_256_1024_1024_1000_none_output_txt_1 --set full --import-source=yes --launch-skip 300 --launch-count 1 ./sc_gpu 10 20 256 1024 1024 1000 none output.txt 1
 cd ..
 
 
 cd streamcluster-opt/
-ncu -f -o rodinia_streamcluster-opt_sc_gpu_10_20_256_1024_1024_1000_none_output_txt_1 --set full --import-source=yes --launch-skip 200 --launch-count 200 ./sc_gpu 10 20 256 1024 1024 1000 none output.txt 1
+ncu -f -o rodinia_streamcluster-opt_sc_gpu_10_20_256_1024_1024_1000_none_output_txt_1 --set full --import-source=yes --launch-skip 300 --launch-count 1 ./sc_gpu 10 20 256 1024 1024 1000 none output.txt 1
 cd ..
