@@ -1,6 +1,6 @@
 [submodule "Quicksilver-opt"]
 	path = Quicksilver-opt
-	url = https://github.com/Jokeren/Quicksilver.git
+	url = git@github.com:parallelcodefoundry/Quicksilver.git
 [submodule "PeleC"]
 	path = PeleC
 	url = https://github.com/Jokeren/PeleC.git
@@ -12,7 +12,7 @@
 	url = https://github.com/AMReX-Astro/Castro.git
 [submodule "Quicksilver"]
 	path = Quicksilver
-	url = https://github.com/Jokeren/Quicksilver
+	url = git@github.com:parallelcodefoundry/Quicksilver.git
 [submodule "LULESH"]
 	path = LULESH
 	url = https://github.com/LLNL/LULESH
