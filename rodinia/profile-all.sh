@@ -178,14 +178,14 @@ cd ..
 
 
 # skipped, error code 6
-#cd particlefilter/
-#ncu -f -o rodinia_particlefilter_particlefilter_float_-x_128_-y_128_-z_10_-np_1000 --set full --import-source=yes $METRICS --kernel-name likelihood_kernel --launch-skip 2 --launch-count 1 ./particlefilter_float -x 128 -y 128 -z 10 -np 1000
-#cd ..
-#
-#
-#cd particlefilter-opt/
-#ncu -f -o rodinia_particlefilter-opt_particlefilter_float_-x_128_-y_128_-z_10_-np_1000 --set full --import-source=yes $METRICS --kernel-name likelihood_kernel --launch-skip 2 --launch-count 1 ./particlefilter_float -x 128 -y 128 -z 10 -np 1000
-#cd ..
+cd particlefilter/
+ncu -f -o rodinia_particlefilter_particlefilter_float_-x_128_-y_128_-z_10_-np_1000 --set full --import-source=yes $METRICS --kernel-name likelihood_kernel --launch-skip 2 --launch-count 1 ./particlefilter_float -x 128 -y 128 -z 10 -np 1000
+cd ..
+
+
+cd particlefilter-opt/
+ncu -f -o rodinia_particlefilter-opt_particlefilter_float_-x_128_-y_128_-z_10_-np_1000 --set full --import-source=yes $METRICS --kernel-name likelihood_kernel --launch-skip 2 --launch-count 1 ./particlefilter_float -x 128 -y 128 -z 10 -np 1000
+cd ..
 
 
 cd pathfinder/
