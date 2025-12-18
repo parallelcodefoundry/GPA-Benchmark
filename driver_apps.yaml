@@ -6,6 +6,7 @@ apps:
   build_command: make -j 8
   run_command: ./main
   replace_file: ExaTENSOR/cuda2.cu
+  fail_check_text: Failed!
 
 - name: LULESH
   kernel_name: ApplyMaterialPropertiesAndUpdateVolume_kernel
@@ -15,6 +16,8 @@ apps:
   run_command: ./lulesh -s 45
   ncu_args: -k ApplyMaterialPropertiesAndUpdateVolume_kernel --launch-skip 49 --launch-count 1
   replace_file: LULESH/cuda/src/lulesh.cu
+  reference_output: LULESH/cuda/src/s45-ref-xyz.asc
+  test_output: LULESH/cuda/src/xyz.asc
 
 - name: Quicksilver
   kernel_name: CycleTrackingKernel
