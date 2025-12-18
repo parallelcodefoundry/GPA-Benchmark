@@ -1,6 +1,8 @@
 # Configuration file for proxy apps that the driver can build, run, validate, profile, and test optimizations for.
 # All Makefiles support SM_VERSION (SM_VERSIONS for Rodinia) as a command line argument (e.g., make SM_VERSION=90 SM_VERSIONS=sm_90)
 # The environment should have CUDA_HOME and MPICH_DIR (for LULESH) set.
+# Rodinia apps are built from rodinia/ with make -j 8.
+#TODO: Update run scripts in each rodinia app to include output redirects where needed
 apps:
 
 - name: ExaTENSOR
@@ -40,7 +42,6 @@ apps:
 - name: b+tree
   kernel_name: findRangeK
   path: rodinia/b+tree
-  build_command: make -j 8
   run_command: ./b+tree.out file ../data/b+tree/mil.txt command ../data/b+tree/command.txt
   ncu_args: -k findRangeK
   replace_file: rodinia/b+tree/kernel_gpu_cuda_2.cu
@@ -50,7 +51,6 @@ apps:
 - name: backprop
   kernel_name: bpnn_layerforward_CUDA
   path: rodinia/backprop
-  build_command: make -j 8
   run_command: ./backprop 65536 > output.txt
   ncu_args: -k bpnn_layerforward_CUDA
   replace_file: rodinia/backprop/backprop_cuda_kernel.cu
@@ -62,7 +62,6 @@ apps:
 - name: bfs
   kernel_name: Kernel
   path: rodinia/bfs
-  build_command: make -j 8
   run_command: ./bfs ../data/bfs/graph1MW_6.txt
   ncu_args: -k Kernel --launch-skip 8 --launch-count 1
   replace_file: rodinia/bfs/kernel.cu
@@ -72,7 +71,6 @@ apps:
 - name: gaussian
   kernel_name: Fan2
   path: rodinia/gaussian
-  build_command: make -j 8
   run_command: ./gaussian -s 1024 | head -n -2 > output.txt
   ncu_args: -k Fan2 --launch-skip 250 --launch-count 1
   replace_file: rodinia/gaussian/gaussian.cu
@@ -82,7 +80,6 @@ apps:
 - name: heartwall
   kernel_name: heartwall_kernel
   path: rodinia/heartwall
-  build_command: make -j 8
   run_command: ./heartwall ../data/heartwall/test.avi 10
   ncu_args: --launch-skip 4 --launch-count 1
   replace_file: rodinia/heartwall/kernel.cu
@@ -92,14 +89,14 @@ apps:
 - name: hotspot
   kernel_name: calculate_temp
   path: rodinia/hotspot
-  build_command: make -j 8
   run_command: ./hotspot 512 2 2 ../data/hotspot/temp_512 ../data/hotspot/power_512 output.out
   replace_file: rodinia/hotspot/hotspot.cu
+  reference_output: rodinia/hotspot/ref-output.out
+  test_output: rodinia/hotspot/output.out
 
 - name: huffman
   kernel_name: vlc_encode_kernel_sm64huff
   path: rodinia/huffman
-  build_command: make -j 8
   run_command: ./pavle ../data/huffman/test1024_H2.206587175259.in
   ncu_args: -k vlc_encode_kernel_sm64huff --launch-skip 3 --launch-count 1
   replace_file: rodinia/huffman/vlc_kernel_sm64huff.cu
@@ -107,14 +104,12 @@ apps:
 - name: lavaMD
   kernel_name: cuda_compute_flux
   path: rodinia/lavaMD
-  build_command: make -j 8
   run_command: ./lavaMD -boxes1d 10
   replace_file: rodinia/lavaMD/kernel_gpu_cuda.cu
 
 - name: lud
   kernel_name: lud_diagonal
   path: rodinia/lud
-  build_command: make -j 8
   run_command: ./cuda/lud_cuda -s 256 -v
   ncu_args: -k lud_diagonal --launch-skip 7 --launch-count 1
   replace_file: rodinia/lud/lud_kernel.cu
@@ -122,14 +117,12 @@ apps:
 - name: myocyte
   kernel_name: solver_2
   path: rodinia/myocyte
-  build_command: make -j 8
   run_command: ./myocyte.out 100 100 1
   multiple_replace_options: yes
 
 - name: nw
   kernel_name: needle_cuda_shared_1
   path: rodinia/nw
-  build_command: make -j 8
   run_command: ./needle 2048 10
   ncu_args: -k needle_cuda_shared_1 --launch-skip 127 --launch-count 1
   replace_file: rodinia/nw/needle_kernel.cu
@@ -137,7 +130,6 @@ apps:
 - name: particlefilter
   kernel_name: likelihood_kernel
   path: rodinia/particlefilter
-  build_command: make -j 8
   run_command: ./particlefilter_float -x 128 -y 128 -z 10 -np 1000
   ncu_args: -k likelihood_kernel --launch-skip 2 --launch-count 1
   replace_file: rodinia/particlefilter/ex_particle_CUDA_float_seq.cu
@@ -145,7 +137,6 @@ apps:
 - name: pathfinder
   kernel_name: dynproc_kernel
   path: rodinia/pathfinder
-  build_command: make -j 8
   run_command: ./pathfinder 100000 100 20 > result.txt
   ncu_args: --launch-skip 2 --launch-count 1
   replace_file: rodinia/pathfinder/pathfinder.cu
@@ -153,7 +144,6 @@ apps:
 - name: srad_v1
   kernel_name: reduce
   path: rodinia/srad/srad_v1
-  build_command: make -j 8
   run_command: ./srad 100 0.5 502 458
   ncu_args: -k "reduce" --launch-skip 99 --launch-count 1
   replace_file: rodinia/srad/srad_v1/reduce_kernel.cu
@@ -161,7 +151,6 @@ apps:
 - name: streamcluster
   kernel_name: kernel_compute_cost
   path: rodinia/streamcluster
-  build_command: make -j 8
   run_command: ./sc_gpu 10 20 256 1024 1024 1000 none output.txt 1
   ncu_args: --launch-skip 300 --launch-count 1
   replace_file: rodinia/streamcluster/streamcluster_cuda.cu
