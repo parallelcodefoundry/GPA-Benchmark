@@ -33,6 +33,7 @@ rodinia/huffman-opt/pavle
 rodinia/huffman/pavle
 rodinia/kmeans/kmeans
 rodinia/kmeans-opt/kmeans
+rodinia/lavaMD/result.txt
 rodinia/lud-opt/cuda/lud_cuda
 rodinia/nw-opt/needle
 rodinia/particlefilter-opt/particlefilter_float

@@ -14,7 +14,7 @@ INCLUDE := $(CUDA_DIR)/include
 	# command n
 
 # link objects(binaries) together
-a.out:		main.o
+srad:		main.o
 	$(CC)	main.o \
 				-I$(INCLUDE) \
 				-L$(CUDA_LIB_DIR)  \
@@ -35,4 +35,4 @@ main.o: 	main.cu \
 
 # delete all object files
 clean:
-	rm *.o srad *.sqlite *.qdrep *.pgm
+	rm *.o srad *.sqlite *.qdrep
