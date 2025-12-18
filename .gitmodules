@@ -1,6 +1,7 @@
 [submodule "Quicksilver-opt"]
 	path = Quicksilver-opt
 	url = git@github.com:parallelcodefoundry/Quicksilver.git
+	branch = advisor
 [submodule "PeleC"]
 	path = PeleC
 	url = https://github.com/Jokeren/PeleC.git
@@ -10,12 +11,16 @@
 [submodule "Castro"]
 	path = Castro
 	url = https://github.com/AMReX-Astro/Castro.git
+	branch = 25.10
 [submodule "Quicksilver"]
 	path = Quicksilver
 	url = git@github.com:parallelcodefoundry/Quicksilver.git
+	branch = gpa-unopt
 [submodule "LULESH"]
 	path = LULESH
 	url = git@github.com:parallelcodefoundry/LULESH.git
+	branch = gpa-unopt
 [submodule "darknet"]
 	path = darknet
 	url = git@github.com:AlexeyAB/darknet.git
+	branch = yolov4
