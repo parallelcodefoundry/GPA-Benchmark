@@ -1,9 +1,13 @@
+# Configuration file for proxy apps that the driver can build, run, validate, profile, and test optimizations for.
+# All Makefiles support SM_VERSION (SM_VERSIONS for Rodinia) as a command line argument (e.g., make SM_VERSION=90 SM_VERSIONS=sm_90)
+# The environment should have CUDA_HOME and MPICH_DIR (for LULESH) set.
 apps:
 
 - name: ExaTENSOR
   kernel_name: tensor_transpose
   path: ExaTENSOR
-  build_command: make clean; make
+  clean_command: make clean
+  build_command: make
   run_path: ExaTENSOR/exatensor
   run_command: ./main
   replace_file: ExaTENSOR/cuda2.cu
@@ -13,6 +17,7 @@ apps:
   kernel_name: ApplyMaterialPropertiesAndUpdateVolume_kernel
   path: LULESH
   build_path: LULESH/cuda/src
+  clean_command: make clean
   build_command: make -f ../build/Makefile -j 8
   run_command: ./lulesh -s 45
   ncu_args: -k ApplyMaterialPropertiesAndUpdateVolume_kernel --launch-skip 49 --launch-count 1
@@ -24,7 +29,9 @@ apps:
   kernel_name: CycleTrackingKernel
   path: Quicksilver
   build_path: Quicksilver/src
+  clean_command: make clean
   build_command: make -j 8
+  # must use CORAL2 problem to enable validation!
   run_command: ./qs -i ../Examples/CORAL2_Benchmark/Problem1/Coral2_P1_1.inp
   ncu_args: -k "CycleTrackingKernel" --launch-skip 49 --launch-count 1
   multiple_replace_options: yes
@@ -37,6 +44,8 @@ apps:
   run_command: ./b+tree.out file ../data/b+tree/mil.txt command ../data/b+tree/command.txt
   ncu_args: -k findRangeK
   replace_file: rodinia/b+tree/kernel_gpu_cuda_2.cu
+  reference_output: rodinia/b+tree/ref-output.txt
+  test_output: rodinia/b+tree/output.txt
 
 - name: backprop
   kernel_name: bpnn_layerforward_CUDA
