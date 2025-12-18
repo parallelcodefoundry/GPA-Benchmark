@@ -3,7 +3,8 @@ apps:
 - name: ExaTENSOR
   kernel_name: tensor_transpose
   path: ExaTENSOR
-  build_command: make -j 8
+  build_command: make clean; make
+  run_path: ExaTENSOR/exatensor
   run_command: ./main
   replace_file: ExaTENSOR/cuda2.cu
   fail_check_text: Failed!
