@@ -24,7 +24,9 @@ rodinia/cfd-opt/pre_euler3d_double
 rodinia/cfd/euler3d_double
 rodinia/cfd/pre_euler3d
 rodinia/cfd/pre_euler3d_double
+rodinia/gaussian/output.txt
 rodinia/gaussian-opt/gaussian
+rodinia/heartwall/result.txt
 rodinia/heartwall-opt/heartwall
 rodinia/hotspot-opt/hotspot
 rodinia/huffman-opt/pavle

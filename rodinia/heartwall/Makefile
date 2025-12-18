@@ -1,12 +1,12 @@
 
-ifdef OUTPUT
+ifndef QUIET
 override OUTPUT = -DOUTPUT
 endif
 
 include ../common/make.config
 
 # link objects(binaries) together
-heartwall: main.o ./AVI/avilib.o ./AVI/avimod.o 
+heartwall: main.o ./AVI/avilib.o ./AVI/avimod.o
 	$(CUDA_DIR)/bin/nvcc main.o ./AVI/avilib.o ./AVI/avimod.o -I$(CUDA_DIR)/include -lm -o heartwall
 
 # compile main function file into object (binary)
