@@ -51,9 +51,13 @@ apps:
   kernel_name: bpnn_layerforward_CUDA
   path: rodinia/backprop
   build_command: make -j 8
-  run_command: ./backprop 65536
+  run_command: ./backprop 65536 > output.txt
   ncu_args: -k bpnn_layerforward_CUDA
   replace_file: rodinia/backprop/backprop_cuda_kernel.cu
+  reference_output: rodinia/backprop/ref-output.txt
+  test_output: rodinia/backprop/output.txt
+  float_grep: "sum:"
+  float_tolerance: 0.00001
 
 - name: bfs
   kernel_name: Kernel

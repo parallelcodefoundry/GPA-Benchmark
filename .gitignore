@@ -13,6 +13,7 @@ rodinia/b+tree-opt/output.txt
 rodinia/b+tree/output.txt
 rodinia/backprop-opt1/backprop
 rodinia/backprop-opt2/backprop
+rodinia/backprop/output.txt
 rodinia/bfs-opt/bfs
 rodinia/bfs-opt/result.txt
 rodinia/bfs/result.txt
