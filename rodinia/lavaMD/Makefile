@@ -8,7 +8,7 @@ include ../common/make.config
           # .
           # .
 	# command n
-ifdef OUTPUT
+ifndef QUIET
 override OUTPUT = -DOUTPUT
 endif
 

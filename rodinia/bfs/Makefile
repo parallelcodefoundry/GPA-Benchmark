@@ -8,17 +8,19 @@ SRC = bfs.cu
 
 EXE = bfs
 
-release: $(SRC)
-	$(CC) $(SRC) -O3 -lineinfo -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR) 
+release: $(EXE)
+
+$(EXE): $(SRC)
+	$(CC) $(SRC) -O3 -lineinfo -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR)
 
 enum: $(SRC)
-	$(CC) -deviceemu $(SRC) -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR) 
+	$(CC) -deviceemu $(SRC) -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR)
 
 debug: $(SRC)
-	$(CC) -g $(SRC) -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR) 
+	$(CC) -g $(SRC) -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR)
 
 debugenum: $(SRC)
-	$(CC) -g -deviceemu $(SRC) -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR) 
+	$(CC) -g -deviceemu $(SRC) -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR)
 
-clean: $(SRC)
+clean:
 	rm -f $(EXE) $(EXE).linkinfo result.txt *.qdrep *.sqlite

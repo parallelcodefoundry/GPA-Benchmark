@@ -100,12 +100,15 @@ apps:
   run_command: ./pavle ../data/huffman/test1024_H2.206587175259.in
   ncu_args: -k vlc_encode_kernel_sm64huff --launch-skip 3 --launch-count 1
   replace_file: rodinia/huffman/vlc_kernel_sm64huff.cu
+  pass_check_text: PASS! vectors are matching!
 
 - name: lavaMD
   kernel_name: cuda_compute_flux
   path: rodinia/lavaMD
   run_command: ./lavaMD -boxes1d 10
   replace_file: rodinia/lavaMD/kernel_gpu_cuda.cu
+  reference_output: rodinia/lavaMD/ref-result.txt
+  test_output: rodinia/lavaMD/result.txt
 
 - name: lud
   kernel_name: lud_diagonal
