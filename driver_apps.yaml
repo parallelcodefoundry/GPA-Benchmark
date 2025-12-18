@@ -25,9 +25,10 @@ apps:
   path: Quicksilver
   build_path: Quicksilver/src
   build_command: make -j 8
-  run_command: ./qs
+  run_command: ./qs -i ../Examples/CORAL2_Benchmark/Problem1/Coral2_P1_1.inp
   ncu_args: -k "CycleTrackingKernel" --launch-skip 49 --launch-count 1
   multiple_replace_options: yes
+  fail_check_text: FAIL
 
 - name: b+tree
   kernel_name: findRangeK
