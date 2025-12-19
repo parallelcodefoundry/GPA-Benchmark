@@ -35,6 +35,8 @@ rodinia/kmeans/kmeans
 rodinia/kmeans-opt/kmeans
 rodinia/lavaMD/result.txt
 rodinia/lud-opt/cuda/lud_cuda
+rodinia/myocyte/result.txt
+rodinia/nw/result.txt
 rodinia/nw-opt/needle
 rodinia/particlefilter-opt/particlefilter_float
 rodinia/particlefilter-opt/particlefilter_naive

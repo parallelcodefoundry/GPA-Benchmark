@@ -116,12 +116,15 @@ apps:
   run_command: ./cuda/lud_cuda -s 256 -v
   ncu_args: -k lud_diagonal --launch-skip 7 --launch-count 1
   replace_file: rodinia/lud/lud_kernel.cu
+  fail_check_text: dismatch at
 
 - name: myocyte
   kernel_name: solver_2
   path: rodinia/myocyte
   run_command: ./myocyte.out 100 100 1
   multiple_replace_options: yes
+  reference_output: rodinia/myocyte/ref-result.txt
+  test_output: rodinia/myocyte/result.txt
 
 - name: nw
   kernel_name: needle_cuda_shared_1
@@ -129,13 +132,20 @@ apps:
   run_command: ./needle 2048 10
   ncu_args: -k needle_cuda_shared_1 --launch-skip 127 --launch-count 1
   replace_file: rodinia/nw/needle_kernel.cu
+  reference_output: rodinia/nw/ref-result.txt
+  test_output: rodinia/nw/result.txt
 
 - name: particlefilter
   kernel_name: likelihood_kernel
   path: rodinia/particlefilter
-  run_command: ./particlefilter_float -x 128 -y 128 -z 10 -np 1000
+  run_command: ./particlefilter_float -x 128 -y 128 -z 10 -np 1000 > result.txt
   ncu_args: -k likelihood_kernel --launch-skip 2 --launch-count 1
   replace_file: rodinia/particlefilter/ex_particle_CUDA_float_seq.cu
+  reference_output: rodinia/particlefilter/ref-result.txt
+  test_output: rodinia/particlefilter/result.txt
+  float_grep: "XE:"
+  float_grep_2: "YE:"
+  float_tolerance: 0.5
 
 - name: pathfinder
   kernel_name: dynproc_kernel
@@ -143,6 +153,8 @@ apps:
   run_command: ./pathfinder 100000 100 20 > result.txt
   ncu_args: --launch-skip 2 --launch-count 1
   replace_file: rodinia/pathfinder/pathfinder.cu
+  reference_output: rodinia/pathfinder/ref-result.txt
+  test_output: rodinia/pathfinder/result.txt
 
 - name: srad_v1
   kernel_name: reduce

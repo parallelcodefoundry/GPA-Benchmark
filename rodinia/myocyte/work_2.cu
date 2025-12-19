@@ -168,7 +168,7 @@ int work_2(	int xmax,
 
 	for(i=0; i<workload; i++){
 		pointer = i*((xmax+1)*EQUATIONS) + 0*(EQUATIONS);
-		read("../../data/myocyte/y.txt",
+		read("../data/myocyte/y.txt",
 					&y[pointer],
 					91,
 					1,
@@ -182,7 +182,7 @@ int work_2(	int xmax,
 
 	for(i=0; i<workload; i++){
 		pointer = i*PARAMETERS;
-		read("../../data/myocyte/params.txt",
+		read("../data/myocyte/params.txt",
 					&params[pointer],
 					18,
 					1,
@@ -238,6 +238,8 @@ int work_2(	int xmax,
 
 	cudaMemcpy(x, d_x, x_mem, cudaMemcpyDeviceToHost);
 	cudaMemcpy(y, d_y, y_mem, cudaMemcpyDeviceToHost);
+
+	write("result.txt", y, workload, xmax+1, 0, EQUATIONS);
 
 	time5 = get_time();
 
@@ -318,5 +320,5 @@ int work_2(	int xmax,
 	return 0;
 
 }
- 
- 
+
+
