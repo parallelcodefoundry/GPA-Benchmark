@@ -6,10 +6,10 @@
 //        --creation of prototype version
 //    2006.03   Drew Gilliam
 //        --rewriting of prototype version into current version
-//        --got rid of multiple function calls, all code in a  
+//        --got rid of multiple function calls, all code in a
 //         single function (for speed)
 //        --code cleanup & commenting
-//        --code optimization efforts   
+//        --code optimization efforts
 //    2006.04   Drew Gilliam
 //        --added diffusion coefficent saturation on [0,1]
 //		2009.12 Lukasz G. Szafaryn
@@ -86,7 +86,7 @@ int main(int argc, char *argv []){
 	long NeROI;														// ROI nbr of elements
 
     // surrounding pixel indicies
-    int *iN,*iS,*jE,*jW;    
+    int *iN,*iS,*jE,*jW;
 
     // counters
     int iter;   // primary loop
@@ -128,9 +128,9 @@ int main(int argc, char *argv []){
 	int* d_iS;
 	int* d_jE;
 	int* d_jW;
-	fp* d_dN; 
-	fp* d_dS; 
-	fp* d_dW; 
+	fp* d_dN;
+	fp* d_dS;
+	fp* d_dW;
 	fp* d_dE;
 	fp* d_I;																// input IMAGE on DEVICE
 	fp* d_c;
@@ -165,7 +165,7 @@ int main(int argc, char *argv []){
 
 	image_ori = (fp*)malloc(sizeof(fp) * image_ori_elem);
 
-	read_graphics(	"../../../data/srad/image.pgm",
+	read_graphics(	"../../data/srad/image.pgm",
 								image_ori,
 								image_ori_rows,
 								image_ori_cols,
@@ -223,7 +223,7 @@ int main(int argc, char *argv []){
 
 	// N/S/W/E boundary conditions, fix surrounding indices outside boundary of image
 	iN[0]    = 0;															// changes IMAGE top row index from -1 to 0
-	iS[Nr-1] = Nr-1;														// changes IMAGE bottom row index from Nr to Nr-1 
+	iS[Nr-1] = Nr-1;														// changes IMAGE bottom row index from Nr to Nr-1
 	jW[0]    = 0;															// changes IMAGE leftmost column index from -1 to 0
 	jE[Nc-1] = Nc-1;														// changes IMAGE rightmost column index from Nc to Nc-1
 
@@ -238,11 +238,11 @@ int main(int argc, char *argv []){
 	// allocate memory for coordinates on DEVICE
 	cudaMalloc((void **)&d_iN, mem_size_i);													//
 	cudaMemcpy(d_iN, iN, mem_size_i, cudaMemcpyHostToDevice);				//
-	cudaMalloc((void **)&d_iS, mem_size_i);													// 
+	cudaMalloc((void **)&d_iS, mem_size_i);													//
 	cudaMemcpy(d_iS, iS, mem_size_i, cudaMemcpyHostToDevice);				//
 	cudaMalloc((void **)&d_jE, mem_size_j);													//
 	cudaMemcpy(d_jE, jE, mem_size_j, cudaMemcpyHostToDevice);				//
-	cudaMalloc((void **)&d_jW, mem_size_j);													// 
+	cudaMalloc((void **)&d_jW, mem_size_j);													//
 	cudaMemcpy(d_jW, jW, mem_size_j, cudaMemcpyHostToDevice);			//
 
 	// allocate memory for partial sums on DEVICE
@@ -250,13 +250,13 @@ int main(int argc, char *argv []){
 	cudaMalloc((void **)&d_sums2, mem_size);												//
 
 	// allocate memory for derivatives
-	cudaMalloc((void **)&d_dN, mem_size);														// 
-	cudaMalloc((void **)&d_dS, mem_size);														// 
-	cudaMalloc((void **)&d_dW, mem_size);													// 
-	cudaMalloc((void **)&d_dE, mem_size);														// 
+	cudaMalloc((void **)&d_dN, mem_size);														//
+	cudaMalloc((void **)&d_dS, mem_size);														//
+	cudaMalloc((void **)&d_dW, mem_size);													//
+	cudaMalloc((void **)&d_dE, mem_size);														//
 
 	// allocate memory for coefficient on DEVICE
-	cudaMalloc((void **)&d_c, mem_size);														// 
+	cudaMalloc((void **)&d_c, mem_size);														//
 
 	checkCUDAError("setup");
 
@@ -269,7 +269,7 @@ int main(int argc, char *argv []){
 	threads.y = 1;
 	blocks_x = Ne/threads.x;
 	if (Ne % threads.x != 0){												// compensate for division remainder above by adding one grid
-		blocks_x = blocks_x + 1;																	
+		blocks_x = blocks_x + 1;
 	}
 	blocks.x = blocks_x;													// define the number of blocks in the grid
 	blocks.y = 1;
@@ -317,7 +317,7 @@ int main(int argc, char *argv []){
 
 		// performs subsequent reductions of sums
 		blocks2.x = blocks.x;												// original number of blocks
-		blocks2.y = blocks.y;												
+		blocks2.y = blocks.y;
 		no = Ne;														// original number of sum elements
 		mul = 1;														// original multiplier
 
@@ -329,7 +329,7 @@ int main(int argc, char *argv []){
 			reduce<<<blocks2, threads>>>(	Ne,
 											no,
 											mul,
-											d_sums, 
+											d_sums,
 											d_sums2);
 
 			checkCUDAError("reduce");
@@ -365,11 +365,11 @@ int main(int argc, char *argv []){
 		// calculate statistics
 		meanROI	= total / fp(NeROI);										// gets mean (average) value of element in ROI
 		meanROI2 = meanROI * meanROI;										//
-		varROI = (total2 / fp(NeROI)) - meanROI2;						// gets variance of ROI								
+		varROI = (total2 / fp(NeROI)) - meanROI2;						// gets variance of ROI
 		q0sqr = varROI / meanROI2;											// gets standard deviation of ROI
 
 		// execute srad kernel
-		srad<<<blocks, threads>>>(	lambda,									// SRAD coefficient 
+		srad<<<blocks, threads>>>(	lambda,									// SRAD coefficient
 									Nr,										// # of rows in input image
 									Nc,										// # of columns in input image
 									Ne,										// # of elements in input image
@@ -381,14 +381,14 @@ int main(int argc, char *argv []){
 									d_dS,									// South derivative
 									d_dW,									// West derivative
 									d_dE,									// East derivative
-									q0sqr,									// standard deviation of ROI 
+									q0sqr,									// standard deviation of ROI
 									d_c,									// diffusion coefficient
 									d_I);									// output image
 
 		checkCUDAError("srad");
 
 		// execute srad2 kernel
-		srad2<<<blocks, threads>>>(	lambda,									// SRAD coefficient 
+		srad2<<<blocks, threads>>>(	lambda,									// SRAD coefficient
 									Nr,										// # of rows in input image
 									Nc,										// # of columns in input image
 									Ne,										// # of elements in input image
@@ -451,9 +451,9 @@ int main(int argc, char *argv []){
 
 	free(image_ori);
 	free(image);
-	free(iN); 
-	free(iS); 
-	free(jW); 
+	free(iN);
+	free(iS);
+	free(jW);
 	free(jE);
 
 	cudaFree(d_I);

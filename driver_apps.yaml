@@ -162,6 +162,8 @@ apps:
   run_command: ./srad 100 0.5 502 458
   ncu_args: -k "reduce" --launch-skip 99 --launch-count 1
   replace_file: rodinia/srad/srad_v1/reduce_kernel.cu
+  reference_output: rodinia/srad/srad_v1/ref_image_out.pgm
+  test_output: rodinia/srad/srad_v1/image_out.pgm
 
 - name: streamcluster
   kernel_name: kernel_compute_cost
@@ -169,3 +171,5 @@ apps:
   run_command: ./sc_gpu 10 20 256 1024 1024 1000 none output.txt 1
   ncu_args: --launch-skip 300 --launch-count 1
   replace_file: rodinia/streamcluster/streamcluster_cuda.cu
+  reference_output: rodinia/streamcluster/ref-output.txt
+  test_output: rodinia/streamcluster/output.txt
