@@ -1,8 +1,6 @@
 # Configuration file for proxy apps that the driver can build, run, validate, profile, and test optimizations for.
-# All Makefiles support SM_VERSION (SM_VERSIONS for Rodinia) as a command line argument (e.g., make SM_VERSION=90 SM_VERSIONS=sm_90)
-# The environment should have CUDA_HOME and MPICH_DIR (for LULESH) set.
-# Rodinia apps are built from rodinia/ with make -j 8.
-#TODO: Update run scripts in each rodinia app to include output redirects where needed
+# All Makefiles support SM_VERSION as a command line argument (e.g., make SM_VERSION=90)
+# The environment should have CUDA_HOME set. Rodinia apps are built from rodinia/ with make -j 8.
 apps:
 
 - name: ExaTENSOR

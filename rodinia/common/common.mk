@@ -36,7 +36,8 @@
 .SUFFIXES : .cu .cu_dbg_o .c_dbg_o .cpp_dbg_o .cu_rel_o .c_rel_o .cpp_rel_o .cubin
 
 # Set SM version via command line argument
-SM_VERSIONS ?= sm_90
+SM_VERSION ?= 90
+SM_VERSIONS ?= sm_$(SM_VERSION)
 
 ifndef CUDA_HOME
 	CUDA_INSTALL_PATH ?= /usr/local/cuda
