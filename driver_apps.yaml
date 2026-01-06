@@ -25,17 +25,17 @@ apps:
   reference_output: LULESH/cuda/src/s45-ref-xyz.asc
   test_output: LULESH/cuda/src/xyz.asc
 
-- name: Quicksilver
-  kernel_name: CycleTrackingKernel
-  path: Quicksilver
-  build_path: Quicksilver/src
-  clean_command: make clean
-  build_command: make -j 8
-  # must use CORAL2 problem to enable validation!
-  run_command: ./qs -i ../Examples/CORAL2_Benchmark/Problem1/Coral2_P1_1.inp
-  ncu_args: -k "CycleTrackingKernel" --launch-skip 49 --launch-count 1
-  multiple_replace_options: yes
-  fail_check_text: FAIL
+#- name: Quicksilver
+#  kernel_name: CycleTrackingKernel
+#  path: Quicksilver
+#  build_path: Quicksilver/src
+#  clean_command: make clean
+#  build_command: make -j 8
+#  # must use CORAL2 problem to enable validation!
+#  run_command: ./qs -i ../Examples/CORAL2_Benchmark/Problem1/Coral2_P1_1.inp
+#  ncu_args: -k "CycleTrackingKernel" --launch-skip 49 --launch-count 1
+#  multiple_replace_options: yes
+#  fail_check_text: FAIL
 
 - name: b+tree
   kernel_name: findRangeK
@@ -113,16 +113,16 @@ apps:
   path: rodinia/lud
   run_command: ./cuda/lud_cuda -s 256 -v
   ncu_args: -k lud_diagonal --launch-skip 7 --launch-count 1
-  replace_file: rodinia/lud/lud_kernel.cu
+  replace_file: rodinia/lud/cuda/lud_kernel.cu
   fail_check_text: dismatch at
 
-- name: myocyte
-  kernel_name: solver_2
-  path: rodinia/myocyte
-  run_command: ./myocyte.out 100 100 1
-  multiple_replace_options: yes
-  reference_output: rodinia/myocyte/ref-result.txt
-  test_output: rodinia/myocyte/result.txt
+#- name: myocyte
+#  kernel_name: solver_2
+#  path: rodinia/myocyte
+#  run_command: ./myocyte.out 100 100 1
+#  multiple_replace_options: yes
+#  reference_output: rodinia/myocyte/ref-result.txt
+#  test_output: rodinia/myocyte/result.txt
 
 - name: nw
   kernel_name: needle_cuda_shared_1

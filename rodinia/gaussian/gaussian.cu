@@ -299,7 +299,7 @@ __global__ void Fan1(float *m_cuda, float *a_cuda, int Size, int t)
  ** Fan2() -- Modify the matrix A into LUD
  **-------------------------------------------------------
  */
-
+// >>> START EDITABLE REGION
 __global__ void Fan2(float *m_cuda, float *a_cuda, float *b_cuda,int Size, int j1, int t)
 {
 	if(threadIdx.x + blockIdx.x * blockDim.x >= Size-1-t) return;
@@ -317,7 +317,7 @@ __global__ void Fan2(float *m_cuda, float *a_cuda, float *b_cuda,int Size, int j
 		b_cuda[xidx+1+t] -= m_cuda[Size*(xidx+1+t)+(yidx+t)] * b_cuda[t];
 	}
 }
-
+// <<< END EDITABLE REGION
 /*------------------------------------------------------
  ** ForwardSub() -- Forward substitution of Gaussian
  ** elimination.

@@ -68,7 +68,7 @@ fatal(char *s)
 #define IN_RANGE(x, min, max)   ((x)>=(min) && (x)<=(max))
 #define CLAMP_RANGE(x, min, max) x = (x<(min)) ? min : ((x>(max)) ? max : x )
 #define MIN(a, b) ((a)<=(b) ? (a) : (b))
-
+// >>> START EDITABLE REGION
 __global__ void dynproc_kernel(
                 int iteration, 
                 int *gpuWall,
@@ -150,7 +150,7 @@ __global__ void dynproc_kernel(
           gpuResults[xidx]=result[tx];		
       }
 }
-
+// <<< END EDITABLE REGION
 /*
    compute N time steps
 */
@@ -212,13 +212,20 @@ void run(int argc, char** argv)
     cudaMemcpy(result, gpuResult[final_ret], sizeof(int)*cols, cudaMemcpyDeviceToHost);
 
 
-#ifdef BENCH_PRINT
-    for (int i = 0; i < cols; i++)
-            printf("%d ",data[i]) ;
-    printf("\n") ;
-    for (int i = 0; i < cols; i++)
-            printf("%d ",result[i]) ;
-    printf("\n") ;
+#ifdef BENCH_PRINT
+
+    for (int i = 0; i < cols; i++)
+
+            printf("%d ",data[i]) ;
+
+    printf("\n") ;
+
+    for (int i = 0; i < cols; i++)
+
+            printf("%d ",result[i]) ;
+
+    printf("\n") ;
+
 #endif
 
 

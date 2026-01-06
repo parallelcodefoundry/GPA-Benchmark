@@ -100,7 +100,7 @@ void readinput(float *vect, int grid_rows, int grid_cols, char *file){
 #define IN_RANGE(x, min, max)   ((x)>=(min) && (x)<=(max))
 #define CLAMP_RANGE(x, min, max) x = (x<(min)) ? min : ((x>(max)) ? max : x )
 #define MIN(a, b) ((a)<=(b) ? (a) : (b))
-
+// >>> START EDITABLE REGION
 __global__ void calculate_temp(int iteration,  //number of iteration
                                float *power,   //power input
                                float *temp_src,    //temperature input/output
@@ -214,7 +214,7 @@ __global__ void calculate_temp(int iteration,  //number of iteration
           temp_dst[index]= temp_t[ty][tx];		
       }
 }
-
+// <<< END EDITABLE REGION
 /*
    compute N time steps
 */

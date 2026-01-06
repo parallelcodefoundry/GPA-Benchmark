@@ -41,7 +41,7 @@ Point *p;
 
 static int iter = 0;		// counter for total# of iteration
 
-
+// >>> START EDITABLE REGION
 //=======================================
 // Euclidean Distance
 //=======================================
@@ -87,7 +87,7 @@ kernel_compute_cost(int num, int dim, long x, Point *p, int K, int stride,
 		}
 	}
 }
-
+// <<< END EDITABLE REGION
 //=======================================
 // Allocate Device Memory
 //=======================================

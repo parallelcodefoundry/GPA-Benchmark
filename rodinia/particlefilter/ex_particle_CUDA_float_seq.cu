@@ -73,22 +73,6 @@ void cuda_print_double_array(double *array_GPU, size_t size) {
     mem = NULL;
 }
 
-/********************************
- * CALC LIKELIHOOD SUM
- * DETERMINES THE LIKELIHOOD SUM BASED ON THE FORMULA: SUM( (IK[IND] - 100)^2 - (IK[IND] - 228)^2)/ 100
- * param 1 I 3D matrix
- * param 2 current ind array
- * param 3 length of ind array
- * returns a double representing the sum
- ********************************/
-__device__ double calcLikelihoodSum(unsigned char * I, int * ind, int numOnes, int index) {
-    double likelihoodSum = 0.0;
-    int x;
-    for (x = 0; x < numOnes; x++)
-        likelihoodSum += (pow((double) (I[ind[index * numOnes + x]] - 100), 2) - pow((double) (I[ind[index * numOnes + x]] - 228), 2)) / 50.0;
-    return likelihoodSum;
-}
-
 /****************************
 CDF CALCULATE
 CALCULATES CDF
@@ -104,21 +88,7 @@ __device__ void cdfCalc(double * CDF, double * weights, int Nparticles) {
     }
 }
 
-/*****************************
- * RANDU
- * GENERATES A UNIFORM DISTRIBUTION
- * returns a double representing a randomily generated number from a uniform distribution with range [0, 1)
- ******************************/
-__device__ double d_randu(int * seed, int index) {
-
-    int M = INT_MAX;
-    int A = 1103515245;
-    int C = 12345;
-    int num = A * seed[index] + C;
-    seed[index] = num % M;
-
-    return fabs(seed[index] / ((double) M));
-}/**
+/**
 * Generates a uniformly distributed random number using the provided seed and GCC's settings for the Linear Congruential Generator (LCG)
 * @see http://en.wikipedia.org/wiki/Linear_congruential_generator
 * @note This function is thread-safe
@@ -155,16 +125,6 @@ double test_randn(int * seed, int index) {
     double pi = 3.14159265358979323846;
     double u = randu(seed, index);
     double v = randu(seed, index);
-    double cosine = cos(2 * pi * v);
-    double rt = -2 * log(u);
-    return sqrt(rt) * cosine;
-}
-
-__device__ double d_randn(int * seed, int index) {
-    //Box-Muller algortihm
-    double pi = 3.14159265358979323846;
-    double u = d_randu(seed, index);
-    double v = d_randu(seed, index);
     double cosine = cos(2 * pi * v);
     double rt = -2 * log(u);
     return sqrt(rt) * cosine;
@@ -312,6 +272,49 @@ __global__ void sum_kernel(double* partial_sums, int Nparticles) {
     }
 }
 
+// >>> START EDITABLE REGION
+/********************************
+ * CALC LIKELIHOOD SUM
+ * DETERMINES THE LIKELIHOOD SUM BASED ON THE FORMULA: SUM( (IK[IND] - 100)^2 - (IK[IND] - 228)^2)/ 100
+ * param 1 I 3D matrix
+ * param 2 current ind array
+ * param 3 length of ind array
+ * returns a double representing the sum
+ ********************************/
+ __device__ double calcLikelihoodSum(unsigned char * I, int * ind, int numOnes, int index) {
+    double likelihoodSum = 0.0;
+    int x;
+    for (x = 0; x < numOnes; x++)
+        likelihoodSum += (pow((double) (I[ind[index * numOnes + x]] - 100), 2) - pow((double) (I[ind[index * numOnes + x]] - 228), 2)) / 50.0;
+    return likelihoodSum;
+}
+
+/*****************************
+ * RANDU
+ * GENERATES A UNIFORM DISTRIBUTION
+ * returns a double representing a randomily generated number from a uniform distribution with range [0, 1)
+ ******************************/
+ __device__ double d_randu(int * seed, int index) {
+
+    int M = INT_MAX;
+    int A = 1103515245;
+    int C = 12345;
+    int num = A * seed[index] + C;
+    seed[index] = num % M;
+
+    return fabs(seed[index] / ((double) M));
+}
+
+__device__ double d_randn(int * seed, int index) {
+    //Box-Muller algortihm
+    double pi = 3.14159265358979323846;
+    double u = d_randu(seed, index);
+    double v = d_randu(seed, index);
+    double cosine = cos(2 * pi * v);
+    double rt = -2 * log(u);
+    return sqrt(rt) * cosine;
+}
+
 /*****************************
  * CUDA Likelihood Kernel Function to replace FindIndex
  * param1: arrayX
@@ -396,7 +399,7 @@ __global__ void likelihood_kernel(double * arrayX, double * arrayY, double * xj,
 
     
 }
-
+// <<< END EDITABLE REGION
 /** 
  * Takes in a double and returns an integer that approximates to that double
  * @return if the mantissa < .5 => return value < input value; else return value > input value

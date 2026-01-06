@@ -11,7 +11,7 @@
         #define BLOCK_SIZE 16
 #endif
 
-
+// >>> START EDITABLE REGION
 __global__ void 
 lud_diagonal(float *m, int matrix_dim, int offset)
 {
@@ -53,7 +53,7 @@ lud_diagonal(float *m, int matrix_dim, int offset)
     array_offset += matrix_dim;
   }
 }
-
+// <<< END EDITABLE REGION
 __global__ void
 lud_perimeter(float *m, int matrix_dim, int offset)
 {
