@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 GPA-Benchmark Driver
 This script holds the main driver for compiling, running, validating, profiling, and testing
