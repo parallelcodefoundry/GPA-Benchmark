@@ -3,12 +3,52 @@ GPA-Benchmark Driver
 This script holds the main driver for compiling, running, validating, profiling, and testing
 optimizations for GPA-Benchmark.
 """
+import os
+import shutil
 import argparse
 import subprocess
 import yaml
-import os
 
-def build_app(app: dict, sm_version: int, no_clean: bool, cuda_home: str | None) -> None:
+NCU_ARGS = ["--metrics",
+            "regex:sm__inst_executed_pipe_[^.]*.avg.pct_of_peak_sustained_active$,regex:sm__sass_thread_inst_executed_op.*sum$,regex:l1tex__t_set_.*_pipe_lsu_mem_global_op_ld.sum$,regex:l1tex__t_set_accesses.sum$,regex:l1tex__t_requests.sum$,regex:l1tex__m_xbar2l1tex_read_sectors.sum$,sm__average_thread_inst_executed_pred_on_per_inst_executed_realtime,regex:sm__sass_inst_executed.*sum$,regex:sm__inst_issued.avg.per_cycle_active$,regex:.*throughput.avg.pct_of_peak_sustained_active$,regex:.*throughput.avg.pct_of_peak_sustained_elapsed$]",
+            "--set", "full", "--import-source=yes"]
+
+def swap_file_in_app(app: dict, swap_file_path: str) -> None:
+    """Swap the file in the application directory on disk. Back up original file. If the file
+       contains ">>> START EDITABLE REGION" and "<<< END EDITABLE REGION", then replace
+       only that region with the contents of the swap file.
+    """
+    dest_path = app["replace_file"]
+    src_path = os.path.join(swap_file_path, app["name"] + ".swap")
+
+    backup_path = dest_path + ".bak"
+    shutil.copy(dest_path, backup_path)
+
+    with open(dest_path, "r", encoding="utf-8") as dest_file:
+        dest_text = dest_file.read()
+    if ">>> START EDITABLE REGION" not in dest_text or "<<< END EDITABLE REGION" not in dest_text:
+        # Replace entire file with swap file
+        shutil.copy(src_path, dest_path)
+        return
+    with open(src_path, "r", encoding="utf-8") as src_file:
+        src_text = src_file.read()
+    start_index = dest_text.find(">>> START EDITABLE REGION")
+    end_index = dest_text.find("<<< END EDITABLE REGION")
+    dest_text = dest_text[:start_index] + src_text + dest_text[end_index:]
+    with open(dest_path, "w", encoding="utf-8") as dest_file:
+        dest_file.write(dest_text)
+
+
+def swap_file_out_app(app: dict) -> None:
+    """Swap the file out of the application directory on disk. Restore original file."""
+    dest_path = app["replace_file"]
+    backup_path = dest_path + ".bak"
+    swap_save_path = dest_path + ".swap"
+    shutil.copy(dest_path, swap_save_path)
+    shutil.copy(backup_path, dest_path)
+
+
+def build_app(app: dict, sm_version: int, no_clean: bool, cuda_home: str) -> None:
     """Build the application."""
     build_path = app["path"] if "build_path" not in app else app["build_path"]
     if "rodinia" in build_path:
@@ -17,13 +57,13 @@ def build_app(app: dict, sm_version: int, no_clean: bool, cuda_home: str | None)
         subprocess.run(app["clean_command"].split() if "clean_command" in app
                        else ["make", "clean"],
                        cwd=build_path, check=True)
-    build_command = app["build_command"] if "build_command" not in app else app["build_command"]
-    build_command.append(f" SM_VERSION={sm_version}")
-    env = {"CUDA_HOME": cuda_home} if cuda_home else {}
+    build_command = "make -j 8" if "build_command" not in app else app["build_command"]
+    build_command += f" SM_VERSION={sm_version}"
+    env = {"CUDA_HOME": cuda_home}
     subprocess.run(build_command.split(), cwd=build_path, env=env, check=True)
 
 
-def run_app(app: dict, cuda_home: str | None) -> None:
+def run_app(app: dict, cuda_home: str) -> None:
     """Run the application."""
     if "run_path" in app:
         run_path = app["run_path"]
@@ -31,9 +71,39 @@ def run_app(app: dict, cuda_home: str | None) -> None:
         run_path = app["build_path"]
     else:
         run_path = app["path"]
-    run_command = app["run_command"] if "run_command" not in app else app["run_command"]
-    env = {"CUDA_HOME": cuda_home} if cuda_home else {}
+    run_command = app["run_command"]
+    env = {"CUDA_HOME": cuda_home}
     subprocess.run(run_command.split(), cwd=run_path, env=env, check=True)
+
+
+def nsys_profile_app(app: dict, cuda_home: str) -> None:
+    """Profile the application with Nsight Systems."""
+    nsys_command = ["nsys", "profile", "-o", app["name"] + ".nsys", "-f", "true"]
+    nsys_command.extend(app["run_command"].split())
+    nsys_command.extend(NCU_ARGS)
+    env = {"CUDA_HOME": cuda_home}
+    if "run_path" in app:
+        run_path = app["run_path"]
+    elif "build_path" in app:
+        run_path = app["build_path"]
+    else:
+        run_path = app["path"]
+    subprocess.run(nsys_command, cwd=run_path, env=env, check=True)
+
+
+def ncu_profile_app(app: dict, cuda_home: str) -> None:
+    """Profile the application with Nsight Compute."""
+    ncu_command = ["ncu", "-o", app["name"] + ".ncu", "-f", "true"]
+    ncu_command.extend(app["ncu_args"].split())
+    ncu_command.extend(app["run_command"].split())
+    env = {"CUDA_HOME": cuda_home}
+    if "run_path" in app:
+        run_path = app["run_path"]
+    elif "build_path" in app:
+        run_path = app["build_path"]
+    else:
+        run_path = app["path"]
+    subprocess.run(ncu_command, cwd=run_path, env=env, check=True)
 
 
 def main() -> None:
@@ -54,7 +124,7 @@ def main() -> None:
                         help="The app config file to use")
     parser.add_argument("--swap-file-path", type=str, default=None,
                         help="The path to the directory containing code files to swap in for the " \
-                            + "kernel, with the filename being the app name, app file path to " \
+                            + "kernel, with the filename being app_name.swap, app file path to " \
                             + "swap for is set in the config file")
     args = parser.parse_args()
     app_config: list[dict] = yaml.load(open(args.config_file, "r", encoding="utf-8"),
@@ -63,21 +133,25 @@ def main() -> None:
         swap_files = os.listdir(args.swap_file_path)
     else:
         swap_files = None
+    if args.cuda_home:
+        cuda_home = args.cuda_home
+    else:
+        cuda_home = os.getenv("CUDA_HOME")
     for app in app_config:
         if args.app != "all" and app["name"] != args.app:
             continue
         if swap_files and app["name"] in swap_files:
             swap_file_in_app(app, args.swap_file_path)
-        build_app(app, args.sm_version, args.no_clean, args.cuda_home)
+        build_app(app, args.sm_version, args.no_clean, cuda_home)
         if args.build:
             continue
-        run_app(app, args.cuda_home)
+        run_app(app, cuda_home)
         if args.nsys_profile:
-            nsys_profile_app(app)
+            nsys_profile_app(app, cuda_home)
         if args.ncu_profile:
-            ncu_profile_app(app)
+            ncu_profile_app(app, cuda_home)
         if swap_files and app["name"] in swap_files:
-            swap_file_out_app(app, args.swap_file_path)
+            swap_file_out_app(app)
 
 
 if __name__ == "__main__":
