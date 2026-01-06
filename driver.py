@@ -6,6 +6,7 @@ optimizations for GPA-Benchmark.
 import argparse
 import subprocess
 import yaml
+import os
 
 def build_app(app: dict, sm_version: int, no_clean: bool, cuda_home: str | None) -> None:
     """Build the application."""
@@ -51,12 +52,22 @@ def main() -> None:
                         help="Profile the application with Nsight Compute")
     parser.add_argument("--config_file", type=str, default="driver_apps.yaml",
                         help="The app config file to use")
+    parser.add_argument("--swap-file-path", type=str, default=None,
+                        help="The path to the directory containing code files to swap in for the " \
+                            + "kernel, with the filename being the app name, app file path to " \
+                            + "swap for is set in the config file")
     args = parser.parse_args()
     app_config: list[dict] = yaml.load(open(args.config_file, "r", encoding="utf-8"),
                                        Loader=yaml.FullLoader)
+    if args.swap_file_path:
+        swap_files = os.listdir(args.swap_file_path)
+    else:
+        swap_files = None
     for app in app_config:
         if args.app != "all" and app["name"] != args.app:
             continue
+        if swap_files and app["name"] in swap_files:
+            swap_file_in_app(app, args.swap_file_path)
         build_app(app, args.sm_version, args.no_clean, args.cuda_home)
         if args.build:
             continue
@@ -65,6 +76,8 @@ def main() -> None:
             nsys_profile_app(app)
         if args.ncu_profile:
             ncu_profile_app(app)
+        if swap_files and app["name"] in swap_files:
+            swap_file_out_app(app, args.swap_file_path)
 
 
 if __name__ == "__main__":
