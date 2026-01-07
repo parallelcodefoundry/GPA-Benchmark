@@ -35,4 +35,4 @@ main.o: 	main.cu \
 
 # delete all object files
 clean:
-	rm *.o srad *.sqlite *.qdrep *.pgm
+	rm *.o srad *.sqlite *.qdrep image-out.pgm

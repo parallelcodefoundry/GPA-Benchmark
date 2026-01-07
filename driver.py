@@ -5,6 +5,7 @@ This script holds the main driver for compiling, running, validating, profiling,
 optimizations for GPA-Benchmark.
 """
 import os
+import re
 import shutil
 import argparse
 import subprocess
@@ -64,8 +65,9 @@ def build_app(app: dict, sm_version: int, no_clean: bool, env: dict) -> bool:
     build_path = app["path"] if "build_path" not in app else app["build_path"]
     if "rodinia" in build_path:
         build_path = "rodinia"
-    if not no_clean and "clean_command" in app:
-        clean_result = subprocess_wrapper(app["clean_command"].split(), build_path, env)
+    if not no_clean:
+        clean_result = subprocess_wrapper(app["clean_command"].split() if "clean_command" in app \
+            else ["make", "clean"], build_path, env)
         if clean_result.returncode != 0:
             return False
     build_command = ["make", "-j", "8"]
@@ -75,15 +77,80 @@ def build_app(app: dict, sm_version: int, no_clean: bool, env: dict) -> bool:
     return subprocess_wrapper(build_command, build_path, env).returncode == 0
 
 
-def run_app(app: dict, env: dict) -> bool:
-    """Run the application. Returns True if successful, False otherwise."""
+def validate_app(app: dict, result: subprocess.CompletedProcess) -> bool:
+    """Validate the application. Returns True if successful, False otherwise.
+       Types of validation:
+       - fail_check_text: if the stdout contains the text in fail check text, return False
+       - pass_check_text: if the stdout contains the text in pass check text, return True
+       - reference_output: if the stdout (or file specified by test_output) matches the reference
+                           output, return True
+       - float_grep: locate the float in the stdout (or file specified by test_output) and compare
+                     it to reference_output, return True if the difference is within float_tolerance
+    """
+    if "fail_check_text" in app:
+        if app["fail_check_text"] in result.stdout.decode("utf-8"):
+            return False
+        else:
+            return True # Fail check text not found
+    if "pass_check_text" in app:
+        if app["pass_check_text"] in result.stdout.decode("utf-8"):
+            return True
+        else:
+            return False # Pass check text not found
+    if "reference_output" in app:
+        with open(app["reference_output"], "r", encoding="utf-8") as ref_file:
+            ref_output = ref_file.read()
+        if "test_output" in app:
+            with open(app["test_output"], "r", encoding="utf-8") as test_file:
+                test_output = test_file.read()
+        else:
+            test_output = result.stdout.decode("utf-8")
+        if test_output == ref_output:
+            return True
+        elif "float_grep" in app:
+            return validate_float(test_output, app, ref_output)
+        else:
+            return False # Test output does not match and not a float grep validation
+    else:
+        raise ValueError(f"No validation type specified for {app['name']}")
+
+
+def validate_float(test_output: str, app: dict, ref_output: str) -> bool:
+    """Validate the float in the test output. Returns True if successful, False otherwise."""
+    float_str = re.search(r"(\d+\.\d+)", test_output.split(app["float_grep"])[-1])
+    ref_str = re.search(r"(\d+\.\d+)", ref_output.split(app["float_grep"])[-1])
+    if not ref_str:
+        raise ValueError(f"Reference output {app['reference_output']} does not contain " \
+                            + f"float {app['float_grep']}")
+    if float_str:
+        float_value = float(float_str.group(1))
+        ref_value = float(ref_str.group(1))
+        if abs(float_value - ref_value) <= app["float_tolerance"]:
+            return True
+        else:
+            return False
+    else:
+        print(f"Warning: No float found in test output {test_output} for {app['name']}, " \
+                + f"looking for {app['float_grep']}")
+        return False
+
+
+def run_app(app: dict, env: dict) -> tuple[bool, subprocess.CompletedProcess]:
+    """Run the application. Returns True if successful, False otherwise, and the result of the run.
+       If the application has a test output file, remove it before running.
+    """
+    if "test_output" in app:
+        if os.path.exists(app["test_output"]):
+            os.remove(app["test_output"])
     if "run_path" in app:
         run_path = app["run_path"]
     elif "build_path" in app:
         run_path = app["build_path"]
     else:
         run_path = app["path"]
-    return subprocess_wrapper(app["run_command"].split(), run_path, env).returncode == 0
+    run_command = app["run_command"].split()
+    result = subprocess_wrapper(run_command, run_path, env)
+    return result.returncode == 0, result
 
 
 def nsys_profile_app(app: dict, env: dict) -> bool:
@@ -213,6 +280,7 @@ def determine_operations(args: argparse.Namespace) -> list[str]:
     operations.append("Build")
     if not args.build:
         operations.append("Run")
+        operations.append("Validate")
     if args.nsys:
         operations.append("NSYS Profile")
     if args.ncu:
@@ -238,22 +306,36 @@ def run_apps(app_config: dict, swap_files: list[str] | None, env: dict,
             swap_file_in_app(app, args.swaps)
 
         # Build
+        # For Rodinia, all apps are built at once, so only need to build once. If the first build
+        # fails, error out to avoid repeatedly failing to build the same apps. If the build
+        # succeeds, check if the app binary exists and is executable to determine build success
+        # for each rodinia app.
         if "rodinia" not in app["path"] or not rodinia_built:
             build_success = build_app(app, args.sm_version, args.no_clean, env)
-            results[app_name]["Build"] = build_success
             if "rodinia" in app["path"]:
-                rodinia_built = build_success
-        else:
-            results[app_name]["Build"] = True
+                if not build_success:
+                    raise ValueError("Failed to build Rodinia apps, exiting now.")
+                rodinia_built = True
+            else:
+                results[app_name]["Build"] = build_success
 
-        if args.build:
+        if "rodinia" in app["path"]: # Rodinia apps will always be built by this point
+            bin_path = os.path.join(app["path"], app["run_command"].split()[0])
+            results[app_name]["Build"] = os.path.exists(bin_path) and os.access(bin_path, os.X_OK)
+
+        if args.build or not results[app_name]["Build"]:
             if swap_files and app["name"] in swap_files:
                 swap_file_out_app(app)
             continue
 
         # Run
-        run_success = run_app(app, env)
+        run_success, result = run_app(app, env)
         results[app_name]["Run"] = run_success
+
+        # Validate
+        validate_success = validate_app(app, result)
+        print(f"Validate success: {validate_success}")
+        results[app_name]["Validate"] = validate_success
 
         # NSYS Profile
         if args.nsys:

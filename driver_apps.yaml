@@ -49,11 +49,10 @@ apps:
 - name: backprop
   kernel_name: bpnn_layerforward_CUDA
   path: rodinia/backprop
-  run_command: ./backprop 65536 > output.txt
+  run_command: ./backprop 65536
   ncu_args: -k bpnn_layerforward_CUDA
   replace_file: rodinia/backprop/backprop_cuda_kernel.cu
   reference_output: rodinia/backprop/ref-output.txt
-  test_output: rodinia/backprop/output.txt
   float_grep: "sum:"
   float_tolerance: 0.00001
 
@@ -136,11 +135,10 @@ apps:
 - name: particlefilter
   kernel_name: likelihood_kernel
   path: rodinia/particlefilter
-  run_command: ./particlefilter_float -x 128 -y 128 -z 10 -np 1000 > result.txt
+  run_command: ./particlefilter_float -x 128 -y 128 -z 10 -np 1000
   ncu_args: -k likelihood_kernel --launch-skip 2 --launch-count 1
   replace_file: rodinia/particlefilter/ex_particle_CUDA_float_seq.cu
   reference_output: rodinia/particlefilter/ref-result.txt
-  test_output: rodinia/particlefilter/result.txt
   float_grep: "XE:"
   float_grep_2: "YE:"
   float_tolerance: 0.5
@@ -148,11 +146,10 @@ apps:
 - name: pathfinder
   kernel_name: dynproc_kernel
   path: rodinia/pathfinder
-  run_command: ./pathfinder 100000 100 20 > result.txt
+  run_command: ./pathfinder 100000 100 20
   ncu_args: --launch-skip 2 --launch-count 1
   replace_file: rodinia/pathfinder/pathfinder.cu
   reference_output: rodinia/pathfinder/ref-result.txt
-  test_output: rodinia/pathfinder/result.txt
 
 - name: srad_v1
   kernel_name: reduce
