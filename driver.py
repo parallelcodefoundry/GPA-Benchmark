@@ -276,8 +276,7 @@ def parse_args() -> argparse.Namespace:
 
 def setup_app_config(args: argparse.Namespace) -> tuple[dict, list[str] | None, dict]:
     """Setup the application configuration."""
-    app_config: dict = yaml.load(open(args.config, "r", encoding="utf-8"),
-                                 Loader=yaml.FullLoader)
+    app_config: dict = yaml.safe_load(open(args.config, "r", encoding="utf-8"))
     if args.app != "all" and args.app not in [app["name"] for app in app_config["apps"]]:
         raise ValueError(f"Application {args.app} not found in config file {args.config}")
     if args.swaps:

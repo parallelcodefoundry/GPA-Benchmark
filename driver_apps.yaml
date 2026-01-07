@@ -25,6 +25,16 @@ apps:
   reference_output: LULESH/cuda/src/s45-ref-xyz.asc
   test_output: LULESH/cuda/src/xyz.asc
 
+- name: XSBench
+  kernel_name: xs_lookup_kernel
+  path: XSBench
+  build_path: XSBench/cuda
+  clean_command: make clean
+  build_command: make -j 8
+  run_command: ./XSBench -m event -s small
+  ncu_args: -k xs_lookup_kernel
+  pass_check_text: (Valid)
+
 #- name: Quicksilver
 #  kernel_name: CycleTrackingKernel
 #  path: Quicksilver
