@@ -14,6 +14,7 @@ NCU_ARGS = ["--metrics",
             "regex:sm__inst_executed_pipe_[^.]*.avg.pct_of_peak_sustained_active$,regex:sm__sass_thread_inst_executed_op.*sum$,regex:l1tex__t_set_.*_pipe_lsu_mem_global_op_ld.sum$,regex:l1tex__t_set_accesses.sum$,regex:l1tex__t_requests.sum$,regex:l1tex__m_xbar2l1tex_read_sectors.sum$,sm__average_thread_inst_executed_pred_on_per_inst_executed_realtime,regex:sm__sass_inst_executed.*sum$,regex:sm__inst_issued.avg.per_cycle_active$,regex:.*throughput.avg.pct_of_peak_sustained_active$,regex:.*throughput.avg.pct_of_peak_sustained_elapsed$",
             "--set", "full", "--import-source", "yes", "--target-processes", "all"]
 
+
 def swap_file_in_app(app: dict, swap_file_path: str) -> None:
     """Swap the file in the application directory on disk. Back up original file. If the file
        contains ">>> START EDITABLE REGION" and "<<< END EDITABLE REGION", then replace
@@ -49,22 +50,25 @@ def swap_file_out_app(app: dict) -> None:
     shutil.copy(backup_path, dest_path)
 
 
-def build_app(app: dict, sm_version: int, no_clean: bool, env: dict) -> None:
-    """Build the application."""
+def build_app(app: dict, sm_version: int, no_clean: bool, env: dict) -> bool:
+    """Build the application. Returns True if successful, False otherwise."""
     build_path = app["path"] if "build_path" not in app else app["build_path"]
     if "rodinia" in build_path:
         build_path = "rodinia"
     if not no_clean and "clean_command" in app:
-        subprocess.run(app["clean_command"].split(), cwd=build_path, check=True)
+        clean_result = subprocess.run(app["clean_command"].split(), cwd=build_path, check=False)
+        if clean_result.returncode != 0:
+            return False
     build_command = "make -j 8" if "build_command" not in app else app["build_command"]
     build_command += f" SM_VERSION={sm_version}"
     build_command = build_command.split()
     print(f"Build command {build_command}")
-    subprocess.run(build_command, cwd=build_path, env=env, check=True)
+    build_result = subprocess.run(build_command, cwd=build_path, env=env, check=False)
+    return build_result.returncode == 0
 
 
-def run_app(app: dict, env: dict) -> None:
-    """Run the application."""
+def run_app(app: dict, env: dict) -> bool:
+    """Run the application. Returns True if successful, False otherwise."""
     if "run_path" in app:
         run_path = app["run_path"]
     elif "build_path" in app:
@@ -73,11 +77,12 @@ def run_app(app: dict, env: dict) -> None:
         run_path = app["path"]
     run_command = app["run_command"].split()
     print(f"Run command {run_command}")
-    subprocess.run(run_command, cwd=run_path, env=env, check=True)
+    run_result = subprocess.run(run_command, cwd=run_path, env=env, check=False)
+    return run_result.returncode == 0
 
 
-def nsys_profile_app(app: dict, env: dict) -> None:
-    """Profile the application with Nsight Systems."""
+def nsys_profile_app(app: dict, env: dict) -> bool:
+    """Profile the application with Nsight Systems. Returns True if successful, False otherwise."""
     profile_dir = setup_profile_dir()
     nsys_command = ["nsys", "profile", "-o", os.path.join(profile_dir, app["name"]), "-f", "true"]
     nsys_command.extend(app["run_command"].split())
@@ -88,11 +93,12 @@ def nsys_profile_app(app: dict, env: dict) -> None:
     else:
         run_path = app["path"]
     print(f"NSYS command {nsys_command}")
-    subprocess.run(nsys_command, cwd=run_path, env=env, check=True)
+    nsys_result = subprocess.run(nsys_command, cwd=run_path, env=env, check=False)
+    return nsys_result.returncode == 0
 
 
-def ncu_profile_app(app: dict, env: dict) -> None:
-    """Profile the application with Nsight Compute."""
+def ncu_profile_app(app: dict, env: dict) -> bool:
+    """Profile the application with Nsight Compute. Returns True if successful, False otherwise."""
     profile_dir = setup_profile_dir()
     ncu_command = ["ncu", "-o", os.path.join(profile_dir, app["name"]), "-f"]
     if "ncu_args" in app:
@@ -106,7 +112,8 @@ def ncu_profile_app(app: dict, env: dict) -> None:
     else:
         run_path = app["path"]
     print(f"NCU command {ncu_command}")
-    subprocess.run(ncu_command, cwd=run_path, env=env, check=True)
+    ncu_result = subprocess.run(ncu_command, cwd=run_path, env=env, check=False)
+    return ncu_result.returncode == 0
 
 
 def setup_profile_dir() -> str:
@@ -117,9 +124,45 @@ def setup_profile_dir() -> str:
     return profile_dir
 
 
-def main() -> None:
-    """Main function for driver."""
-    print("Start driver.py")
+def print_report_table(results: dict, operations: list) -> None:
+    """Print a formatted table showing the status of all operations for each application."""
+    if not results:
+        return
+
+    # Determine column widths
+    app_name_width = max(len(app_name) for app_name in results.keys())
+    app_name_width = max(app_name_width, len("Application"))
+    col_width = max(len(op) for op in operations) if operations else 10
+    col_width = max(col_width, 8)
+
+    # Print header
+    header = f"{'Application':<{app_name_width}}"
+    for op in operations:
+        header += f" | {op:<{col_width}}"
+    print("\n" + "=" * len(header))
+    print(header)
+    print("=" * len(header))
+
+    # Print rows
+    for app_name, app_results in results.items():
+        row = f"{app_name:<{app_name_width}}"
+        for op in operations:
+            status = app_results.get(op, None)
+            if status is True:
+                symbol = "✓"
+            elif status is False:
+                symbol = "✗"
+            else:
+                symbol = "-"
+            row += f" | {symbol:<{col_width}}"
+        print(row)
+
+    print("=" * len(header))
+    print()
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse command line arguments."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--app", type=str, default="all", help="The application to run")
     parser.add_argument("--sm-version", type=int, default=90, help="The SM version to use")
@@ -138,7 +181,11 @@ def main() -> None:
                         help="The path to the directory containing code files to swap in for the " \
                             + "kernel, with the filename being app_name.swap, app file path to " \
                             + "swap for is set in the config file")
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+def setup_app_config(args: argparse.Namespace) -> tuple[dict, list[str] | None, dict]:
+    """Setup the application configuration."""
     app_config: dict = yaml.load(open(args.config, "r", encoding="utf-8"),
                                  Loader=yaml.FullLoader)
     if args.app != "all" and args.app not in [app["name"] for app in app_config["apps"]]:
@@ -154,21 +201,78 @@ def main() -> None:
                  "/usr/local/cuda")
     env = os.environ.copy()
     env["CUDA_HOME"] = cuda_home
+    return app_config, swap_files, env
+
+
+def determine_operations(args: argparse.Namespace) -> list[str]:
+    """Determine which operations will be performed."""
+    operations: list[str] = []
+    operations.append("Build")
+    if not args.build:
+        operations.append("Run")
+    if args.nsys:
+        operations.append("NSYS Profile")
+    if args.ncu:
+        operations.append("NCU Profile")
+    return operations
+
+
+def run_apps(app_config: dict, swap_files: list[str] | None, env: dict,
+             args: argparse.Namespace) -> tuple[dict[str, dict[str, bool]], list[str]]:
+    """Run the applications."""
+    results: dict[str, dict[str, bool]] = {}
+    operations = determine_operations(args)
+
     for app in app_config["apps"]:
         if args.app != "all" and app["name"] != args.app:
             continue
+
+        app_name = app["name"]
+        results[app_name] = {}
+
         if swap_files and app["name"] in swap_files:
             swap_file_in_app(app, args.swaps)
-        build_app(app, args.sm_version, args.no_clean, env)
+
+        # Build
+        build_success = build_app(app, args.sm_version, args.no_clean, env)
+        results[app_name]["Build"] = build_success
+
         if args.build:
+            if swap_files and app["name"] in swap_files:
+                swap_file_out_app(app)
             continue
-        run_app(app, env)
+
+        # Run
+        run_success = run_app(app, env)
+        results[app_name]["Run"] = run_success
+
+        # NSYS Profile
         if args.nsys:
-            nsys_profile_app(app, env)
+            nsys_success = nsys_profile_app(app, env)
+            results[app_name]["NSYS Profile"] = nsys_success
+
+        # NCU Profile
         if args.ncu:
-            ncu_profile_app(app, env)
+            ncu_success = ncu_profile_app(app, env)
+            results[app_name]["NCU Profile"] = ncu_success
+
         if swap_files and app["name"] in swap_files:
             swap_file_out_app(app)
+
+    return results, operations
+
+
+def main() -> None:
+    """Main function for driver."""
+    print("Start driver.py")
+
+    args = parse_args()
+
+    app_config, swap_files, env = setup_app_config(args)
+
+    results, operations = run_apps(app_config, swap_files, env, args)
+
+    print_report_table(results, operations)
 
 
 if __name__ == "__main__":
