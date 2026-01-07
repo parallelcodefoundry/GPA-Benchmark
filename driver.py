@@ -50,21 +50,29 @@ def swap_file_out_app(app: dict) -> None:
     shutil.copy(backup_path, dest_path)
 
 
+def subprocess_wrapper(command: list[str], cwd: str, env: dict) -> subprocess.CompletedProcess:
+    """Wrapper for subprocess.run to capture stdout and stderr, print command before running."""
+    print(f"Running command {' '.join(command)} in directory {cwd}")
+    result = subprocess.run(command, cwd=cwd, env=env, check=False, capture_output=True)
+    print(result.stdout.decode("utf-8"))
+    print(result.stderr.decode("utf-8"))
+    return result
+
+
 def build_app(app: dict, sm_version: int, no_clean: bool, env: dict) -> bool:
     """Build the application. Returns True if successful, False otherwise."""
     build_path = app["path"] if "build_path" not in app else app["build_path"]
     if "rodinia" in build_path:
         build_path = "rodinia"
     if not no_clean and "clean_command" in app:
-        clean_result = subprocess.run(app["clean_command"].split(), cwd=build_path, check=False)
+        clean_result = subprocess_wrapper(app["clean_command"].split(), build_path, env)
         if clean_result.returncode != 0:
             return False
-    build_command = "make -j 8" if "build_command" not in app else app["build_command"]
-    build_command += f" SM_VERSION={sm_version}"
-    build_command = build_command.split()
-    print(f"Build command {build_command}")
-    build_result = subprocess.run(build_command, cwd=build_path, env=env, check=False)
-    return build_result.returncode == 0
+    build_command = ["make", "-j", "8"]
+    if "build_command" in app:
+        build_command = app["build_command"].split()
+    build_command.append(f"SM_VERSION={sm_version}")
+    return subprocess_wrapper(build_command, build_path, env).returncode == 0
 
 
 def run_app(app: dict, env: dict) -> bool:
@@ -75,10 +83,7 @@ def run_app(app: dict, env: dict) -> bool:
         run_path = app["build_path"]
     else:
         run_path = app["path"]
-    run_command = app["run_command"].split()
-    print(f"Run command {run_command}")
-    run_result = subprocess.run(run_command, cwd=run_path, env=env, check=False)
-    return run_result.returncode == 0
+    return subprocess_wrapper(app["run_command"].split(), run_path, env).returncode == 0
 
 
 def nsys_profile_app(app: dict, env: dict) -> bool:
@@ -92,9 +97,7 @@ def nsys_profile_app(app: dict, env: dict) -> bool:
         run_path = app["build_path"]
     else:
         run_path = app["path"]
-    print(f"NSYS command {nsys_command}")
-    nsys_result = subprocess.run(nsys_command, cwd=run_path, env=env, check=False)
-    return nsys_result.returncode == 0 \
+    return subprocess_wrapper(nsys_command, run_path, env).returncode == 0 \
         and os.path.exists(os.path.join(profile_dir, app["name"] + ".nsys-rep"))
 
 
@@ -112,9 +115,7 @@ def ncu_profile_app(app: dict, env: dict) -> bool:
         run_path = app["build_path"]
     else:
         run_path = app["path"]
-    print(f"NCU command {ncu_command}")
-    ncu_result = subprocess.run(ncu_command, cwd=run_path, env=env, check=False)
-    return ncu_result.returncode == 0 \
+    return subprocess_wrapper(ncu_command, run_path, env).returncode == 0 \
         and os.path.exists(os.path.join(profile_dir, app["name"] + ".ncu-rep"))
 
 
@@ -224,6 +225,7 @@ def run_apps(app_config: dict, swap_files: list[str] | None, env: dict,
     """Run the applications."""
     results: dict[str, dict[str, bool]] = {}
     operations = determine_operations(args)
+    rodinia_built = False
 
     for app in app_config["apps"]:
         if args.app != "all" and app["name"] != args.app:
@@ -236,8 +238,13 @@ def run_apps(app_config: dict, swap_files: list[str] | None, env: dict,
             swap_file_in_app(app, args.swaps)
 
         # Build
-        build_success = build_app(app, args.sm_version, args.no_clean, env)
-        results[app_name]["Build"] = build_success
+        if "rodinia" not in app["path"] or not rodinia_built:
+            build_success = build_app(app, args.sm_version, args.no_clean, env)
+            results[app_name]["Build"] = build_success
+            if "rodinia" in app["path"]:
+                rodinia_built = build_success
+        else:
+            results[app_name]["Build"] = True
 
         if args.build:
             if swap_files and app["name"] in swap_files:
