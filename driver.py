@@ -94,7 +94,8 @@ def nsys_profile_app(app: dict, env: dict) -> bool:
         run_path = app["path"]
     print(f"NSYS command {nsys_command}")
     nsys_result = subprocess.run(nsys_command, cwd=run_path, env=env, check=False)
-    return nsys_result.returncode == 0
+    return nsys_result.returncode == 0 \
+        and os.path.exists(os.path.join(profile_dir, app["name"] + ".nsys-rep"))
 
 
 def ncu_profile_app(app: dict, env: dict) -> bool:
@@ -113,7 +114,8 @@ def ncu_profile_app(app: dict, env: dict) -> bool:
         run_path = app["path"]
     print(f"NCU command {ncu_command}")
     ncu_result = subprocess.run(ncu_command, cwd=run_path, env=env, check=False)
-    return ncu_result.returncode == 0
+    return ncu_result.returncode == 0 \
+        and os.path.exists(os.path.join(profile_dir, app["name"] + ".ncu-rep"))
 
 
 def setup_profile_dir() -> str:
