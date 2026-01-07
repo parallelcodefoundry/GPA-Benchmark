@@ -11,7 +11,7 @@ import subprocess
 import yaml
 
 NCU_ARGS = ["--metrics",
-            "regex:sm__inst_executed_pipe_[^.]*.avg.pct_of_peak_sustained_active$,regex:sm__sass_thread_inst_executed_op.*sum$,regex:l1tex__t_set_.*_pipe_lsu_mem_global_op_ld.sum$,regex:l1tex__t_set_accesses.sum$,regex:l1tex__t_requests.sum$,regex:l1tex__m_xbar2l1tex_read_sectors.sum$,sm__average_thread_inst_executed_pred_on_per_inst_executed_realtime,regex:sm__sass_inst_executed.*sum$,regex:sm__inst_issued.avg.per_cycle_active$,regex:.*throughput.avg.pct_of_peak_sustained_active$,regex:.*throughput.avg.pct_of_peak_sustained_elapsed$]",
+            "regex:sm__inst_executed_pipe_[^.]*.avg.pct_of_peak_sustained_active$,regex:sm__sass_thread_inst_executed_op.*sum$,regex:l1tex__t_set_.*_pipe_lsu_mem_global_op_ld.sum$,regex:l1tex__t_set_accesses.sum$,regex:l1tex__t_requests.sum$,regex:l1tex__m_xbar2l1tex_read_sectors.sum$,sm__average_thread_inst_executed_pred_on_per_inst_executed_realtime,regex:sm__sass_inst_executed.*sum$,regex:sm__inst_issued.avg.per_cycle_active$,regex:.*throughput.avg.pct_of_peak_sustained_active$,regex:.*throughput.avg.pct_of_peak_sustained_elapsed$",
             "--set", "full", "--import-source", "yes", "--target-processes", "all"]
 
 def swap_file_in_app(app: dict, swap_file_path: str) -> None:
@@ -59,7 +59,7 @@ def build_app(app: dict, sm_version: int, no_clean: bool, env: dict) -> None:
     build_command = "make -j 8" if "build_command" not in app else app["build_command"]
     build_command += f" SM_VERSION={sm_version}"
     build_command = build_command.split()
-    print(" ".join(build_command))
+    print(f"Build command {build_command}")
     subprocess.run(build_command, cwd=build_path, env=env, check=True)
 
 
@@ -72,7 +72,7 @@ def run_app(app: dict, env: dict) -> None:
     else:
         run_path = app["path"]
     run_command = app["run_command"].split()
-    print(" ".join(run_command))
+    print(f"Run command {run_command}")
     subprocess.run(run_command, cwd=run_path, env=env, check=True)
 
 
@@ -87,14 +87,14 @@ def nsys_profile_app(app: dict, env: dict) -> None:
         run_path = app["build_path"]
     else:
         run_path = app["path"]
-    print(" ".join(nsys_command))
+    print(f"NSYS command {nsys_command}")
     subprocess.run(nsys_command, cwd=run_path, env=env, check=True)
 
 
 def ncu_profile_app(app: dict, env: dict) -> None:
     """Profile the application with Nsight Compute."""
     profile_dir = setup_profile_dir()
-    ncu_command = ["ncu", "-o", os.path.join(profile_dir, app["name"]), "-f", "true"]
+    ncu_command = ["ncu", "-o", os.path.join(profile_dir, app["name"]), "-f"]
     if "ncu_args" in app:
         ncu_command.extend(app["ncu_args"].split())
     ncu_command.extend(NCU_ARGS)
@@ -105,7 +105,7 @@ def ncu_profile_app(app: dict, env: dict) -> None:
         run_path = app["build_path"]
     else:
         run_path = app["path"]
-    print(" ".join(ncu_command))
+    print(f"NCU command {ncu_command}")
     subprocess.run(ncu_command, cwd=run_path, env=env, check=True)
 
 
@@ -119,6 +119,7 @@ def setup_profile_dir() -> str:
 
 def main() -> None:
     """Main function for driver."""
+    print("Start driver.py")
     parser = argparse.ArgumentParser()
     parser.add_argument("--app", type=str, default="all", help="The application to run")
     parser.add_argument("--sm-version", type=int, default=90, help="The SM version to use")
