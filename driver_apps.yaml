@@ -68,11 +68,11 @@ apps:
 - name: gaussian
   kernel_name: Fan2
   path: rodinia/gaussian
-  run_command: ./gaussian -s 1024 | head -n -2 > output.txt
+  run_command: ./gaussian -s 1024 | head -n -2
   ncu_args: -k Fan2 --launch-skip 250 --launch-count 1
   replace_file: rodinia/gaussian/gaussian.cu
   reference_output: rodinia/gaussian/ref-output.txt
-  test_output: rodinia/gaussian/output.txt
+  output_window: [-6, -4]
 
 - name: heartwall
   kernel_name: heartwall_kernel

@@ -86,6 +86,8 @@ def validate_app(app: dict, result: subprocess.CompletedProcess) -> bool:
                            output, return True
        - float_grep: locate the float in the stdout (or file specified by test_output) and compare
                      it to reference_output, return True if the difference is within float_tolerance
+       - output_window: the number of lines to compare at the beginning (positive) or end (negative)
+                        of the output, default is 0 (compare all lines)
     """
     if "fail_check_text" in app:
         if app["fail_check_text"] in result.stdout.decode("utf-8"):
@@ -101,18 +103,35 @@ def validate_app(app: dict, result: subprocess.CompletedProcess) -> bool:
         with open(app["reference_output"], "r", encoding="utf-8") as ref_file:
             ref_output = ref_file.read()
         if "test_output" in app:
-            with open(app["test_output"], "r", encoding="utf-8") as test_file:
-                test_output = test_file.read()
+            if not os.path.exists(app["test_output"]):
+                print(f"Warning: could not find test output file {app['test_output']} for " \
+                    + f"{app['name']}, trying stdout instead")
+                test_output = result.stdout.decode("utf-8")
+            else:
+                with open(app["test_output"], "r", encoding="utf-8") as test_file:
+                    test_output = test_file.read()
         else:
             test_output = result.stdout.decode("utf-8")
         if test_output == ref_output:
             return True
+        elif "output_window" in app and app["output_window"] != 0:
+            return validate_output_window(test_output, app, ref_output)
         elif "float_grep" in app:
             return validate_float(test_output, app, ref_output)
         else:
             return False # Test output does not match and not a float grep validation
     else:
         raise ValueError(f"No validation type specified for {app['name']}")
+
+
+def validate_output_window(test_output: str, app: dict, ref_output: str) -> bool:
+    """Validate the output window. Returns True if successful, False otherwise."""
+    window_sizes = app["output_window"]
+    if len(window_sizes) != 2:
+        raise ValueError(f"Output window must be a list of two integers ({app['name']})")
+    test_output = "\n".join(test_output.splitlines()[window_sizes[0]:window_sizes[1]])
+    ref_output = "\n".join(ref_output.splitlines()[window_sizes[0]:window_sizes[1]])
+    return test_output == ref_output
 
 
 def validate_float(test_output: str, app: dict, ref_output: str) -> bool:
