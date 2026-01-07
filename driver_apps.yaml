@@ -31,7 +31,7 @@ apps:
   build_path: XSBench/cuda
   clean_command: make clean
   build_command: make -j 8
-  run_command: ./XSBench -m event -s small
+  run_command: ./XSBench -m event -s large
   ncu_args: -k xs_lookup_kernel
   pass_check_text: (Valid)
 
