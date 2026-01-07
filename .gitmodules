@@ -24,3 +24,7 @@
 	path = darknet
 	url = git@github.com:AlexeyAB/darknet.git
 	branch = yolov4
+[submodule "XSBench"]
+	path = XSBench
+	url = git@github.com:hpcgroup/XSBench.git
+	branch = gpa-benchmark
