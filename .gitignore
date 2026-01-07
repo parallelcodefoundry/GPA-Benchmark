@@ -65,3 +65,5 @@ rodinia/lavaMD-opt/lavaMD
 rodinia/lavaMD/lavaMD
 rodinia/streamcluster-opt/output.txt
 rodinia/streamcluster/output.txt
+
+profiles/

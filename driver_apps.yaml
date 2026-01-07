@@ -17,7 +17,7 @@ apps:
   kernel_name: ApplyMaterialPropertiesAndUpdateVolume_kernel
   path: LULESH
   build_path: LULESH/cuda/src
-  clean_command: make clean
+  clean_command: make -f ../build/Makefile clean
   build_command: make -f ../build/Makefile -j 8
   run_command: ./lulesh -s 45
   ncu_args: -k ApplyMaterialPropertiesAndUpdateVolume_kernel --launch-skip 49 --launch-count 1
