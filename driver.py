@@ -51,11 +51,12 @@ def swap_file_out_app(app: dict) -> None:
     shutil.copy(backup_path, dest_path)
 
 
-def subprocess_wrapper(command: list[str], cwd: str, env: dict) -> subprocess.CompletedProcess:
+def subprocess_wrapper(command: list[str], cwd: str, env: dict, quiet: bool = False) -> subprocess.CompletedProcess:
     """Wrapper for subprocess.run to capture stdout and stderr, print command before running."""
     print(f"Running command {' '.join(command)} in directory {cwd}")
     result = subprocess.run(command, cwd=cwd, env=env, check=False, capture_output=True)
-    print(result.stdout.decode("utf-8"))
+    if not quiet:
+        print(result.stdout.decode("utf-8"))
     print(result.stderr.decode("utf-8"))
     return result
 
@@ -67,7 +68,7 @@ def build_app(app: dict, sm_version: int, no_clean: bool, env: dict) -> bool:
         build_path = "rodinia"
     if not no_clean:
         clean_result = subprocess_wrapper(app["clean_command"].split() if "clean_command" in app \
-            else ["make", "clean"], build_path, env)
+            else ["make", "clean"], build_path, env, quiet=True)
         if clean_result.returncode != 0:
             return False
     build_command = ["make", "-j", "8"]

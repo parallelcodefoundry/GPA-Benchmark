@@ -224,39 +224,6 @@ __global__ void find_index_kernel(double * arrayX, double * arrayY, double * CDF
     __syncthreads();
 }
 
-__global__ void normalize_weights_kernel(double * weights, int Nparticles, double* partial_sums, double * CDF, double * u, int * seed) {
-    int block_id = blockIdx.x;
-    int i = blockDim.x * block_id + threadIdx.x;
-    __shared__ double u1, sumWeights;
-    
-    if(0 == threadIdx.x)
-        sumWeights = partial_sums[0];
-    
-    __syncthreads();
-    
-    if (i < Nparticles) {
-        weights[i] = weights[i] / sumWeights;
-    }
-    
-    __syncthreads(); 
-    
-    if (i == 0) {
-        cdfCalc(CDF, weights, Nparticles);
-        u[0] = (1 / ((double) (Nparticles))) * d_randu(seed, i); // do this to allow all threads in all blocks to use the same u1
-    }
-    
-    __syncthreads();
-    
-    if(0 == threadIdx.x) 
-        u1 = u[0];
-    
-    __syncthreads();
-        
-    if (i < Nparticles) {
-        u[i] = u1 + i / ((double) (Nparticles));
-    }
-}
-
 __global__ void sum_kernel(double* partial_sums, int Nparticles) {
     int block_id = blockIdx.x;
     int i = blockDim.x * block_id + threadIdx.x;
@@ -400,6 +367,40 @@ __global__ void likelihood_kernel(double * arrayX, double * arrayY, double * xj,
     
 }
 // <<< END EDITABLE REGION
+
+__global__ void normalize_weights_kernel(double * weights, int Nparticles, double* partial_sums, double * CDF, double * u, int * seed) {
+    int block_id = blockIdx.x;
+    int i = blockDim.x * block_id + threadIdx.x;
+    __shared__ double u1, sumWeights;
+    
+    if(0 == threadIdx.x)
+        sumWeights = partial_sums[0];
+    
+    __syncthreads();
+    
+    if (i < Nparticles) {
+        weights[i] = weights[i] / sumWeights;
+    }
+    
+    __syncthreads(); 
+    
+    if (i == 0) {
+        cdfCalc(CDF, weights, Nparticles);
+        u[0] = (1 / ((double) (Nparticles))) * d_randu(seed, i); // do this to allow all threads in all blocks to use the same u1
+    }
+    
+    __syncthreads();
+    
+    if(0 == threadIdx.x) 
+        u1 = u[0];
+    
+    __syncthreads();
+        
+    if (i < Nparticles) {
+        u[i] = u1 + i / ((double) (Nparticles));
+    }
+}
+
 /** 
  * Takes in a double and returns an integer that approximates to that double
  * @return if the mantissa < .5 => return value < input value; else return value > input value
