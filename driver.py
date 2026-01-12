@@ -9,7 +9,10 @@ import re
 import shutil
 import argparse
 import subprocess
+import sqlite3
 import yaml
+import pandas as pd
+
 
 NCU_ARGS = ["--metrics",
             "regex:sm__inst_executed_pipe_[^.]*.avg.pct_of_peak_sustained_active$,regex:sm__sass_thread_inst_executed_op.*sum$,regex:l1tex__t_set_.*_pipe_lsu_mem_global_op_ld.sum$,regex:l1tex__t_set_accesses.sum$,regex:l1tex__t_requests.sum$,regex:l1tex__m_xbar2l1tex_read_sectors.sum$,sm__average_thread_inst_executed_pred_on_per_inst_executed_realtime,regex:sm__sass_inst_executed.*sum$,regex:sm__inst_issued.avg.per_cycle_active$,regex:.*throughput.avg.pct_of_peak_sustained_active$,regex:.*throughput.avg.pct_of_peak_sustained_elapsed$",
@@ -188,6 +191,65 @@ def nsys_profile_app(app: dict, env: dict) -> bool:
         and os.path.exists(os.path.join(profile_dir, app["name"] + ".nsys-rep"))
 
 
+def postprocess_nsys_app(app: dict, env: dict) -> bool:
+    """Postprocess the Nsight Systems profile. Returns True if successful, False otherwise."""
+    profile_dir = setup_profile_dir()
+
+    # Convert nsys-rep file to sqlite file
+    nsys_rep_file = os.path.join(profile_dir, app["name"] + ".nsys-rep")
+    if not os.path.exists(nsys_rep_file):
+        print(f"Warning: could not find Nsight Systems profile file {nsys_rep_file} for " \
+            + f"{app['name']}")
+        return False
+    postprocess_command = ["nsys", "export","-f", "true", "-t", "sqlite", nsys_rep_file]
+    if subprocess_wrapper(postprocess_command, profile_dir, env).returncode != 0:
+        print(f"Warning: could not postprocess Nsight Systems profile file {nsys_rep_file} for " \
+            + f"{app['name']}")
+        return False
+
+    sqlite_file = os.path.join(profile_dir, app["name"] + ".sqlite")
+    if not os.path.exists(sqlite_file):
+        print(f"Warning: could not find sqlite file {sqlite_file} for {app['name']}")
+        return False
+
+    # Read sqlite file into pandas dataframes
+    conn = sqlite3.connect(sqlite_file)
+    df = pd.read_sql_query("SELECT * FROM CUPTI_ACTIVITY_KIND_KERNEL", conn)
+    string_ids = pd.read_sql_query("SELECT * FROM StringIds", conn)
+    conn.close()
+
+    # Stringify demangledName, shortName, and mangledName columns by looking up string_ids
+    df["demangledName"] = df["demangledName"].map(string_ids.set_index("id")["value"])
+    df["shortName"] = df["shortName"].map(string_ids.set_index("id")["value"])
+    df["mangledName"] = df["mangledName"].map(string_ids.set_index("id")["value"])
+
+    # Write temp csv file for debugging
+    df.to_csv(os.path.join(profile_dir, app["name"] + "_debug.csv"), index=False)
+
+    # Find kernel of interest using ncu_args
+    kernel_name = app["kernel_name"]
+    launch_skip = 0
+    ncu_args = app["ncu_args"].split()
+    for i,arg in enumerate(ncu_args):
+        if arg == "-k" or arg == "--kernel-name":
+            kernel_name = ncu_args[i+1]
+        if arg == "--launch-skip":
+            launch_skip = int(ncu_args[i+1])
+
+    # Get the row of interest: launch_skip-th invocation of kernel_name
+    try:
+        kernel_row = df[df["shortName"] == kernel_name].iloc[[launch_skip]]
+    except IndexError:
+        print(f"Warning: could not find kernel {kernel_name} in Nsight Systems profile for " \
+            + f"{app['name']} at launch skip {launch_skip}")
+        return False
+
+    # Export the row of interest to a CSV file with header row from column name of df
+    kernel_row.to_csv(os.path.join(profile_dir, app["name"] + ".csv"), index=False)
+
+    return True
+
+
 def ncu_profile_app(app: dict, env: dict) -> bool:
     """Profile the application with Nsight Compute. Returns True if successful, False otherwise."""
     profile_dir = setup_profile_dir()
@@ -262,7 +324,8 @@ def parse_args() -> argparse.Namespace:
                         help="Do not clean the application before building")
     parser.add_argument("--build", action="store_true", help="Only build the application")
     parser.add_argument("--nsys", action="store_true",
-                        help="Profile the application with Nsight Systems")
+                        help="Profile the application with Nsight Systems, then export and " \
+                            + "process the sqlite database into a CSV file")
     parser.add_argument("--ncu", action="store_true",
                         help="Profile the application with Nsight Compute")
     parser.add_argument("--config", type=str, default="driver_apps.yaml",
@@ -271,6 +334,8 @@ def parse_args() -> argparse.Namespace:
                         help="The path to the directory containing code files to swap in for the " \
                             + "kernel, with the filename being app_name.swap, app file path to " \
                             + "swap for is set in the config file")
+    parser.add_argument("--postprocess-nsys", action="store_true",
+                        help="Postprocess the nsys-rep file(s) only, do not run the application")
     return parser.parse_args()
 
 
@@ -296,12 +361,15 @@ def setup_app_config(args: argparse.Namespace) -> tuple[dict, list[str] | None, 
 def determine_operations(args: argparse.Namespace) -> list[str]:
     """Determine which operations will be performed."""
     operations: list[str] = []
-    operations.append("Build")
-    if not args.build:
-        operations.append("Run")
-        operations.append("Validate")
+    if not args.postprocess_nsys:
+        operations.append("Build")
+        if not args.build:
+            operations.append("Run")
+            operations.append("Validate")
     if args.nsys:
         operations.append("NSYS Profile")
+    if args.nsys or args.postprocess_nsys:
+        operations.append("NSYS Post")
     if args.ncu:
         operations.append("NCU Profile")
     return operations
@@ -321,53 +389,58 @@ def run_apps(app_config: dict, swap_files: list[str] | None, env: dict,
         app_name = app["name"]
         results[app_name] = {}
 
-        if swap_files and app["name"] in swap_files:
-            swap_file_in_app(app, args.swaps)
+        if not args.postprocess_nsys:
+            if swap_files and app["name"] in swap_files:
+                swap_file_in_app(app, args.swaps)
 
-        # Build
-        # For Rodinia, all apps are built at once, so only need to build once. If the first build
-        # fails, error out to avoid repeatedly failing to build the same apps. If the build
-        # succeeds, check if the app binary exists and is executable to determine build success
-        # for each rodinia app.
-        if "rodinia" not in app["path"] or not rodinia_built:
-            build_success = build_app(app, args.sm_version, args.no_clean, env)
-            if "rodinia" in app["path"]:
-                if not build_success:
-                    raise ValueError("Failed to build Rodinia apps, exiting now.")
-                rodinia_built = True
-            else:
-                results[app_name]["Build"] = build_success
+            # Build
+            # For Rodinia, all apps are built at once, so only need to build once. If the first build
+            # fails, error out to avoid repeatedly failing to build the same apps. If the build
+            # succeeds, check if the app binary exists and is executable to determine build success
+            # for each rodinia app.
+            if "rodinia" not in app["path"] or not rodinia_built:
+                build_success = build_app(app, args.sm_version, args.no_clean, env)
+                if "rodinia" in app["path"]:
+                    if not build_success:
+                        raise ValueError("Failed to build Rodinia apps, exiting now.")
+                    rodinia_built = True
+                else:
+                    results[app_name]["Build"] = build_success
 
-        if "rodinia" in app["path"]: # Rodinia apps will always be built by this point
-            bin_path = os.path.join(app["path"], app["run_command"].split()[0])
-            results[app_name]["Build"] = os.path.exists(bin_path) and os.access(bin_path, os.X_OK)
+            if "rodinia" in app["path"]: # Rodinia apps will always be built by this point
+                bin_path = os.path.join(app["path"], app["run_command"].split()[0])
+                results[app_name]["Build"] = os.path.exists(bin_path) and os.access(bin_path, os.X_OK)
 
-        if args.build or not results[app_name]["Build"]:
+            if args.build or not results[app_name]["Build"]:
+                if swap_files and app["name"] in swap_files:
+                    swap_file_out_app(app)
+                continue
+
+            # Run
+            run_success, result = run_app(app, env)
+            results[app_name]["Run"] = run_success
+
+            # Validate
+            validate_success = validate_app(app, result)
+            print(f"Validate success: {validate_success}")
+            results[app_name]["Validate"] = validate_success
+
+            # NSYS Profile
+            if args.nsys:
+                nsys_success = nsys_profile_app(app, env)
+                results[app_name]["NSYS Profile"] = nsys_success
+
+            # NCU Profile
+            if args.ncu:
+                ncu_success = ncu_profile_app(app, env)
+                results[app_name]["NCU Profile"] = ncu_success
+
             if swap_files and app["name"] in swap_files:
                 swap_file_out_app(app)
-            continue
 
-        # Run
-        run_success, result = run_app(app, env)
-        results[app_name]["Run"] = run_success
-
-        # Validate
-        validate_success = validate_app(app, result)
-        print(f"Validate success: {validate_success}")
-        results[app_name]["Validate"] = validate_success
-
-        # NSYS Profile
-        if args.nsys:
-            nsys_success = nsys_profile_app(app, env)
-            results[app_name]["NSYS Profile"] = nsys_success
-
-        # NCU Profile
-        if args.ncu:
-            ncu_success = ncu_profile_app(app, env)
-            results[app_name]["NCU Profile"] = ncu_success
-
-        if swap_files and app["name"] in swap_files:
-            swap_file_out_app(app)
+        if args.postprocess_nsys or args.nsys:
+            postprocess_nsys_success = postprocess_nsys_app(app, env)
+            results[app_name]["NSYS Post"] = postprocess_nsys_success
 
     return results, operations
 
