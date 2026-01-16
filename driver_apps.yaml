@@ -3,7 +3,7 @@
 # The environment should have CUDA_HOME set. Rodinia apps are built from rodinia/ with make -j 8.
 apps:
 
-- name: ExaTENSOR
+- name: exatensor
   kernel_name: tensor_transpose
   path: ExaTENSOR
   clean_command: make clean
@@ -13,7 +13,7 @@ apps:
   replace_file: ExaTENSOR/cuda2.cu
   fail_check_text: Failed!
 
-- name: LULESH
+- name: lulesh
   kernel_name: ApplyMaterialPropertiesAndUpdateVolume_kernel
   path: LULESH
   build_path: LULESH/cuda/src
@@ -25,7 +25,7 @@ apps:
   reference_output: LULESH/cuda/src/s45-ref-xyz.asc
   test_output: LULESH/cuda/src/xyz.asc
 
-- name: XSBench
+- name: xsbench
   kernel_name: xs_lookup_kernel
   path: XSBench
   build_path: XSBench/cuda
@@ -33,9 +33,10 @@ apps:
   build_command: make -j 8
   run_command: ./XSBench -m event -s large
   ncu_args: -k xs_lookup_kernel
+  replace_file: XSBench/cuda/Simulation.cu
   pass_check_text: (Valid)
 
-#- name: Quicksilver
+#- name: quicksilver
 #  kernel_name: CycleTrackingKernel
 #  path: Quicksilver
 #  build_path: Quicksilver/src
@@ -161,7 +162,7 @@ apps:
   replace_file: rodinia/pathfinder/pathfinder.cu
   reference_output: rodinia/pathfinder/ref-result.txt
 
-- name: srad_v1
+- name: srad
   kernel_name: reduce
   path: rodinia/srad/srad_v1
   run_command: ./srad 100 0.5 502 458
