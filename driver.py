@@ -258,7 +258,8 @@ def subprocess_wrapper(command: list[str], cwd: str, env: dict,
     return result
 
 
-def build_app(app: dict, sm_version: int, no_clean: bool, env: dict) -> bool:
+def build_app(app: dict, sm_version: int, no_clean: bool,
+              env: dict) -> tuple[bool, subprocess.CompletedProcess]:
     """Build the application. Returns True if successful, False otherwise."""
     build_path = app["path"] if "build_path" not in app else app["build_path"]
     if not no_clean:
@@ -266,13 +267,15 @@ def build_app(app: dict, sm_version: int, no_clean: bool, env: dict) -> bool:
             else ["make", "clean"], build_path, env, quiet=True)
         if clean_result.returncode != 0:
             # Directly remove executable if make clean fails
-            if os.path.exists(os.path.join(build_path, app["run_command"].split()[0])):
-                os.remove(os.path.join(build_path, app["run_command"].split()[0]))
+            exe_path = os.path.join(build_path, app["run_command"].split()[0])
+            if os.path.exists(exe_path):
+                os.remove(exe_path)
     build_command = ["make", "-j", "8"]
     if "build_command" in app:
         build_command = app["build_command"].split()
     build_command.append(f"SM_VERSION={sm_version}")
-    return subprocess_wrapper(build_command, build_path, env).returncode == 0
+    result = subprocess_wrapper(build_command, build_path, env)
+    return result.returncode == 0, result
 
 
 def validate_app(app: dict, result: subprocess.CompletedProcess) -> bool:
@@ -631,10 +634,10 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace,
             swap_file_in_app(app, swap_config)
 
         try:
-            build_success = build_app(app, args.sm_version, args.no_clean, env)
+            build_success, build_result = build_app(app, args.sm_version, args.no_clean, env)
             bin_path = os.path.join(app["path"], app["run_command"].split()[0])
-            result.build = os.path.exists(bin_path) and os.access(bin_path, os.X_OK) \
-                and build_success
+            result.build = build_success and os.path.exists(bin_path) \
+                and os.access(bin_path, os.X_OK)
 
             if args.build or result.build is False:
                 return result
