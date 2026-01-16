@@ -310,6 +310,8 @@ def print_report_table(results: dict, operations: list) -> None:
                 symbol = "✓"
             elif status is False:
                 symbol = "✗"
+            elif isinstance(status, str):
+                symbol = status
             else:
                 symbol = "-"
             row += f" | {symbol:<{col_width}}"
