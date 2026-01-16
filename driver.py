@@ -29,28 +29,24 @@ NCU_ARGS = ["--metrics",
             "--set", "full", "--import-source", "yes", "--target-processes", "all"]
 
 
-def swap_file_in_app(app: dict, swap_file_path: str) -> None:
+def swap_file_in_app(app: dict, swap_config: dict) -> None:
     """Swap the file in the application directory on disk. Back up original file. If the file
        contains ">>> START EDITABLE REGION" and "<<< END EDITABLE REGION", then replace
        only that region with the contents of the swap file.
     """
     dest_path = app["replace_file"]
-    src_path = os.path.join(swap_file_path, app["name"] + ".swap")
-
     backup_path = dest_path + ".bak"
     shutil.copy(dest_path, backup_path)
-
     with open(dest_path, "r", encoding="utf-8") as dest_file:
         dest_text = dest_file.read()
     if ">>> START EDITABLE REGION" not in dest_text or "<<< END EDITABLE REGION" not in dest_text:
-        # Replace entire file with swap file
-        shutil.copy(src_path, dest_path)
+        # Replace entire file with swap file code
+        with open(dest_path, "w", encoding="utf-8") as dest_file:
+            dest_file.write(swap_config["code"])
         return
-    with open(src_path, "r", encoding="utf-8") as src_file:
-        src_text = src_file.read()
     start_index = dest_text.find(">>> START EDITABLE REGION")
     end_index = dest_text.find("<<< END EDITABLE REGION")
-    dest_text = dest_text[:start_index] + src_text + dest_text[end_index:]
+    dest_text = dest_text[:start_index] + swap_config["code"] + dest_text[end_index:]
     with open(dest_path, "w", encoding="utf-8") as dest_file:
         dest_file.write(dest_text)
 
@@ -59,8 +55,6 @@ def swap_file_out_app(app: dict) -> None:
     """Swap the file out of the application directory on disk. Restore original file."""
     dest_path = app["replace_file"]
     backup_path = dest_path + ".bak"
-    swap_save_path = dest_path + ".swap"
-    shutil.copy(dest_path, swap_save_path)
     shutil.copy(backup_path, dest_path)
 
 
@@ -393,7 +387,8 @@ def build_swaps_dict(swaps: str) -> dict[str, dict[str, str]]:
                 rest_of_code = "\n".join(code.splitlines()[1:])
                 swaps_dict[full_path] = {
                     "app_name": app_name,
-                    "swap_file_name": swap_file_name,
+                    "swap_file_src_path": full_path,
+                    "swap_file_dest_name": swap_file_name,
                     "run_num": run_num,
                     "optimized_code_num": optimized_code_num,
                     "code": rest_of_code
