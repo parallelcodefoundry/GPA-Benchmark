@@ -10,6 +10,7 @@ import re
 import shutil
 import argparse
 import subprocess
+import json
 from enum import Enum
 from dataclasses import dataclass
 from typing import Optional
@@ -62,13 +63,33 @@ class SwapConfig:
 @dataclass
 class DriverPassResult:
     """Represents the results of a single driver pass."""
-    build: Optional[bool] = None
-    run: Optional[bool] = None
-    validate: Optional[bool] = None
-    nsys_profile: Optional[bool] = None
-    ncu_profile: Optional[bool] = None
-    nsys_post: Optional[bool] = None
-    nsys_data: Optional[dict[str, str | int | float]] = None
+    app_name: str | None = None
+    run_num: str | None = None
+    swap_num: str | None = None
+    swap_file_src_path: str | None = None
+    build: bool | None = None
+    run: bool | None = None
+    validate: bool | None = None
+    nsys_profile: bool | None = None
+    ncu_profile: bool | None = None
+    nsys_post: bool | None = None
+    nsys_data: dict[str, str | int | float | None] | None = None
+
+    def to_dict(self) -> dict[str, str | bool | dict[str, str | int | float | None] | None]:
+        """Convert the results to a dictionary."""
+        return {
+            "app_name": self.app_name,
+            "run_num": self.run_num,
+            "swap_num": self.swap_num,
+            "swap_file_src_path": self.swap_file_src_path,
+            "build": self.build,
+            "run": self.run,
+            "validate": self.validate,
+            "nsys_profile": self.nsys_profile,
+            "ncu_profile": self.ncu_profile,
+            "nsys_post": self.nsys_post,
+            "nsys_data": self.nsys_data,
+        }
 
 
 
@@ -193,7 +214,6 @@ class AppResults:
             if self.swap_nsys_post_denominator > 0:
                 return f"{self.swap_nsys_post_numerator}/{self.swap_nsys_post_denominator}"
             return None
-        return None
 
 
 
@@ -240,8 +260,6 @@ def subprocess_wrapper(command: list[str], cwd: str, env: dict,
 def build_app(app: dict, sm_version: int, no_clean: bool, env: dict) -> bool:
     """Build the application. Returns True if successful, False otherwise."""
     build_path = app["path"] if "build_path" not in app else app["build_path"]
-    if "rodinia" in build_path:
-        build_path = "rodinia"
     if not no_clean:
         clean_result = subprocess_wrapper(app["clean_command"].split() if "clean_command" in app \
             else ["make", "clean"], build_path, env, quiet=True)
@@ -364,7 +382,7 @@ def nsys_profile_app(app: dict, env: dict) -> bool:
         and os.path.exists(os.path.join(profile_dir, app["name"] + ".nsys-rep"))
 
 
-def postprocess_nsys_app(app: dict, env: dict) -> dict[str, str | int | float] | None:
+def postprocess_nsys_app(app: dict, env: dict) -> dict[str, str | int | float | None] | None:
     """Postprocess the Nsight Systems profile. Returns True if successful, False otherwise."""
     profile_dir = setup_profile_dir()
 
@@ -464,7 +482,7 @@ def print_report_table(results: dict[str, AppResults], operations: list[Operatio
     # Print header
     header = f"{'Application':<{app_name_width}}"
     for op in operations:
-        header += f" | {op:<{col_width}}"
+        header += f" | {op.value:<{col_width}}"
     print("\n" + "=" * len(header))
     print(header)
     print("=" * len(header))
@@ -528,7 +546,8 @@ def build_swaps_dict(swaps: str) -> dict[str, SwapConfig]:
                     code = f.read()
                 # First line is automatically generated, ends with file name
                 swap_file_name = code.splitlines()[0].split(" ")[-1]
-                rest_of_code = "\n".join(code.splitlines()[1:])
+                rest_of_code = "\n".join([line for line in code.splitlines()[1:]
+                                          if not line.startswith("```")])
                 swaps_dict[full_path] = SwapConfig(
                     app_name=app_name,
                     swap_file_src_path=full_path,
@@ -570,11 +589,12 @@ def determine_operations(args: argparse.Namespace) -> list[Operation]:
 
 
 def run_all(app_config: dict, swaps_dict: dict[str, SwapConfig] | None, env: dict,
-            args: argparse.Namespace) -> tuple[dict[str, AppResults], list[Operation]]:
+            args: argparse.Namespace) -> tuple[dict[str, AppResults], list[Operation],
+                                               dict[str, DriverPassResult]]:
     """Run the applications."""
     results: dict[str, AppResults] = {}
+    long_results: dict[str, DriverPassResult] = {}
     operations = determine_operations(args)
-    rodinia_built = False
 
     for app in app_config["apps"]:
         if args.app != "all" and app["name"] != args.app:
@@ -588,71 +608,67 @@ def run_all(app_config: dict, swaps_dict: dict[str, SwapConfig] | None, env: dic
             driver_passes.extend([swap for swap in swaps_dict.values()
                             if swap.app_name == app["name"]])
         for driver_pass in driver_passes:
-            pass_results, rodinia_built = run_driver_pass(app, env, args, rodinia_built,
-                                                          swap_config=driver_pass)
+            pass_results = run_driver_pass(app, env, args, swap_config=driver_pass)
             results[app_name].update_from_pass_result(pass_results, driver_pass is not None)
-    return results, operations
+            long_results[app_name] = pass_results
+    return results, operations, long_results
 
 
-def run_driver_pass(app: dict, env: dict, args: argparse.Namespace, rodinia_built: bool,
-                    swap_config: SwapConfig | None = None) -> tuple[DriverPassResult, bool]:
-    """Run a driver pass. Returns the results and the updated rodinia_built flag."""
-    results = DriverPassResult()
+def run_driver_pass(app: dict, env: dict, args: argparse.Namespace,
+                    swap_config: SwapConfig | None = None) -> DriverPassResult:
+    """Run a driver pass. Returns the results."""
+    result = DriverPassResult()
+    result.app_name = app["name"]
+    result.run_num = swap_config.run_num if swap_config else None
+    result.swap_num = swap_config.optimized_code_num if swap_config else None
+    result.swap_file_src_path = swap_config.swap_file_src_path if swap_config else None
     if not args.postprocess_nsys:
         if swap_config:
             swap_file_in_app(app, swap_config)
 
-        # Build
-        # For Rodinia, all apps are built at once, so only need to build once. If the first
-        # build fails, error out to avoid repeatedly failing to build the same apps. If the
-        # build succeeds, check if the app binary exists and is executable to determine build
-        # success for each rodinia app.
-        if "rodinia" not in app["path"] or not rodinia_built:
-            build_success = build_app(app, args.sm_version, args.no_clean, env)
-            if "rodinia" in app["path"]:
-                if not build_success:
-                    raise ValueError("Failed to build Rodinia apps, exiting now.")
-                rodinia_built = True
-            else:
-                results.build = build_success
+        build_success = build_app(app, args.sm_version, args.no_clean, env)
+        bin_path = os.path.join(app["path"], app["run_command"].split()[0])
+        result.build = os.path.exists(bin_path) and os.access(bin_path, os.X_OK) and build_success
 
-        if "rodinia" in app["path"]: # Rodinia apps will always be built by this point
-            bin_path = os.path.join(app["path"], app["run_command"].split()[0])
-            results.build = os.path.exists(bin_path) and os.access(bin_path, os.X_OK)
-
-        if args.build or results.build is False:
+        if args.build or result.build is False:
             if swap_config:
                 swap_file_out_app(app)
-            return results, rodinia_built
+            return result
 
         # Run
-        run_success, result = run_app(app, env)
-        results.run = run_success
+        run_success, run_result = run_app(app, env)
+        result.run = run_success
 
         # Validate
-        validate_success = validate_app(app, result)
+        validate_success = validate_app(app, run_result)
         print(f"Validate success: {validate_success}")
-        results.validate = validate_success
+        result.validate = validate_success
 
         # NSYS Profile
         if args.nsys:
             nsys_success = nsys_profile_app(app, env)
-            results.nsys_profile = nsys_success
+            result.nsys_profile = nsys_success
 
         # NCU Profile
         if args.ncu:
             ncu_success = ncu_profile_app(app, env)
-            results.ncu_profile = ncu_success
+            result.ncu_profile = ncu_success
 
         if swap_config:
             swap_file_out_app(app)
 
     if args.postprocess_nsys or args.nsys:
         postprocess_nsys_result = postprocess_nsys_app(app, env)
-        results.nsys_post = postprocess_nsys_result is not None
-        results.nsys_data = postprocess_nsys_result
+        result.nsys_post = postprocess_nsys_result is not None
+        result.nsys_data = postprocess_nsys_result
 
-    return results, rodinia_built
+    return result
+
+
+def save_results(long_results: dict[str, DriverPassResult], output_file: str) -> None:
+    """Save the long results to a JSON file."""
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump([result.to_dict() for result in long_results.values()], f, indent=4)
 
 
 def parse_args() -> argparse.Namespace:
@@ -678,6 +694,8 @@ def parse_args() -> argparse.Namespace:
                             + "swap for is set in the config file")
     parser.add_argument("--postprocess-nsys", action="store_true",
                         help="Postprocess the nsys-rep file(s) only, do not run the application")
+    parser.add_argument("--output-file", type=str, default="driver_results.json",
+                        help="The file to save the long results to")
     return parser.parse_args()
 
 
@@ -689,9 +707,11 @@ def main() -> None:
 
     app_config, swaps_dict, env = setup_app_config(args)
 
-    results, operations = run_all(app_config, swaps_dict, env, args)
+    results, operations, long_results = run_all(app_config, swaps_dict, env, args)
 
     print_report_table(results, operations)
+
+    save_results(long_results, args.output_file)
 
 
 if __name__ == "__main__":
