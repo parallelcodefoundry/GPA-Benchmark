@@ -11,6 +11,7 @@ module load cuda/gcc/11.3.0/zen2/12.3.0
 . ~/scratch/spack/share/spack/setup-env.sh
 spack load nvhpc
 cd ~/scratch/llms4hpc/GPA-Benchmark
+. .venv/bin/activate
 
 driver_srun() {
     srun -n 1 -c 8 --gpus-per-task 1 --exact ./driver.py --app "$1" --nsys --swaps ~/scratch/llms4hpc/gpa-bench-nodr --output-file nodr-"$1".json --no-progress &
