@@ -244,6 +244,7 @@ def swap_file_out_app(app: dict) -> None:
     dest_path = app["replace_file"]
     backup_path = dest_path + ".bak"
     shutil.copy(backup_path, dest_path)
+    os.remove(backup_path)
 
 
 def subprocess_wrapper(command: list[str], cwd: str, env: dict,
@@ -264,7 +265,9 @@ def build_app(app: dict, sm_version: int, no_clean: bool, env: dict) -> bool:
         clean_result = subprocess_wrapper(app["clean_command"].split() if "clean_command" in app \
             else ["make", "clean"], build_path, env, quiet=True)
         if clean_result.returncode != 0:
-            return False
+            # Directly remove executable if make clean fails
+            if os.path.exists(os.path.join(build_path, app["run_command"].split()[0])):
+                os.remove(os.path.join(build_path, app["run_command"].split()[0]))
     build_command = ["make", "-j", "8"]
     if "build_command" in app:
         build_command = app["build_command"].split()
@@ -590,10 +593,10 @@ def determine_operations(args: argparse.Namespace) -> list[Operation]:
 
 def run_all(app_config: dict, swaps_dict: dict[str, SwapConfig] | None, env: dict,
             args: argparse.Namespace) -> tuple[dict[str, AppResults], list[Operation],
-                                               dict[str, DriverPassResult]]:
+                                               dict[str, list[DriverPassResult]]]:
     """Run the applications."""
     results: dict[str, AppResults] = {}
-    long_results: dict[str, DriverPassResult] = {}
+    long_results: dict[str, list[DriverPassResult]] = {}
     operations = determine_operations(args)
 
     for app in app_config["apps"]:
@@ -602,6 +605,7 @@ def run_all(app_config: dict, swaps_dict: dict[str, SwapConfig] | None, env: dic
 
         app_name = app["name"]
         results[app_name] = AppResults()
+        long_results[app_name] = []
 
         driver_passes: list[SwapConfig | None] = [None]
         if swaps_dict:
@@ -610,7 +614,7 @@ def run_all(app_config: dict, swaps_dict: dict[str, SwapConfig] | None, env: dic
         for driver_pass in driver_passes:
             pass_results = run_driver_pass(app, env, args, swap_config=driver_pass)
             results[app_name].update_from_pass_result(pass_results, driver_pass is not None)
-            long_results[app_name] = pass_results
+            long_results[app_name].append(pass_results)
     return results, operations, long_results
 
 
@@ -626,36 +630,37 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace,
         if swap_config:
             swap_file_in_app(app, swap_config)
 
-        build_success = build_app(app, args.sm_version, args.no_clean, env)
-        bin_path = os.path.join(app["path"], app["run_command"].split()[0])
-        result.build = os.path.exists(bin_path) and os.access(bin_path, os.X_OK) and build_success
+        try:
+            build_success = build_app(app, args.sm_version, args.no_clean, env)
+            bin_path = os.path.join(app["path"], app["run_command"].split()[0])
+            result.build = os.path.exists(bin_path) and os.access(bin_path, os.X_OK) \
+                and build_success
 
-        if args.build or result.build is False:
+            if args.build or result.build is False:
+                return result
+
+            # Run
+            run_success, run_result = run_app(app, env)
+            result.run = run_success
+
+            # Validate
+            validate_success = validate_app(app, run_result)
+            print(f"Validate success: {validate_success}")
+            result.validate = validate_success
+
+            # NSYS Profile
+            if args.nsys:
+                nsys_success = nsys_profile_app(app, env)
+                result.nsys_profile = nsys_success
+
+            # NCU Profile
+            if args.ncu:
+                ncu_success = ncu_profile_app(app, env)
+                result.ncu_profile = ncu_success
+
+        finally:
             if swap_config:
                 swap_file_out_app(app)
-            return result
-
-        # Run
-        run_success, run_result = run_app(app, env)
-        result.run = run_success
-
-        # Validate
-        validate_success = validate_app(app, run_result)
-        print(f"Validate success: {validate_success}")
-        result.validate = validate_success
-
-        # NSYS Profile
-        if args.nsys:
-            nsys_success = nsys_profile_app(app, env)
-            result.nsys_profile = nsys_success
-
-        # NCU Profile
-        if args.ncu:
-            ncu_success = ncu_profile_app(app, env)
-            result.ncu_profile = ncu_success
-
-        if swap_config:
-            swap_file_out_app(app)
 
     if args.postprocess_nsys or args.nsys:
         postprocess_nsys_result = postprocess_nsys_app(app, env)
@@ -665,10 +670,11 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace,
     return result
 
 
-def save_results(long_results: dict[str, DriverPassResult], output_file: str) -> None:
+def save_results(long_results: dict[str, list[DriverPassResult]], output_file: str) -> None:
     """Save the long results to a JSON file."""
     with open(output_file, "w", encoding="utf-8") as f:
-        json.dump([result.to_dict() for result in long_results.values()], f, indent=4)
+        json.dump([result.to_dict() for results in long_results.values() for result in results],
+                  f, indent=4)
 
 
 def parse_args() -> argparse.Namespace:
