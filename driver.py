@@ -289,6 +289,13 @@ def subprocess_wrapper(command: list[str], cwd: str, env: dict,
     return result
 
 
+def get_bin_path(app: dict) -> str:
+    """Get the binary path for the application."""
+    if "run_path" in app:
+        return os.path.join(app["run_path"], app["run_command"].split()[0])
+    return os.path.join(app["path"], app["run_command"].split()[0])
+
+
 def build_app(app: dict, sm_version: int, no_clean: bool,
               env: dict, verbose: int = 0) -> tuple[bool, subprocess.CompletedProcess]:
     """Build the application. Returns True if successful, False otherwise."""
@@ -298,9 +305,9 @@ def build_app(app: dict, sm_version: int, no_clean: bool,
             else ["make", "clean"], build_path, env, quiet=True, verbose=verbose)
         if clean_result.returncode != 0:
             # Directly remove executable if make clean fails
-            exe_path = os.path.join(build_path, app["run_command"].split()[0])
-            if os.path.exists(exe_path):
-                os.remove(exe_path)
+            bin_path = get_bin_path(app)
+            if os.path.exists(bin_path):
+                os.remove(bin_path)
     build_command = ["make", "-j", "8"]
     if "build_command" in app:
         build_command = app["build_command"].split()
@@ -673,11 +680,13 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace,
             # Capture build stdout and stderr
             result.build_stdout = build_result.stdout.decode("utf-8")
             result.build_stderr = build_result.stderr.decode("utf-8")
-            bin_path = os.path.join(app["path"], app["run_command"].split()[0])
+            bin_path = get_bin_path(app)
             result.build = build_success and os.path.exists(bin_path) \
                 and os.access(bin_path, os.X_OK)
 
             if args.build or result.build is False:
+                if swap_config is None:
+                    raise ValueError(f"Build failed for baseline ({app['name']})")
                 return result
 
             # Run
@@ -687,10 +696,20 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace,
             result.run_stderr = run_result.stderr.decode("utf-8")
             result.run = run_success
 
+            if result.run is False:
+                if swap_config is None:
+                    raise ValueError(f"Run failed for baseline ({app['name']})")
+                return result
+
             # Validate
             validate_success = validate_app(app, run_result)
             print(f"Validate success: {validate_success}")
             result.validate = validate_success
+
+            if result.validate is False:
+                if swap_config is None:
+                    raise ValueError(f"Validation failed for baseline ({app['name']})")
+                return result
 
             # NSYS Profile
             if args.nsys:
@@ -706,7 +725,7 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace,
             if swap_config:
                 swap_file_out_app(app)
 
-    if args.postprocess_nsys or args.nsys:
+    if args.postprocess_nsys or (args.nsys and result.nsys_profile):
         postprocess_nsys_result = postprocess_nsys_app(app, env, verbose)
         result.nsys_post = postprocess_nsys_result is not None
         result.nsys_data = postprocess_nsys_result

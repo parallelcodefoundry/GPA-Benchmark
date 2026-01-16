@@ -15,8 +15,7 @@ apps:
 
 - name: lulesh
   kernel_name: ApplyMaterialPropertiesAndUpdateVolume_kernel
-  path: LULESH
-  build_path: LULESH/cuda/src
+  path: LULESH/cuda/src
   clean_command: make -f ../build/Makefile clean
   build_command: make -f ../build/Makefile -j 8
   run_command: ./lulesh -s 45
@@ -27,8 +26,7 @@ apps:
 
 - name: xsbench
   kernel_name: xs_lookup_kernel
-  path: XSBench
-  build_path: XSBench/cuda
+  path: XSBench/cuda
   clean_command: make clean
   build_command: make -j 8
   run_command: ./XSBench -m event -s large
