@@ -74,6 +74,10 @@ class DriverPassResult:
     ncu_profile: bool | None = None
     nsys_post: bool | None = None
     nsys_data: dict[str, str | int | float | None] | None = None
+    build_stdout: str | None = None
+    build_stderr: str | None = None
+    run_stdout: str | None = None
+    run_stderr: str | None = None
 
     def to_dict(self) -> dict[str, str | bool | dict[str, str | int | float | None] | None]:
         """Convert the results to a dictionary."""
@@ -89,6 +93,10 @@ class DriverPassResult:
             "ncu_profile": self.ncu_profile,
             "nsys_post": self.nsys_post,
             "nsys_data": self.nsys_data,
+            "build_stdout": self.build_stdout,
+            "build_stderr": self.build_stderr,
+            "run_stdout": self.run_stdout,
+            "run_stderr": self.run_stderr,
         }
 
 
@@ -248,23 +256,45 @@ def swap_file_out_app(app: dict) -> None:
 
 
 def subprocess_wrapper(command: list[str], cwd: str, env: dict,
-                       quiet: bool = False) -> subprocess.CompletedProcess:
-    """Wrapper for subprocess.run to capture stdout and stderr, print command before running."""
+                       quiet: bool = False, verbose: int = 0) -> subprocess.CompletedProcess:
+    """Wrapper for subprocess.run to capture stdout and stderr, print command before running.
+
+    Args:
+        command: Command to run
+        cwd: Working directory
+        env: Environment variables
+        quiet: If True, suppress default output
+        verbose: Verbosity level (0=default, 1=-v, 2=-vv)
+            - 0: Default behavior (never print stdout or stderr)
+            - 1: Print stderr on failure (except when quiet=True)
+            - 2: Always print stdout and stderr (even when quiet=True)
+    """
     print(f"Running command {' '.join(command)} in directory {cwd}")
     result = subprocess.run(command, cwd=cwd, env=env, check=False, capture_output=True)
-    if not quiet:
+
+    if verbose >= 2:
+        # -vv: Always print stdout and stderr, even with quiet=True
         print(result.stdout.decode("utf-8"))
-    print(result.stderr.decode("utf-8"))
+        print(result.stderr.decode("utf-8"))
+    elif verbose >= 1:
+        # -v: Print stderr only on failure, unless quiet=True (then don't print anything)
+        if not quiet:
+            print(result.stdout.decode("utf-8"))
+            if result.returncode != 0:
+                print(result.stderr.decode("utf-8"))
+        # If quiet=True, don't print anything even with -v
+    # else: Default behavior (verbose=0): never print stdout or stderr
+
     return result
 
 
 def build_app(app: dict, sm_version: int, no_clean: bool,
-              env: dict) -> tuple[bool, subprocess.CompletedProcess]:
+              env: dict, verbose: int = 0) -> tuple[bool, subprocess.CompletedProcess]:
     """Build the application. Returns True if successful, False otherwise."""
     build_path = app["path"] if "build_path" not in app else app["build_path"]
     if not no_clean:
         clean_result = subprocess_wrapper(app["clean_command"].split() if "clean_command" in app \
-            else ["make", "clean"], build_path, env, quiet=True)
+            else ["make", "clean"], build_path, env, quiet=True, verbose=verbose)
         if clean_result.returncode != 0:
             # Directly remove executable if make clean fails
             exe_path = os.path.join(build_path, app["run_command"].split()[0])
@@ -274,7 +304,7 @@ def build_app(app: dict, sm_version: int, no_clean: bool,
     if "build_command" in app:
         build_command = app["build_command"].split()
     build_command.append(f"SM_VERSION={sm_version}")
-    result = subprocess_wrapper(build_command, build_path, env)
+    result = subprocess_wrapper(build_command, build_path, env, verbose=verbose)
     return result.returncode == 0, result
 
 
@@ -355,7 +385,7 @@ def validate_float(test_output: str, app: dict, ref_output: str) -> bool:
         return False
 
 
-def run_app(app: dict, env: dict) -> tuple[bool, subprocess.CompletedProcess]:
+def run_app(app: dict, env: dict, verbose: int = 0) -> tuple[bool, subprocess.CompletedProcess]:
     """Run the application. Returns True if successful, False otherwise, and the result of the run.
        If the application has a test output file, remove it before running.
     """
@@ -369,11 +399,11 @@ def run_app(app: dict, env: dict) -> tuple[bool, subprocess.CompletedProcess]:
     else:
         run_path = app["path"]
     run_command = app["run_command"].split()
-    result = subprocess_wrapper(run_command, run_path, env)
+    result = subprocess_wrapper(run_command, run_path, env, verbose=verbose)
     return result.returncode == 0, result
 
 
-def nsys_profile_app(app: dict, env: dict) -> bool:
+def nsys_profile_app(app: dict, env: dict, verbose: int = 0) -> bool:
     """Profile the application with Nsight Systems. Returns True if successful, False otherwise."""
     profile_dir = setup_profile_dir()
     nsys_command = ["nsys", "profile", "-o", os.path.join(profile_dir, app["name"]), "-f", "true"]
@@ -384,11 +414,12 @@ def nsys_profile_app(app: dict, env: dict) -> bool:
         run_path = app["build_path"]
     else:
         run_path = app["path"]
-    return subprocess_wrapper(nsys_command, run_path, env).returncode == 0 \
+    return subprocess_wrapper(nsys_command, run_path, env, verbose=verbose).returncode == 0 \
         and os.path.exists(os.path.join(profile_dir, app["name"] + ".nsys-rep"))
 
 
-def postprocess_nsys_app(app: dict, env: dict) -> dict[str, str | int | float | None] | None:
+def postprocess_nsys_app(app: dict, env: dict,
+                         verbose: int = 0) -> dict[str, str | int | float | None] | None:
     """Postprocess the Nsight Systems profile. Returns True if successful, False otherwise."""
     profile_dir = setup_profile_dir()
 
@@ -399,7 +430,7 @@ def postprocess_nsys_app(app: dict, env: dict) -> dict[str, str | int | float | 
             + f"{app['name']}")
         return None
     postprocess_command = ["nsys", "export","-f", "true", "-t", "sqlite", nsys_rep_file]
-    if subprocess_wrapper(postprocess_command, profile_dir, env).returncode != 0:
+    if subprocess_wrapper(postprocess_command, profile_dir, env, verbose=verbose).returncode != 0:
         print(f"Warning: could not postprocess Nsight Systems profile file {nsys_rep_file} for " \
             + f"{app['name']}")
         return None
@@ -448,7 +479,7 @@ def postprocess_nsys_app(app: dict, env: dict) -> dict[str, str | int | float | 
     return kernel_row.to_dict()
 
 
-def ncu_profile_app(app: dict, env: dict) -> bool:
+def ncu_profile_app(app: dict, env: dict, verbose: int = 0) -> bool:
     """Profile the application with Nsight Compute. Returns True if successful, False otherwise."""
     profile_dir = setup_profile_dir()
     ncu_command = ["ncu", "-o", os.path.join(profile_dir, app["name"]), "-f"]
@@ -462,7 +493,7 @@ def ncu_profile_app(app: dict, env: dict) -> bool:
         run_path = app["build_path"]
     else:
         run_path = app["path"]
-    return subprocess_wrapper(ncu_command, run_path, env).returncode == 0 \
+    return subprocess_wrapper(ncu_command, run_path, env, verbose=verbose).returncode == 0 \
         and os.path.exists(os.path.join(profile_dir, app["name"] + ".ncu-rep"))
 
 
@@ -629,12 +660,18 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace,
     result.run_num = swap_config.run_num if swap_config else None
     result.swap_num = swap_config.optimized_code_num if swap_config else None
     result.swap_file_src_path = swap_config.swap_file_src_path if swap_config else None
+    verbose = getattr(args, 'verbose', 0)
+
     if not args.postprocess_nsys:
         if swap_config:
             swap_file_in_app(app, swap_config)
 
         try:
-            build_success, build_result = build_app(app, args.sm_version, args.no_clean, env)
+            build_success, build_result = build_app(app, args.sm_version, args.no_clean, env,
+                                                    verbose)
+            # Capture build stdout and stderr
+            result.build_stdout = build_result.stdout.decode("utf-8")
+            result.build_stderr = build_result.stderr.decode("utf-8")
             bin_path = os.path.join(app["path"], app["run_command"].split()[0])
             result.build = build_success and os.path.exists(bin_path) \
                 and os.access(bin_path, os.X_OK)
@@ -643,7 +680,10 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace,
                 return result
 
             # Run
-            run_success, run_result = run_app(app, env)
+            run_success, run_result = run_app(app, env, verbose)
+            # Capture run stdout and stderr
+            result.run_stdout = run_result.stdout.decode("utf-8")
+            result.run_stderr = run_result.stderr.decode("utf-8")
             result.run = run_success
 
             # Validate
@@ -653,12 +693,12 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace,
 
             # NSYS Profile
             if args.nsys:
-                nsys_success = nsys_profile_app(app, env)
+                nsys_success = nsys_profile_app(app, env, verbose)
                 result.nsys_profile = nsys_success
 
             # NCU Profile
             if args.ncu:
-                ncu_success = ncu_profile_app(app, env)
+                ncu_success = ncu_profile_app(app, env, verbose)
                 result.ncu_profile = ncu_success
 
         finally:
@@ -666,7 +706,7 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace,
                 swap_file_out_app(app)
 
     if args.postprocess_nsys or args.nsys:
-        postprocess_nsys_result = postprocess_nsys_app(app, env)
+        postprocess_nsys_result = postprocess_nsys_app(app, env, verbose)
         result.nsys_post = postprocess_nsys_result is not None
         result.nsys_data = postprocess_nsys_result
 
@@ -705,6 +745,9 @@ def parse_args() -> argparse.Namespace:
                         help="Postprocess the nsys-rep file(s) only, do not run the application")
     parser.add_argument("--output-file", type=str, default="driver_results.json",
                         help="The file to save the long results to")
+    parser.add_argument("-v", "--verbose", action="count", default=0,
+                        help="Increase verbosity: -v outputs stderr on failure (except when "
+                        + "quiet=True), -vv always outputs stdout and stderr")
     return parser.parse_args()
 
 
