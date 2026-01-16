@@ -4,16 +4,16 @@
 #SBATCH -c 8
 #SBATCH -p gpu
 #SBATCH --gpus-per-task=h100:1
+#SBATCH -J drive-gpa
+#SBATCH -o drive-gpa-%j.out
 
 module load cuda/gcc/11.3.0/zen2/12.3.0
 . ~/scratch/spack/share/spack/setup-env.sh
 spack load nvhpc
 cd ~/scratch/llms4hpc/GPA-Benchmark
 
-ID=0
 driver_srun() {
-    LOCAL_ID=$((ID++))
-    srun -N 1 -n 1 -c 8 --gpus-per-task 1 -r $LOCAL_ID ./driver.py --app "$1" --nsys --swaps ~/scratch/llms4hpc/gpa-bench-nodr --output-file nodr-"$1".json &
+    srun -n 1 -c 8 --gpus-per-task 1 --exact ./driver.py --app "$1" --nsys --swaps ~/scratch/llms4hpc/gpa-bench-nodr --output-file nodr-"$1".json --no-progress &
 }
 
 driver_srun backprop
