@@ -462,12 +462,13 @@ def postprocess_nsys_app(app: dict, env: dict,
     # Find kernel of interest using ncu_args
     kernel_name = app["kernel_name"]
     launch_skip = 0
-    ncu_args = app["ncu_args"].split()
-    for i,arg in enumerate(ncu_args):
-        if arg == "-k" or arg == "--kernel-name":
-            kernel_name = ncu_args[i+1]
-        if arg == "--launch-skip":
-            launch_skip = int(ncu_args[i+1])
+    if "ncu_args" in app:
+        ncu_args = app["ncu_args"].split()
+        for i, arg in enumerate(ncu_args):
+            if arg == "-k" or arg == "--kernel-name":
+                kernel_name = ncu_args[i+1]
+            if arg == "--launch-skip":
+                launch_skip = int(ncu_args[i+1])
 
     # Get the row of interest: launch_skip-th invocation of kernel_name
     try:
@@ -740,11 +741,35 @@ def save_results(long_results: dict[str, list[DriverPassResult]], output_file: s
                   f, indent=4)
 
 
+def detect_sm_version() -> int:
+    """Detect SM version from nvidia-smi. Returns the SM version as a two-digit integer.
+
+    If detection fails, prints a warning and returns 90 as default.
+    """
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        # Get the first line and remove whitespace
+        compute_cap = result.stdout.strip().split('\n')[0].strip()
+        # Remove decimal point (e.g., "9.0" -> "90")
+        sm_version_str = compute_cap.replace('.', '')
+        sm_version = int(sm_version_str)
+        return sm_version
+    except (subprocess.CalledProcessError, ValueError, IndexError, FileNotFoundError) as e:
+        print(f"Warning: Could not detect SM version from nvidia-smi ({e}). Defaulting to 90.")
+        return 90
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--app", type=str, default="all", help="The application to run")
-    parser.add_argument("--sm-version", type=int, default=90, help="The SM version to use")
+    parser.add_argument("--sm-version", type=int, default=None,
+                        help="The SM version to use (default: auto-detect from nvidia-smi)")
     parser.add_argument("--cuda-home", type=str, default=None,
                         help="Path to the CUDA installation to use")
     parser.add_argument("--no-clean", action="store_true",
@@ -777,6 +802,10 @@ def main() -> None:
     print("Start driver.py")
 
     args = parse_args()
+
+    # Auto-detect SM version if not provided
+    if args.sm_version is None:
+        args.sm_version = detect_sm_version()
 
     app_config, swaps_dict, env = setup_app_config(args)
 
