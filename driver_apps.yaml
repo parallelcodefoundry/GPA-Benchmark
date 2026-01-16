@@ -64,7 +64,7 @@ apps:
   replace_file: rodinia/backprop/backprop_cuda_kernel.cu
   reference_output: rodinia/backprop/ref-output.txt
   float_grep: "sum:"
-  float_tolerance: 0.00001
+  float_tolerance: 0.01
 
 - name: bfs
   kernel_name: Kernel

@@ -19,6 +19,7 @@ from typing import Optional
 import sqlite3
 import yaml
 import pandas as pd
+from alive_progress import alive_bar
 
 
 NCU_ARGS = ["--metrics",
@@ -469,13 +470,6 @@ def postprocess_nsys_app(app: dict, env: dict,
             + f"{app['name']} at launch skip {launch_skip}")
         return None
 
-    # Export the row of interest to a CSV file with header row from column name of df
-    #if swaps:
-    #    csv_name = os.path.join(swaps, app["name"] + ".csv")
-    #else:
-    #    csv_name = os.path.join(profile_dir, app["name"] + ".csv")
-    #kernel_row.to_csv(csv_name, index=False)
-
     return kernel_row.to_dict()
 
 
@@ -633,22 +627,29 @@ def run_all(app_config: dict, swaps_dict: dict[str, SwapConfig] | None, env: dic
     long_results: dict[str, list[DriverPassResult]] = {}
     operations = determine_operations(args)
 
-    for app in app_config["apps"]:
-        if args.app != "all" and app["name"] != args.app:
-            continue
+    num_apps = len(app_config["apps"]) if args.app == "all" else 1
+    if swaps_dict:
+        num_apps = len(set([swap.app_name for swap in swaps_dict.values()]))
+    num_runs = num_apps + len(swaps_dict.values()) if swaps_dict else 0
+    with alive_bar(num_runs) as pbar:
+        for app in app_config["apps"]:
+            if args.app != "all" and app["name"] != args.app:
+                continue
 
-        app_name = app["name"]
-        results[app_name] = AppResults()
-        long_results[app_name] = []
+            app_name = app["name"]
+            results[app_name] = AppResults()
+            long_results[app_name] = []
 
-        driver_passes: list[SwapConfig | None] = [None]
-        if swaps_dict:
-            driver_passes.extend([swap for swap in swaps_dict.values()
-                            if swap.app_name == app["name"]])
-        for driver_pass in driver_passes:
-            pass_results = run_driver_pass(app, env, args, swap_config=driver_pass)
-            results[app_name].update_from_pass_result(pass_results, driver_pass is not None)
-            long_results[app_name].append(pass_results)
+            driver_passes: list[SwapConfig | None] = [None]
+            if swaps_dict:
+                driver_passes.extend([swap for swap in swaps_dict.values()
+                                if swap.app_name == app["name"]])
+            for driver_pass in driver_passes:
+                pass_results = run_driver_pass(app, env, args, swap_config=driver_pass)
+                results[app_name].update_from_pass_result(pass_results, driver_pass is not None)
+                long_results[app_name].append(pass_results)
+                pbar() # pylint: disable=not-callable
+
     return results, operations, long_results
 
 
@@ -748,6 +749,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("-v", "--verbose", action="count", default=0,
                         help="Increase verbosity: -v outputs stderr on failure (except when "
                         + "quiet=True), -vv always outputs stdout and stderr")
+    parser.add_argument("--no-progress", action="store_true", help="Do not display a progress bar")
     return parser.parse_args()
 
 
