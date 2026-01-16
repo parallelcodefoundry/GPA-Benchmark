@@ -202,7 +202,7 @@ def nsys_profile_app(app: dict, env: dict) -> bool:
         and os.path.exists(os.path.join(profile_dir, app["name"] + ".nsys-rep"))
 
 
-def postprocess_nsys_app(app: dict, swaps: str | None, env: dict) -> bool:
+def postprocess_nsys_app(app: dict, env: dict) -> dict[str, str | int | float] | None:
     """Postprocess the Nsight Systems profile. Returns True if successful, False otherwise."""
     profile_dir = setup_profile_dir()
 
@@ -211,17 +211,17 @@ def postprocess_nsys_app(app: dict, swaps: str | None, env: dict) -> bool:
     if not os.path.exists(nsys_rep_file):
         print(f"Warning: could not find Nsight Systems profile file {nsys_rep_file} for " \
             + f"{app['name']}")
-        return False
+        return None
     postprocess_command = ["nsys", "export","-f", "true", "-t", "sqlite", nsys_rep_file]
     if subprocess_wrapper(postprocess_command, profile_dir, env).returncode != 0:
         print(f"Warning: could not postprocess Nsight Systems profile file {nsys_rep_file} for " \
             + f"{app['name']}")
-        return False
+        return None
 
     sqlite_file = os.path.join(profile_dir, app["name"] + ".sqlite")
     if not os.path.exists(sqlite_file):
         print(f"Warning: could not find sqlite file {sqlite_file} for {app['name']}")
-        return False
+        return None
 
     # Read sqlite file into pandas dataframes
     conn = sqlite3.connect(sqlite_file)
@@ -233,9 +233,6 @@ def postprocess_nsys_app(app: dict, swaps: str | None, env: dict) -> bool:
     df["demangledName"] = df["demangledName"].map(string_ids.set_index("id")["value"])
     df["shortName"] = df["shortName"].map(string_ids.set_index("id")["value"])
     df["mangledName"] = df["mangledName"].map(string_ids.set_index("id")["value"])
-
-    # Write temp csv file for debugging
-    df.to_csv(os.path.join(profile_dir, app["name"] + "_debug.csv"), index=False)
 
     # Find kernel of interest using ncu_args
     kernel_name = app["kernel_name"]
@@ -253,16 +250,16 @@ def postprocess_nsys_app(app: dict, swaps: str | None, env: dict) -> bool:
     except IndexError:
         print(f"Warning: could not find kernel {kernel_name} in Nsight Systems profile for " \
             + f"{app['name']} at launch skip {launch_skip}")
-        return False
+        return None
 
     # Export the row of interest to a CSV file with header row from column name of df
-    if swaps:
-        csv_name = os.path.join(swaps, app["name"] + ".csv")
-    else:
-        csv_name = os.path.join(profile_dir, app["name"] + ".csv")
-    kernel_row.to_csv(csv_name, index=False)
+    #if swaps:
+    #    csv_name = os.path.join(swaps, app["name"] + ".csv")
+    #else:
+    #    csv_name = os.path.join(profile_dir, app["name"] + ".csv")
+    #kernel_row.to_csv(csv_name, index=False)
 
-    return True
+    return kernel_row.to_dict()
 
 
 def ncu_profile_app(app: dict, env: dict) -> bool:
@@ -354,8 +351,13 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def setup_app_config(args: argparse.Namespace) -> tuple[dict, str | None, dict]:
+def setup_app_config(args: argparse.Namespace) -> tuple[dict, dict | None, dict]:
     """Setup the application configuration."""
+    if args.postprocess_nsys and (args.nsys or args.swaps or args.ncu or args.build):
+        raise ValueError("Cannot postprocess Nsight Systems profiles only if other operations " \
+            + "are specified.")
+    if args.build and (args.nsys or args.ncu or args.swaps or args.postprocess_nsys):
+        raise ValueError("Cannot build applications only if other operations are specified.")
     app_config: dict = yaml.safe_load(open(args.config, "r", encoding="utf-8"))
     if args.app != "all" and args.app not in [app["name"] for app in app_config["apps"]]:
         raise ValueError(f"Application {args.app} not found in config file {args.config}")
@@ -366,7 +368,37 @@ def setup_app_config(args: argparse.Namespace) -> tuple[dict, str | None, dict]:
                  "/usr/local/cuda")
     env = os.environ.copy()
     env["CUDA_HOME"] = cuda_home
-    return app_config, args.swaps, env
+    if args.swaps:
+        swaps_dict = build_swaps_dict(args.swaps)
+        return app_config, swaps_dict, env
+    else:
+        return app_config, None, env
+
+
+def build_swaps_dict(swaps: str) -> dict[str, dict[str, str]]:
+    """Build the swaps dictionary."""
+    swaps_dict: dict[str, dict[str, str]] = {}
+    for root, _, files in os.walk(swaps):
+        for file in files:
+            if match := re.match(r"run_(\d+)_optimized_code_(\d+)\.cu", file):
+                run_num = match.group(1)
+                optimized_code_num = match.group(2)
+                # App name is everything before the last _ in the directory three levels up
+                app_name = "_".join(root.split("/")[-3].split("_")[:-1])
+                full_path = os.path.join(root, file)
+                with open(full_path, "r", encoding="utf-8") as f:
+                    code = f.read()
+                # First line is automatically generated, ends with file name
+                swap_file_name = code.splitlines()[0].split(" ")[-1]
+                rest_of_code = "\n".join(code.splitlines()[1:])
+                swaps_dict[full_path] = {
+                    "app_name": app_name,
+                    "swap_file_name": swap_file_name,
+                    "run_num": run_num,
+                    "optimized_code_num": optimized_code_num,
+                    "code": rest_of_code
+                }
+    return swaps_dict
 
 
 def determine_operations(args: argparse.Namespace) -> list[str]:
@@ -383,23 +415,27 @@ def determine_operations(args: argparse.Namespace) -> list[str]:
         operations.append("NSYS Post")
     if args.ncu:
         operations.append("NCU Profile")
+    if args.swaps:
+        operations.append("Swap Builds")
+        if not args.build:
+            operations.append("Swap Runs")
+            operations.append("Swap Valid")
+            if args.nsys:
+                operations.append("Swap NSYS")
+            if args.ncu:
+                operations.append("Swap NCU")
+            if args.postprocess_nsys:
+                operations.append("Swap NSYS Post")
+
     return operations
 
 
-def run_apps(app_config: dict, swaps: str | None, env: dict,
-             args: argparse.Namespace) -> tuple[dict[str, dict[str, bool]], list[str]]:
+def run_all(app_config: dict, swaps_dict: dict | None, env: dict,
+            args: argparse.Namespace) -> tuple[dict[str, dict[str, bool | str]], list[str]]:
     """Run the applications."""
-    results: dict[str, dict[str, bool]] = {}
+    results: dict[str, dict[str, bool | str]] = {}
     operations = determine_operations(args)
     rodinia_built = False
-
-    if swaps:
-        swap_files = os.listdir(swaps)
-        if len(swap_files) != len(app_config["apps"]):
-            raise ValueError(f"Number of swap files {len(swap_files)} does not match number of " \
-                + f"apps {len(app_config['apps'])}")
-    else:
-        swap_files = None
 
     for app in app_config["apps"]:
         if args.app != "all" and app["name"] != args.app:
@@ -408,61 +444,113 @@ def run_apps(app_config: dict, swaps: str | None, env: dict,
         app_name = app["name"]
         results[app_name] = {}
 
-        if not args.postprocess_nsys:
-            if swap_files and app["name"] in swap_files:
-                swap_file_in_app(app, args.swaps)
-
-            # Build
-            # For Rodinia, all apps are built at once, so only need to build once. If the first
-            # build fails, error out to avoid repeatedly failing to build the same apps. If the
-            # build succeeds, check if the app binary exists and is executable to determine build
-            # success for each rodinia app.
-            if "rodinia" not in app["path"] or not rodinia_built:
-                build_success = build_app(app, args.sm_version, args.no_clean, env)
-                if "rodinia" in app["path"]:
-                    if not build_success:
-                        raise ValueError("Failed to build Rodinia apps, exiting now.")
-                    rodinia_built = True
-                else:
-                    results[app_name]["Build"] = build_success
-
-            if "rodinia" in app["path"]: # Rodinia apps will always be built by this point
-                bin_path = os.path.join(app["path"], app["run_command"].split()[0])
-                results[app_name]["Build"] = os.path.exists(bin_path) and os.access(bin_path,
-                                                                                    os.X_OK)
-
-            if args.build or not results[app_name]["Build"]:
-                if swap_files and app["name"] in swap_files:
-                    swap_file_out_app(app)
-                continue
-
-            # Run
-            run_success, result = run_app(app, env)
-            results[app_name]["Run"] = run_success
-
-            # Validate
-            validate_success = validate_app(app, result)
-            print(f"Validate success: {validate_success}")
-            results[app_name]["Validate"] = validate_success
-
-            # NSYS Profile
-            if args.nsys:
-                nsys_success = nsys_profile_app(app, env)
-                results[app_name]["NSYS Profile"] = nsys_success
-
-            # NCU Profile
-            if args.ncu:
-                ncu_success = ncu_profile_app(app, env)
-                results[app_name]["NCU Profile"] = ncu_success
-
-            if swap_files and app["name"] in swap_files:
-                swap_file_out_app(app)
-
-        if args.postprocess_nsys or args.nsys:
-            postprocess_nsys_success = postprocess_nsys_app(app, swaps, env)
-            results[app_name]["NSYS Post"] = postprocess_nsys_success
-
+        driver_passes = [None]
+        if swaps_dict:
+            driver_passes.extend([swap for swap in swaps_dict.values()
+                            if swap["app_name"] == app["name"]])
+        for driver_pass in driver_passes:
+            if not driver_pass:
+                results[app_name].update(run_driver_pass(app, env, args, rodinia_built))
+            else:
+                pass_results = run_driver_pass(app, env, args, rodinia_built,
+                                               swap_config=driver_pass)
+                results[app_name].update(merge_swap_results(results[app_name], pass_results))
     return results, operations
+
+
+def merge_swap_results(results: dict[str, str],
+                       pass_results: dict[str, bool]) -> dict[str, str]:
+    """Consolidate the results of a driver pass."""
+    merged_results: dict[str, str] = results.copy()
+    for key, value in pass_results.items():
+        if key == "Build":
+            if "Swap Builds" not in merged_results:
+                merged_results["Swap Builds"] = "1/1" if value else "0/1"
+            else:
+                merged_results["Swap Builds"] = update_str_fraction(merged_results["Swap Builds"],
+                                                                    value)
+        elif key == "Run":
+            if "Swap Runs" not in merged_results:
+                merged_results["Swap Runs"] = "1/1" if value else "0/1"
+            else:
+                merged_results["Swap Runs"] = update_str_fraction(merged_results["Swap Runs"],
+                                                                  value)
+        elif key == "Validate":
+            if "Swap Valid" not in merged_results:
+                merged_results["Swap Valid"] = "1/1" if value else "0/1"
+            else:
+                merged_results["Swap Valid"] = update_str_fraction(merged_results["Swap Valid"],
+                                                                   value)
+    return merged_results
+
+
+def update_str_fraction(fraction: str, value: bool | int) -> str:
+    """Update the fraction string with the new value. Denominator is always incremented, numerator
+       is incremented if value is True.
+    """
+    addend = 1 if value else 0
+    return f"{int(fraction.split('/')[0]) + addend}/{int(fraction.split('/')[1]) + 1}"
+
+
+def run_driver_pass(app: dict, env: dict, args: argparse.Namespace, rodinia_built: bool,
+                    swap_config: dict | None = None) -> dict[str, bool]:
+    """Run a driver pass."""
+    results: dict[str, bool] = {}
+    if not args.postprocess_nsys:
+        if swap_config:
+            swap_file_in_app(app, swap_config)
+
+        # Build
+        # For Rodinia, all apps are built at once, so only need to build once. If the first
+        # build fails, error out to avoid repeatedly failing to build the same apps. If the
+        # build succeeds, check if the app binary exists and is executable to determine build
+        # success for each rodinia app.
+        if "rodinia" not in app["path"] or not rodinia_built:
+            build_success = build_app(app, args.sm_version, args.no_clean, env)
+            if "rodinia" in app["path"]:
+                if not build_success:
+                    raise ValueError("Failed to build Rodinia apps, exiting now.")
+                rodinia_built = True
+            else:
+                results["Build"] = build_success
+
+        if "rodinia" in app["path"]: # Rodinia apps will always be built by this point
+            bin_path = os.path.join(app["path"], app["run_command"].split()[0])
+            results["Build"] = os.path.exists(bin_path) and os.access(bin_path, os.X_OK)
+
+        if args.build or not results["Build"]:
+            if swap_config:
+                swap_file_out_app(app)
+            return results
+
+        # Run
+        run_success, result = run_app(app, env)
+        results["Run"] = run_success
+
+        # Validate
+        validate_success = validate_app(app, result)
+        print(f"Validate success: {validate_success}")
+        results["Validate"] = validate_success
+
+        # NSYS Profile
+        if args.nsys:
+            nsys_success = nsys_profile_app(app, env)
+            results["NSYS Profile"] = nsys_success
+
+        # NCU Profile
+        if args.ncu:
+            ncu_success = ncu_profile_app(app, env)
+            results["NCU Profile"] = ncu_success
+
+        if swap_config:
+            swap_file_out_app(app)
+
+    if args.postprocess_nsys or args.nsys:
+        postprocess_nsys_result = postprocess_nsys_app(app, env)
+        results["NSYS Post"] = postprocess_nsys_result is not None
+        # TODO: store postprocess_nsys_result in results in a manner that is ignored in print_report_table
+
+    return results
 
 
 def main() -> None:
@@ -471,9 +559,9 @@ def main() -> None:
 
     args = parse_args()
 
-    app_config, swap_files, env = setup_app_config(args)
+    app_config, swaps_dict, env = setup_app_config(args)
 
-    results, operations = run_apps(app_config, swap_files, env, args)
+    results, operations = run_all(app_config, swaps_dict, env, args)
 
     print_report_table(results, operations)
 
