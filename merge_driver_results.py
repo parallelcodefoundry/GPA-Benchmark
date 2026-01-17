@@ -25,9 +25,6 @@ def truncate_string(text: str, max_length: int) -> str:
     Returns:
         The truncated string with ellipses indicating removed content
     """
-    if not isinstance(text, str):
-        return text
-
     if len(text) <= max_length:
         return text
 
