@@ -51,7 +51,7 @@ apps:
   path: rodinia/b+tree
   run_command: ./b+tree.out file ../data/b+tree/mil.txt command ../data/b+tree/command.txt
   ncu_args: -k findRangeK
-  replace_file: rodinia/b+tree/kernel_gpu_cuda_2.cu
+  replace_file: rodinia/b+tree/kernel/kernel_gpu_cuda_2.cu
   reference_output: rodinia/b+tree/ref-output.txt
   test_output: rodinia/b+tree/output.txt
 

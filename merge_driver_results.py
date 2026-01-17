@@ -52,15 +52,35 @@ def truncate_string(text: str, max_length: int) -> str:
     return beginning + ellipsis_msg + end
 
 
+def simplify_nsys_data(nsys_data: dict) -> dict:
+    """Simplify nsys_data field by flattening the nested dictionary if necessary.
+
+    Args:
+        nsys_data: The nsys_data field to simplify
+
+    Returns:
+        The simplified nsys_data field
+    """
+    simplified_nsys_data = {}
+
+    for key, value in nsys_data.items():
+        if isinstance(value, dict):
+            simplified_nsys_data[key] = list(value.values())[0]
+        else:
+            simplified_nsys_data[key] = value
+
+    return simplified_nsys_data
+
+
 def process_entry(entry: dict, max_length: int) -> dict:
-    """Process a single entry to truncate stdout/stderr fields.
+    """Process a single entry to truncate stdout/stderr fields and simpify nsys_data field.
 
     Args:
         entry: A driver result entry dictionary
         max_length: Maximum allowed length for stdout/stderr strings
 
     Returns:
-        The entry with truncated stdout/stderr fields
+        The entry with truncated stdout/stderr fields and simplified nsys_data field
     """
     processed_entry = entry.copy()
 
@@ -70,6 +90,10 @@ def process_entry(entry: dict, max_length: int) -> dict:
     for field in stdout_stderr_fields:
         if field in processed_entry and processed_entry[field] is not None:
             processed_entry[field] = truncate_string(processed_entry[field], max_length)
+
+    # Simplify nsys_data field
+    if "nsys_data" in processed_entry and processed_entry["nsys_data"] is not None:
+        processed_entry["nsys_data"] = simplify_nsys_data(processed_entry["nsys_data"])
 
     return processed_entry
 
