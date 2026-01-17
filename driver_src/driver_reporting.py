@@ -6,7 +6,7 @@ This module provides functions for displaying results and saving output to files
 """
 import json
 
-from driver_models import AppResults, Operation, DriverPassResult
+from driver_src.driver_models import AppResults, Operation, DriverPassResult
 
 
 def print_report_table(results: dict[str, AppResults], operations: list[Operation]) -> None:

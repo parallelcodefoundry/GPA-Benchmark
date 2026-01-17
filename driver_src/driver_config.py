@@ -9,8 +9,8 @@ import os
 import argparse
 import yaml
 
-from driver_models import Operation, SwapConfig
-from driver_file_swapping import build_swaps_dict
+from driver_src.driver_models import Operation, SwapConfig
+from driver_src.driver_file_swapping import build_swaps_dict
 
 
 def setup_app_config(args: argparse.Namespace) -> tuple[dict, dict[str, SwapConfig] | None, dict]:

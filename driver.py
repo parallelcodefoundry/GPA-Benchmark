@@ -20,14 +20,14 @@ from contextlib import nullcontext
 
 from alive_progress import alive_bar
 
-from driver_models import Operation, SwapConfig, DriverPassResult, AppResults
-from driver_utils import get_bin_path, detect_sm_version
-from driver_file_swapping import swap_file_in_app, swap_file_out_app
-from driver_validation import validate_app
-from driver_operations import build_app, run_app
-from driver_profiling import nsys_profile_app, ncu_profile_app, postprocess_nsys_app
-from driver_config import setup_app_config, determine_operations
-from driver_reporting import print_report_table, save_results
+from driver_src.driver_models import Operation, SwapConfig, DriverPassResult, AppResults
+from driver_src.driver_utils import get_bin_path, detect_sm_version
+from driver_src.driver_file_swapping import swap_file_in_app, swap_file_out_app
+from driver_src.driver_validation import validate_app
+from driver_src.driver_operations import build_app, run_app
+from driver_src.driver_profiling import nsys_profile_app, ncu_profile_app, postprocess_nsys_app
+from driver_src.driver_config import setup_app_config, determine_operations
+from driver_src.driver_reporting import print_report_table, save_results
 
 
 def run_driver_pass(app: dict, env: dict, args: argparse.Namespace,

@@ -9,7 +9,7 @@ import os
 import re
 import shutil
 
-from driver_models import SwapConfig
+from driver_src.driver_models import SwapConfig
 
 
 def swap_file_in_app(app: dict, swap_config: SwapConfig) -> None:

@@ -7,7 +7,7 @@ This module provides functions for building and running applications.
 import os
 import subprocess
 
-from driver_utils import subprocess_wrapper, get_bin_path, get_run_path
+from driver_src.driver_utils import subprocess_wrapper, get_bin_path, get_run_path
 
 
 def build_app(app: dict, sm_version: int, no_clean: bool,

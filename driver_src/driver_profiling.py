@@ -11,7 +11,7 @@ from collections.abc import Hashable
 import sqlite3
 import pandas as pd
 
-from driver_utils import subprocess_wrapper, setup_profile_dir, get_run_path
+from driver_src.driver_utils import subprocess_wrapper, setup_profile_dir, get_run_path
 
 
 # Default NCU arguments for profiling

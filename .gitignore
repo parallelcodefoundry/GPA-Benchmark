@@ -67,3 +67,4 @@ rodinia/streamcluster-opt/output.txt
 rodinia/streamcluster/output.txt
 
 profiles/
+__pycache__/
