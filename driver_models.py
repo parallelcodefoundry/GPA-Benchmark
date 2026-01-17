@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+"""
+Data Models for GPA-Benchmark Driver
+
+This module defines the data classes, enums, and result structures used throughout
+the driver system.
+"""
+from enum import Enum
+from dataclasses import dataclass
+from typing import Any
+from collections.abc import Hashable
+
+
+class Operation(Enum):
+    """Represents a type of driver operation that can be performed on an application.
+
+    Attributes:
+        BUILD: Build the application
+        RUN: Run the application
+        VALIDATE: Validate the application output
+        NSYS_PROFILE: Profile with Nsight Systems
+        NCU_PROFILE: Profile with Nsight Compute
+        NSYS_POST: Postprocess Nsight Systems profile
+        SWAP_BUILDS: Build operations for swapped code
+        SWAP_RUNS: Run operations for swapped code
+        SWAP_VALID: Validation operations for swapped code
+        SWAP_NSYS: Nsight Systems profiling for swapped code
+        SWAP_NCU: Nsight Compute profiling for swapped code
+        SWAP_NSYS_POST: Nsight Systems postprocessing for swapped code
+    """
+    BUILD = "Build"
+    RUN = "Run"
+    VALIDATE = "Validate"
+    NSYS_PROFILE = "NSYS Profile"
+    NCU_PROFILE = "NCU Profile"
+    NSYS_POST = "NSYS Post"
+    SWAP_BUILDS = "Swap Builds"
+    SWAP_RUNS = "Swap Runs"
+    SWAP_VALID = "Swap Valid"
+    SWAP_NSYS = "Swap NSYS"
+    SWAP_NCU = "Swap NCU"
+    SWAP_NSYS_POST = "Swap NSYS Post"
+
+
+@dataclass
+class SwapConfig:
+    """Represents a swap configuration for replacing code in an application.
+
+    Attributes:
+        app_name: Name of the application
+        swap_file_src_path: Path to the source swap file
+        swap_file_dest_name: Destination filename for the swap
+        run_num: Run number identifier
+        optimized_code_num: Optimized code number identifier
+        code: The code content to swap in
+    """
+    app_name: str
+    swap_file_src_path: str
+    swap_file_dest_name: str
+    run_num: str
+    optimized_code_num: str
+    code: str
+
+
+@dataclass
+class DriverPassResult:
+    """Represents the results of a single driver pass.
+
+    Attributes:
+        app_name: Name of the application
+        run_num: Run number identifier (if from swap)
+        swap_num: Swap number identifier (if from swap)
+        swap_file_src_path: Path to the swap file used (if from swap)
+        build: Whether the build succeeded
+        run: Whether the run succeeded
+        validate: Whether validation succeeded
+        nsys_profile: Whether Nsight Systems profiling succeeded
+        ncu_profile: Whether Nsight Compute profiling succeeded
+        nsys_post: Whether Nsight Systems postprocessing succeeded
+        nsys_data: Data extracted from Nsight Systems profile
+        build_stdout: Standard output from build process
+        build_stderr: Standard error from build process
+        run_stdout: Standard output from run process
+        run_stderr: Standard error from run process
+    """
+    app_name: str | None = None
+    run_num: str | None = None
+    swap_num: str | None = None
+    swap_file_src_path: str | None = None
+    build: bool | None = None
+    run: bool | None = None
+    validate: bool | None = None
+    nsys_profile: bool | None = None
+    ncu_profile: bool | None = None
+    nsys_post: bool | None = None
+    nsys_data: dict[Hashable, Any] | None = None
+    build_stdout: str | None = None
+    build_stderr: str | None = None
+    run_stdout: str | None = None
+    run_stderr: str | None = None
+
+    def to_dict(self) -> dict[str, str | bool | dict[Hashable, Any] | None]:
+        """Convert the results to a dictionary.
+
+        Returns:
+            Dictionary representation of the driver pass result
+        """
+        return {
+            "app_name": self.app_name,
+            "run_num": self.run_num,
+            "swap_num": self.swap_num,
+            "swap_file_src_path": self.swap_file_src_path,
+            "build": self.build,
+            "run": self.run,
+            "validate": self.validate,
+            "nsys_profile": self.nsys_profile,
+            "ncu_profile": self.ncu_profile,
+            "nsys_post": self.nsys_post,
+            "nsys_data": self.nsys_data,
+            "build_stdout": self.build_stdout,
+            "build_stderr": self.build_stderr,
+            "run_stdout": self.run_stdout,
+            "run_stderr": self.run_stderr,
+        }
+
+
+class AppResults:
+    """Represents results for all passes of a given application.
+
+    Tracks both baseline (non-swap) results and aggregated swap results
+    as fractions (numerator/denominator).
+    """
+    def __init__(self) -> None:
+        """Initialize AppResults with all fields set to None or zero."""
+        # Results for single non-swap pass
+        self.build: bool | None = None
+        self.run: bool | None = None
+        self.validate: bool | None = None
+        self.nsys_profile: bool | None = None
+        self.ncu_profile: bool | None = None
+        self.nsys_post: bool | None = None
+
+        # Results for all swap passes (tracked as fractions)
+        self.swap_builds_numerator: int = 0
+        self.swap_builds_denominator: int = 0
+        self.swap_runs_numerator: int = 0
+        self.swap_runs_denominator: int = 0
+        self.swap_valid_numerator: int = 0
+        self.swap_valid_denominator: int = 0
+        self.swap_nsys_numerator: int = 0
+        self.swap_nsys_denominator: int = 0
+        self.swap_ncu_numerator: int = 0
+        self.swap_ncu_denominator: int = 0
+        self.swap_nsys_post_numerator: int = 0
+        self.swap_nsys_post_denominator: int = 0
+
+    def update_from_pass_result(self, pass_result: DriverPassResult, is_swap: bool) -> None:
+        """Update results from a driver pass result.
+
+        Args:
+            pass_result: The driver pass result to incorporate
+            is_swap: Whether this result is from a swap pass (True) or baseline (False)
+        """
+        if pass_result.build is not None:
+            if not is_swap:
+                self.build = pass_result.build
+            else:
+                self.swap_builds_denominator += 1
+                if pass_result.build:
+                    self.swap_builds_numerator += 1
+
+        if pass_result.run is not None:
+            if not is_swap:
+                self.run = pass_result.run
+            else:
+                self.swap_runs_denominator += 1
+                if pass_result.run:
+                    self.swap_runs_numerator += 1
+
+        if pass_result.validate is not None:
+            if not is_swap:
+                self.validate = pass_result.validate
+            else:
+                self.swap_valid_denominator += 1
+                if pass_result.validate:
+                    self.swap_valid_numerator += 1
+
+        if pass_result.nsys_profile is not None:
+            if not is_swap:
+                self.nsys_profile = pass_result.nsys_profile
+            else:
+                self.swap_nsys_denominator += 1
+                if pass_result.nsys_profile:
+                    self.swap_nsys_numerator += 1
+
+        if pass_result.ncu_profile is not None:
+            if not is_swap:
+                self.ncu_profile = pass_result.ncu_profile
+            else:
+                self.swap_ncu_denominator += 1
+                if pass_result.ncu_profile:
+                    self.swap_ncu_numerator += 1
+
+        if pass_result.nsys_post is not None:
+            if not is_swap:
+                self.nsys_post = pass_result.nsys_post
+            else:
+                self.swap_nsys_post_denominator += 1
+                if pass_result.nsys_post:
+                    self.swap_nsys_post_numerator += 1
+
+    def get(self, key: Operation) -> bool | str | None:
+        """Get a result value by key (for backward compatibility with dict interface).
+
+        Args:
+            key: The operation to get results for
+
+        Returns:
+            The result value (bool for baseline, "n/d" string for swaps, None if not available)
+        """
+        if key == Operation.BUILD:
+            return self.build
+        elif key == Operation.RUN:
+            return self.run
+        elif key == Operation.VALIDATE:
+            return self.validate
+        elif key == Operation.NSYS_PROFILE:
+            return self.nsys_profile
+        elif key == Operation.NCU_PROFILE:
+            return self.ncu_profile
+        elif key == Operation.NSYS_POST:
+            return self.nsys_post
+        elif key == Operation.SWAP_BUILDS:
+            if self.swap_builds_denominator > 0:
+                return f"{self.swap_builds_numerator}/{self.swap_builds_denominator}"
+            return None
+        elif key == Operation.SWAP_RUNS:
+            if self.swap_runs_denominator > 0:
+                return f"{self.swap_runs_numerator}/{self.swap_runs_denominator}"
+            return None
+        elif key == Operation.SWAP_VALID:
+            if self.swap_valid_denominator > 0:
+                return f"{self.swap_valid_numerator}/{self.swap_valid_denominator}"
+            return None
+        elif key == Operation.SWAP_NSYS:
+            if self.swap_nsys_denominator > 0:
+                return f"{self.swap_nsys_numerator}/{self.swap_nsys_denominator}"
+            return None
+        elif key == Operation.SWAP_NCU:
+            if self.swap_ncu_denominator > 0:
+                return f"{self.swap_ncu_numerator}/{self.swap_ncu_denominator}"
+            return None
+        elif key == Operation.SWAP_NSYS_POST:
+            if self.swap_nsys_post_denominator > 0:
+                return f"{self.swap_nsys_post_numerator}/{self.swap_nsys_post_denominator}"
+            return None
+        else:
+            return None
