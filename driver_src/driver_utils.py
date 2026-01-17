@@ -77,14 +77,15 @@ def get_run_path(app: dict) -> str:
 
 
 def setup_profile_dir() -> str:
-    """Setup the profile directory for storing profiling output files.
+    """Setup the profile directory for storing profiling output files in the current working
+       directory.
 
     Creates the directory if it doesn't exist.
 
     Returns:
         Path to the profile directory
     """
-    profile_dir: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "profiles")
+    profile_dir: str = os.path.join(os.getcwd(), "profiles")
     if not os.path.exists(profile_dir):
         os.makedirs(profile_dir)
     return profile_dir

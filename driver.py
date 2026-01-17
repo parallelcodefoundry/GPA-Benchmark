@@ -226,11 +226,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--nsys", action="store_true",
         help="Profile the application with Nsight Systems, then export and "
-             "process the sqlite database"
+             "process the sqlite database (profiles stored under profiles/)"
     )
     parser.add_argument(
         "--ncu", action="store_true",
-        help="Profile the application with Nsight Compute"
+        help="Profile the application with Nsight Compute (profiles stored under profiles/)"
     )
     parser.add_argument(
         "--config", type=str, default="driver_apps.yaml",
@@ -243,7 +243,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--postprocess-nsys", action="store_true",
-        help="Postprocess the nsys-rep file(s) only, do not run the application"
+        help="Only postprocess nsys-rep file(s) found under profiles/, do not run the application"
     )
     parser.add_argument(
         "--output-file", type=str, default="driver_results.json",
