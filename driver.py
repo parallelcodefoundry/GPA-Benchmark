@@ -169,7 +169,7 @@ def run_all(app_config: dict, swaps_dict: dict[str, SwapConfig] | None, env: dic
             if args.app != "all" and app["name"] != args.app:
                 continue
 
-            with tempfile.TemporaryDirectory() as temp_dir:
+            with tempfile.TemporaryDirectory(dir=args.temp_dir) as temp_dir:
                 app_dir = next(app_dir for app_dir in APP_DIRS if app_dir in app["path"])
                 shutil.copytree(app_dir, os.path.join(temp_dir, app_dir))
 
@@ -187,7 +187,8 @@ def run_all(app_config: dict, swaps_dict: dict[str, SwapConfig] | None, env: dic
 
                 # Run each pass
                 for driver_pass in driver_passes:
-                    pass_results = run_driver_pass(app, env, args, temp_dir, swap_config=driver_pass)
+                    pass_results = run_driver_pass(app, env, args, temp_dir,
+                                                   swap_config=driver_pass)
                     is_swap = driver_pass is not None
                     results[app_name].update_from_pass_result(pass_results, is_swap)
                     long_results[app_name].append(pass_results)
@@ -250,8 +251,12 @@ def parse_args() -> argparse.Namespace:
         help="Only postprocess nsys-rep file(s) found under profiles/, do not run the application"
     )
     parser.add_argument(
-        "--output-file", type=str, default="driver_results.json",
+        "-o", "--output-file", type=str, default="driver_results.json",
         help="The file to save the long results to (default: driver_results.json)"
+    )
+    parser.add_argument(
+        "-t", "--temp-dir", type=str, default=None,
+        help="The temporary directory to use for the driver, must exist (default: /tmp)"
     )
     parser.add_argument(
         "-v", "--verbose", action="count", default=0,
