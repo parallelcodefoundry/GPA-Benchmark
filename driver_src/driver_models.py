@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from typing import Any
 from collections.abc import Hashable
 
+from numpy import mean
+
 
 class Operation(Enum):
     """Represents a type of driver operation that can be performed on an application.
@@ -93,19 +95,22 @@ class DriverPassResult:
     nsys_profile: bool | None = None
     ncu_profile: bool | None = None
     nsys_post: bool | None = None
-    nsys_data: dict[Hashable, Any] | None = None
+    nsys_data: list[dict[Hashable, Any]] | None = None
     build_stdout: str | None = None
     build_stderr: str | None = None
     run_stdout: str | None = None
     run_stderr: str | None = None
 
-    def to_dict(self) -> dict[str, str | bool | dict[Hashable, Any] | None]:
+    def to_dict(self) -> dict[str, str | bool | float | int | list[dict[Hashable, Any]] | None]:
         """Convert the results to a dictionary.
 
         Returns:
             Dictionary representation of the driver pass result
         """
-        return {
+        exec_times = None
+        if self.nsys_data is not None:
+            exec_times = [data["exec_time"] for data in self.nsys_data]
+        results = {
             "app_name": self.app_name,
             "run_num": self.run_num,
             "swap_num": self.swap_num,
@@ -117,11 +122,15 @@ class DriverPassResult:
             "ncu_profile": self.ncu_profile,
             "nsys_post": self.nsys_post,
             "nsys_data": self.nsys_data,
+            "exec_time.mean": mean(exec_times) if exec_times else None,
+            "exec_time.min": min(exec_times) if exec_times else None,
+            "exec_time.max": max(exec_times) if exec_times else None,
             "build_stdout": self.build_stdout,
             "build_stderr": self.build_stderr,
             "run_stdout": self.run_stdout,
             "run_stderr": self.run_stderr,
         }
+        return results
 
 
 class AppResults:

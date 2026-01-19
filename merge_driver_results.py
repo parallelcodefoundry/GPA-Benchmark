@@ -70,7 +70,7 @@ def simplify_nsys_data(nsys_data: dict, full_entry: dict) -> dict:
         else:
             simplified_nsys_data[key] = value
 
-    if "exec_time" not in full_entry:
+    if "exec_time" not in full_entry and "exec_time.mean" not in full_entry:
         simplified_nsys_data["exec_time"] = \
             simplified_nsys_data["end"] - simplified_nsys_data["start"]
 

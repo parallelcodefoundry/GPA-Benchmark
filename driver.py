@@ -108,13 +108,13 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace, temp_dir: st
 
             # NSYS Profile
             if args.nsys:
-                nsys_success = nsys_profile_app(app, env, temp_dir, verbose,
+                nsys_success = nsys_profile_app(app, env, temp_dir, args.num_samples, verbose,
                                                 swap_config=swap_config or None)
                 result.nsys_profile = nsys_success
 
             # NCU Profile
             if args.ncu:
-                ncu_success = ncu_profile_app(app, env, temp_dir, verbose,
+                ncu_success = ncu_profile_app(app, env, temp_dir, args.num_samples, verbose,
                                               swap_config=swap_config or None)
                 result.ncu_profile = ncu_success
 
@@ -125,7 +125,7 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace, temp_dir: st
 
     # Postprocess NSYS (either standalone or after profiling)
     if args.postprocess_nsys or (args.nsys and result.nsys_profile):
-        postprocess_nsys_result = postprocess_nsys_app(app, env, verbose,
+        postprocess_nsys_result = postprocess_nsys_app(app, env, args.num_samples, verbose,
                                                        swap_config=swap_config or None)
         result.nsys_post = postprocess_nsys_result is not None
         result.nsys_data = postprocess_nsys_result
@@ -249,6 +249,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--postprocess-nsys", action="store_true",
         help="Only postprocess nsys-rep file(s) found under profiles/, do not run the application"
+    )
+    parser.add_argument(
+        "-n", "--num-samples", type=int, default=3,
+        help="The number of times to collect ncu/nsys profiles for each application and swap"
     )
     parser.add_argument(
         "-o", "--output-file", type=str, default="driver_results.json",
