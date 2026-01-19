@@ -10,29 +10,31 @@ import re
 import subprocess
 
 
-def _get_test_output(app: dict, result: subprocess.CompletedProcess) -> str:
+def _get_test_output(app: dict, result: subprocess.CompletedProcess, temp_dir: str) -> str:
     """Get the test output from file or stdout.
 
     Args:
         app: Application configuration dictionary
         result: Completed process result from running the application
+        temp_dir: Temporary directory where working copy of application directory is located
 
     Returns:
         The test output as a string
     """
     if "test_output" in app:
-        if not os.path.exists(app["test_output"]):
+        test_output_path = os.path.join(temp_dir, app["test_output"])
+        if not os.path.exists(test_output_path):
             print(f"Warning: could not find test output file {app['test_output']} for " \
                 + f"{app['name']}, trying stdout instead")
             return result.stdout.decode("utf-8")
         else:
-            with open(app["test_output"], "r", encoding="utf-8") as test_file:
+            with open(test_output_path, "r", encoding="utf-8") as test_file:
                 return test_file.read()
     else:
         return result.stdout.decode("utf-8")
 
 
-def validate_app(app: dict, result: subprocess.CompletedProcess) -> bool:
+def validate_app(app: dict, result: subprocess.CompletedProcess, temp_dir: str) -> bool:
     """Validate the application output.
 
     Supports multiple validation types:
@@ -45,6 +47,7 @@ def validate_app(app: dict, result: subprocess.CompletedProcess) -> bool:
     Args:
         app: Application configuration dictionary
         result: Completed process result from running the application
+        temp_dir: Temporary directory where working copy of application directory is located
 
     Returns:
         True if validation succeeds, False otherwise
@@ -64,10 +67,11 @@ def validate_app(app: dict, result: subprocess.CompletedProcess) -> bool:
 
     # Compare to reference output
     if "reference_output" in app:
-        with open(app["reference_output"], "r", encoding="utf-8") as ref_file:
+        with open(os.path.join(temp_dir, app["reference_output"]), "r",
+                  encoding="utf-8") as ref_file:
             ref_output = ref_file.read()
 
-        test_output = _get_test_output(app, result)
+        test_output = _get_test_output(app, result, temp_dir)
 
         # Exact match
         if test_output == ref_output:

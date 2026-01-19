@@ -45,35 +45,53 @@ def subprocess_wrapper(command: list[str], cwd: str, env: dict,
     return result
 
 
-def get_bin_path(app: dict) -> str:
+def get_bin_path(app: dict, temp_dir: str) -> str:
     """Get the binary path for the application.
 
     Args:
         app: Application configuration dictionary
+        temp_dir: Temporary directory where working copy of application directory is located
 
     Returns:
         Absolute path to the application binary
     """
     if "run_path" in app:
-        return os.path.join(app["run_path"], app["run_command"].split()[0])
-    return os.path.join(app["path"], app["run_command"].split()[0])
+        return os.path.join(temp_dir, app["run_path"], app["run_command"].split()[0])
+    return os.path.join(temp_dir, app["path"], app["run_command"].split()[0])
 
 
-def get_run_path(app: dict) -> str:
+def get_build_path(app: dict, temp_dir: str) -> str:
+    """Get the build path for the application.
+
+    Args:
+        app: Application configuration dictionary
+        temp_dir: Temporary directory where working copy of application directory is located
+
+    Returns:
+        Path where the application should be built
+    """
+    if "build_path" in app:
+        return os.path.join(temp_dir, app["build_path"])
+    else:
+        return os.path.join(temp_dir, app["path"])
+
+
+def get_run_path(app: dict, temp_dir: str) -> str:
     """Get the run path for the application.
 
     Args:
         app: Application configuration dictionary
+        temp_dir: Temporary directory where working copy of application directory is located
 
     Returns:
         Path where the application should be run from
     """
     if "run_path" in app:
-        return app["run_path"]
+        return os.path.join(temp_dir, app["run_path"])
     elif "build_path" in app:
-        return app["build_path"]
+        return os.path.join(temp_dir, app["build_path"])
     else:
-        return app["path"]
+        return os.path.join(temp_dir, app["path"])
 
 
 def setup_profile_dir() -> str:

@@ -11,6 +11,7 @@ from collections.abc import Hashable
 import sqlite3
 import pandas as pd
 
+from driver_src.driver_models import SwapConfig
 from driver_src.driver_utils import subprocess_wrapper, setup_profile_dir, get_run_path
 
 
@@ -32,43 +33,53 @@ NCU_ARGS = [
 ]
 
 
-def nsys_profile_app(app: dict, env: dict, verbose: int = 0) -> bool:
+def nsys_profile_app(app: dict, env: dict, temp_dir: str, verbose: int = 0,
+                     swap_config: SwapConfig | None = None) -> bool:
     """Profile the application with Nsight Systems.
 
     Args:
         app: Application configuration dictionary
         env: Environment variables dictionary
+        temp_dir: Temporary directory where working copy of application directory is located
         verbose: Verbosity level (0=default, 1=-v, 2=-vv)
+        swap_config: Swap configuration containing the code to swap in
 
     Returns:
         True if profiling succeeded and output file exists, False otherwise
     """
     profile_dir = setup_profile_dir()
     profile_output = os.path.join(profile_dir, app["name"])
+    if swap_config:
+        profile_output += f"_{swap_config.swap_file_src_path.split('/')[-1].replace('.cu', '')}"
 
     nsys_command = ["nsys", "profile", "-o", profile_output, "-f", "true"]
     nsys_command.extend(app["run_command"].split())
 
-    run_path = get_run_path(app)
+    run_path = get_run_path(app, temp_dir)
     result = subprocess_wrapper(nsys_command, run_path, env, verbose=verbose)
 
     profile_file = profile_output + ".nsys-rep"
     return result.returncode == 0 and os.path.exists(profile_file)
 
 
-def ncu_profile_app(app: dict, env: dict, verbose: int = 0) -> bool:
+def ncu_profile_app(app: dict, env: dict, temp_dir: str, verbose: int = 0,
+                    swap_config: SwapConfig | None = None) -> bool:
     """Profile the application with Nsight Compute.
 
     Args:
         app: Application configuration dictionary
         env: Environment variables dictionary
+        temp_dir: Temporary directory where working copy of application directory is located
         verbose: Verbosity level (0=default, 1=-v, 2=-vv)
+        swap_config: Swap configuration containing the code to swap in
 
     Returns:
         True if profiling succeeded and output file exists, False otherwise
     """
     profile_dir = setup_profile_dir()
     profile_output = os.path.join(profile_dir, app["name"])
+    if swap_config:
+        profile_output += f"_{swap_config.swap_file_src_path.split('/')[-1].replace('.cu', '')}"
 
     ncu_command = ["ncu", "-o", profile_output, "-f"]
     if "ncu_args" in app:
@@ -76,7 +87,7 @@ def ncu_profile_app(app: dict, env: dict, verbose: int = 0) -> bool:
     ncu_command.extend(NCU_ARGS)
     ncu_command.extend(app["run_command"].split())
 
-    run_path = get_run_path(app)
+    run_path = get_run_path(app, temp_dir)
     result = subprocess_wrapper(ncu_command, run_path, env, verbose=verbose)
 
     profile_file = profile_output + ".ncu-rep"
@@ -108,7 +119,8 @@ def _parse_ncu_args(app: dict) -> tuple[str, int]:
     return kernel_name, launch_skip
 
 
-def postprocess_nsys_app(app: dict, env: dict, verbose: int = 0) -> dict[Hashable, Any] | None:
+def postprocess_nsys_app(app: dict, env: dict, verbose: int = 0,
+                         swap_config: SwapConfig | None = None) -> dict[Hashable, Any] | None:
     """Postprocess the Nsight Systems profile.
 
     Converts the nsys-rep file to SQLite format, extracts kernel data, and
@@ -117,29 +129,32 @@ def postprocess_nsys_app(app: dict, env: dict, verbose: int = 0) -> dict[Hashabl
     Args:
         app: Application configuration dictionary
         env: Environment variables dictionary
+        temp_dir: Temporary directory where working copy of application directory is located
         verbose: Verbosity level (0=default, 1=-v, 2=-vv)
+        swap_config: Swap configuration containing the code to swap in
 
     Returns:
         Dictionary of kernel data if successful, None otherwise
     """
     profile_dir = setup_profile_dir()
-    nsys_rep_file = os.path.join(profile_dir, app["name"] + ".nsys-rep")
+    nsys_name = app["name"]
+    if swap_config:
+        nsys_name += f"_{swap_config.swap_file_src_path.split('/')[-1].replace('.cu', '')}"
+    nsys_rep_file = os.path.join(profile_dir, nsys_name + ".nsys-rep")
 
     if not os.path.exists(nsys_rep_file):
-        print(f"Warning: could not find Nsight Systems profile file {nsys_rep_file} for " \
-            + f"{app['name']}")
+        print(f"Warning: could not find Nsight Systems profile file {nsys_rep_file}")
         return None
 
     # Convert nsys-rep to sqlite
     postprocess_command = ["nsys", "export", "-f", "true", "-t", "sqlite", nsys_rep_file]
     if subprocess_wrapper(postprocess_command, profile_dir, env, verbose=verbose).returncode != 0:
-        print(f"Warning: could not postprocess Nsight Systems profile file {nsys_rep_file} for " \
-            + f"{app['name']}")
+        print(f"Warning: could not postprocess Nsight Systems profile file {nsys_rep_file}")
         return None
 
-    sqlite_file = os.path.join(profile_dir, app["name"] + ".sqlite")
+    sqlite_file = os.path.join(profile_dir, nsys_name + ".sqlite")
     if not os.path.exists(sqlite_file):
-        print(f"Warning: could not find sqlite file {sqlite_file} for {app['name']}")
+        print(f"Warning: could not find sqlite file {sqlite_file}")
         return None
 
     # Read sqlite file into pandas dataframes
@@ -153,6 +168,9 @@ def postprocess_nsys_app(app: dict, env: dict, verbose: int = 0) -> dict[Hashabl
     df["demangledName"] = df["demangledName"].map(string_id_map)
     df["shortName"] = df["shortName"].map(string_id_map)
     df["mangledName"] = df["mangledName"].map(string_id_map)
+
+    # Create exec_time column
+    df["exec_time"] = df["end"] - df["start"]
 
     # Find kernel of interest
     kernel_name, launch_skip = _parse_ncu_args(app)

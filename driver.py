@@ -16,8 +16,8 @@ The driver supports:
 """
 import argparse
 import os
-from contextlib import nullcontext
-
+import tempfile
+import shutil
 from alive_progress import alive_bar
 
 from driver_src.driver_models import Operation, SwapConfig, DriverPassResult, AppResults
@@ -30,7 +30,10 @@ from driver_src.driver_config import setup_app_config, determine_operations
 from driver_src.driver_reporting import print_report_table, save_results
 
 
-def run_driver_pass(app: dict, env: dict, args: argparse.Namespace,
+APP_DIRS = ["Castro", "darknet", "ExaTENSOR", "LULESH", "PeleC", "Quicksilver","rodinia", "XSBench"]
+
+
+def run_driver_pass(app: dict, env: dict, args: argparse.Namespace, temp_dir: str,
                     swap_config: SwapConfig | None = None) -> DriverPassResult:
     """Run a single driver pass for an application.
 
@@ -61,17 +64,17 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace,
     if not args.postprocess_nsys:
         # Swap file in if this is a swap pass
         if swap_config:
-            swap_file_in_app(app, swap_config)
+            swap_file_in_app(app, swap_config, temp_dir)
 
         try:
             # Build
             build_success, build_result = build_app(
-                app, args.sm_version, args.no_clean, env, verbose
+                app, args.sm_version, args.no_clean, env, temp_dir, verbose
             )
             result.build_stdout = build_result.stdout.decode("utf-8")
             result.build_stderr = build_result.stderr.decode("utf-8")
 
-            bin_path = get_bin_path(app)
+            bin_path = get_bin_path(app, temp_dir)
             result.build = (build_success and
                           os.path.exists(bin_path) and
                           os.access(bin_path, os.X_OK))
@@ -83,7 +86,7 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace,
                 return result
 
             # Run
-            run_success, run_result = run_app(app, env, verbose)
+            run_success, run_result = run_app(app, env, temp_dir, verbose)
             result.run_stdout = run_result.stdout.decode("utf-8")
             result.run_stderr = run_result.stderr.decode("utf-8")
             result.run = run_success
@@ -94,7 +97,7 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace,
                 return result
 
             # Validate
-            validate_success = validate_app(app, run_result)
+            validate_success = validate_app(app, run_result, temp_dir)
             print(f"Validate success: {validate_success}")
             result.validate = validate_success
 
@@ -105,22 +108,25 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace,
 
             # NSYS Profile
             if args.nsys:
-                nsys_success = nsys_profile_app(app, env, verbose)
+                nsys_success = nsys_profile_app(app, env, temp_dir, verbose,
+                                                swap_config=swap_config or None)
                 result.nsys_profile = nsys_success
 
             # NCU Profile
             if args.ncu:
-                ncu_success = ncu_profile_app(app, env, verbose)
+                ncu_success = ncu_profile_app(app, env, temp_dir, verbose,
+                                              swap_config=swap_config or None)
                 result.ncu_profile = ncu_success
 
         finally:
             # Always restore original file if we swapped
             if swap_config:
-                swap_file_out_app(app)
+                swap_file_out_app(app, temp_dir)
 
     # Postprocess NSYS (either standalone or after profiling)
     if args.postprocess_nsys or (args.nsys and result.nsys_profile):
-        postprocess_nsys_result = postprocess_nsys_app(app, env, verbose)
+        postprocess_nsys_result = postprocess_nsys_app(app, env, verbose,
+                                                       swap_config=swap_config or None)
         result.nsys_post = postprocess_nsys_result is not None
         result.nsys_data = postprocess_nsys_result
 
@@ -157,39 +163,37 @@ def run_all(app_config: dict, swaps_dict: dict[str, SwapConfig] | None, env: dic
         num_apps = len(set([swap.app_name for swap in swaps_dict.values()]))
     num_runs = num_apps + (len(swaps_dict) if swaps_dict else 0)
 
-    # Use progress bar unless disabled
-    progress_context = alive_bar(num_runs) if not args.no_progress else None
-    if progress_context is None:
-        # Create a no-op context manager for when progress is disabled
-        progress_context = nullcontext()
-
-    with progress_context as pbar:
+    with alive_bar(num_runs, disable=args.no_progress) as pbar:
         for app in app_config["apps"]:
             # Filter by app name if specified
             if args.app != "all" and app["name"] != args.app:
                 continue
 
-            app_name = app["name"]
-            results[app_name] = AppResults()
-            long_results[app_name] = []
+            with tempfile.TemporaryDirectory() as temp_dir:
+                app_dir = next(app_dir for app_dir in APP_DIRS if app_dir in app["path"])
+                shutil.copytree(app_dir, os.path.join(temp_dir, app_dir))
 
-            # Build list of passes: baseline first, then swaps
-            driver_passes: list[SwapConfig | None] = [None]  # None = baseline
-            if swaps_dict:
-                driver_passes.extend([
-                    swap for swap in swaps_dict.values()
-                    if swap.app_name == app["name"]
-                ])
+                app_name = app["name"]
+                results[app_name] = AppResults()
+                long_results[app_name] = []
 
-            # Run each pass
-            for driver_pass in driver_passes:
-                pass_results = run_driver_pass(app, env, args, swap_config=driver_pass)
-                is_swap = driver_pass is not None
-                results[app_name].update_from_pass_result(pass_results, is_swap)
-                long_results[app_name].append(pass_results)
+                # Build list of passes: baseline first, then swaps
+                driver_passes: list[SwapConfig | None] = [None]  # None = baseline
+                if swaps_dict:
+                    driver_passes.extend([
+                        swap for swap in swaps_dict.values()
+                        if swap.app_name == app["name"]
+                    ])
 
-                if pbar is not None:
-                    pbar()  # pylint: disable=not-callable
+                # Run each pass
+                for driver_pass in driver_passes:
+                    pass_results = run_driver_pass(app, env, args, temp_dir, swap_config=driver_pass)
+                    is_swap = driver_pass is not None
+                    results[app_name].update_from_pass_result(pass_results, is_swap)
+                    long_results[app_name].append(pass_results)
+
+                    if pbar is not None:
+                        pbar()  # pylint: disable=not-callable
 
     return results, operations, long_results
 

@@ -12,7 +12,7 @@ import shutil
 from driver_src.driver_models import SwapConfig
 
 
-def swap_file_in_app(app: dict, swap_config: SwapConfig) -> None:
+def swap_file_in_app(app: dict, swap_config: SwapConfig, temp_dir: str) -> None:
     """Swap the file in the application directory on disk.
 
     Backs up the original file. If the file contains ">>> START EDITABLE REGION"
@@ -22,12 +22,13 @@ def swap_file_in_app(app: dict, swap_config: SwapConfig) -> None:
     Args:
         app: Application configuration dictionary
         swap_config: Swap configuration containing the code to swap in
+        temp_dir: Temporary directory where working copy of application directory is located
 
     Raises:
         FileNotFoundError: If the destination file doesn't exist
         IOError: If file operations fail
     """
-    dest_path = app["replace_file"]
+    dest_path = os.path.join(temp_dir, app["replace_file"])
     backup_path = dest_path + ".bak"
     shutil.copy(dest_path, backup_path)
 
@@ -49,19 +50,20 @@ def swap_file_in_app(app: dict, swap_config: SwapConfig) -> None:
         dest_file.write(dest_text)
 
 
-def swap_file_out_app(app: dict) -> None:
+def swap_file_out_app(app: dict, temp_dir: str) -> None:
     """Swap the file out of the application directory on disk.
 
     Restores the original file from backup and removes the backup file.
 
     Args:
         app: Application configuration dictionary
+        temp_dir: Temporary directory where working copy of application directory is located
 
     Raises:
         FileNotFoundError: If the backup file doesn't exist
         IOError: If file operations fail
     """
-    dest_path = app["replace_file"]
+    dest_path = os.path.join(temp_dir, app["replace_file"])
     backup_path = dest_path + ".bak"
     shutil.copy(backup_path, dest_path)
     os.remove(backup_path)
