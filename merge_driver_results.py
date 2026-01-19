@@ -71,7 +71,8 @@ def simplify_nsys_data(nsys_data: dict, full_entry: dict) -> dict:
             simplified_nsys_data[key] = value
 
     if "exec_time" not in full_entry:
-        simplified_nsys_data["exec_time"] = nsys_data["end"] - nsys_data["start"]
+        simplified_nsys_data["exec_time"] = \
+            simplified_nsys_data["end"] - simplified_nsys_data["start"]
 
     return simplified_nsys_data
 
