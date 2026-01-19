@@ -52,11 +52,12 @@ def truncate_string(text: str, max_length: int) -> str:
     return beginning + ellipsis_msg + end
 
 
-def simplify_nsys_data(nsys_data: dict) -> dict:
+def simplify_nsys_data(nsys_data: dict, full_entry: dict) -> dict:
     """Simplify nsys_data field by flattening the nested dictionary if necessary.
 
     Args:
         nsys_data: The nsys_data field to simplify
+        full_entry: The full entry dictionary, for checking if exec_time is present
 
     Returns:
         The simplified nsys_data field
@@ -68,6 +69,9 @@ def simplify_nsys_data(nsys_data: dict) -> dict:
             simplified_nsys_data[key] = list(value.values())[0]
         else:
             simplified_nsys_data[key] = value
+
+    if "exec_time" not in full_entry:
+        simplified_nsys_data["exec_time"] = nsys_data["end"] - nsys_data["start"]
 
     return simplified_nsys_data
 
@@ -93,7 +97,8 @@ def process_entry(entry: dict, max_length: int) -> dict:
 
     # Simplify nsys_data field
     if "nsys_data" in processed_entry and processed_entry["nsys_data"] is not None:
-        processed_entry["nsys_data"] = simplify_nsys_data(processed_entry["nsys_data"])
+        processed_entry["nsys_data"] = simplify_nsys_data(processed_entry["nsys_data"],
+                                                          processed_entry)
 
     return processed_entry
 
