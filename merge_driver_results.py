@@ -52,7 +52,7 @@ def truncate_string(text: str, max_length: int) -> str:
     return beginning + ellipsis_msg + end
 
 
-def simplify_nsys_data(nsys_data: dict, full_entry: dict) -> dict:
+def simplify_nsys_data(nsys_data: dict | list, full_entry: dict) -> dict | list:
     """Simplify nsys_data field by flattening the nested dictionary if necessary.
 
     Args:
@@ -62,17 +62,24 @@ def simplify_nsys_data(nsys_data: dict, full_entry: dict) -> dict:
     Returns:
         The simplified nsys_data field
     """
-    simplified_nsys_data = {}
+    simplified_nsys_data: dict | list = {}
 
-    for key, value in nsys_data.items():
-        if isinstance(value, dict):
-            simplified_nsys_data[key] = list(value.values())[0]
-        else:
-            simplified_nsys_data[key] = value
+    if isinstance(nsys_data, dict):
+        for key, value in nsys_data.items():
+            if isinstance(value, dict):
+                simplified_nsys_data[key] = list(value.values())[0]
+            else:
+                simplified_nsys_data[key] = value
+    else:
+        simplified_nsys_data = nsys_data
 
     if "exec_time" not in full_entry and "exec_time.mean" not in full_entry:
-        simplified_nsys_data["exec_time"] = \
-            simplified_nsys_data["end"] - simplified_nsys_data["start"]
+        if isinstance(simplified_nsys_data, list):
+            for i,item in enumerate(simplified_nsys_data):
+                simplified_nsys_data[i]["exec_time"] = item["end"] - item["start"]
+        else:
+            simplified_nsys_data["exec_time"] = \
+                simplified_nsys_data["end"] - simplified_nsys_data["start"]
 
     return simplified_nsys_data
 
