@@ -83,10 +83,12 @@ kernel_gpu_cuda_wrapper_2(	knode *knodes,
 	//	EXECUTION PARAMETERS
 	//====================================================================================================100
 
+	// >>> START EDITABLE REGION ID=0
 	int numBlocks;
 	numBlocks = count;
 	int threadsPerBlock;
 	threadsPerBlock = order < 1024 ? order : 1024;
+	// <<< END EDITABLE REGION ID=0
 
 	printf("# of blocks = %d, # of threads/block = %d (ensure that device can handle)\n", numBlocks, threadsPerBlock);
 
@@ -259,6 +261,7 @@ kernel_gpu_cuda_wrapper_2(	knode *knodes,
 	//	KERNEL
 	//======================================================================================================================================================150
 
+	// >>> START EDITABLE REGION ID=1
 	// [GPU] findRangeK kernel
 	findRangeK<<<numBlocks, threadsPerBlock>>>(	maxheight,
 												knodesD,
@@ -274,7 +277,7 @@ kernel_gpu_cuda_wrapper_2(	knode *knodes,
 												ansDLength);
 	cudaThreadSynchronize();
 	checkCUDAError("findRangeK");
-
+	// <<< END EDITABLE REGION ID=1
 	time4 = get_time();
 
 	//======================================================================================================================================================150

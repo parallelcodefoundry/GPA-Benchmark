@@ -18,7 +18,7 @@ The CUDA Kernel for Applying BFS on a loaded Graph. Created By Pawan Harish
 #ifndef _KERNEL_H_
 #define _KERNEL_H_
 
-// >>> START EDITABLE REGION
+// >>> START EDITABLE REGION ID=0
 __global__ void
 Kernel( Node* g_graph_nodes, int* g_graph_edges, bool* g_graph_mask, bool* g_updating_graph_mask, bool *g_graph_visited, int* g_cost, int no_of_nodes) 
 {
@@ -37,5 +37,5 @@ Kernel( Node* g_graph_nodes, int* g_graph_edges, bool* g_graph_mask, bool* g_upd
 			}
 	}
 }
-// <<< END EDITABLE REGION
+// <<< END EDITABLE REGION ID=0
 #endif 

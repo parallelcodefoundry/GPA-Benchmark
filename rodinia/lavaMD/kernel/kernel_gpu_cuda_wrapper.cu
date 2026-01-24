@@ -81,10 +81,12 @@ kernel_gpu_cuda_wrapper(par_str par_cpu,
 	//	EXECUTION PARAMETERS
 	//====================================================================================================100
 
+	// >>> START EDITABLE REGION ID=0
 	blocks.x = dim_cpu.number_boxes;
 	blocks.y = 1;
 	threads.x = NUMBER_THREADS;											// define the number of threads in the block
 	threads.y = 1;
+	// <<< END EDITABLE REGION ID=0
 
 	time1 = get_time();
 
@@ -184,6 +186,7 @@ kernel_gpu_cuda_wrapper(par_str par_cpu,
 	//	KERNEL
 	//======================================================================================================================================================150
 
+	// >>> START EDITABLE REGION ID=1
 	// launch kernel - all boxes
 	kernel_gpu_cuda<<<blocks, threads>>>(	par_cpu,
 											dim_cpu,
@@ -194,6 +197,7 @@ kernel_gpu_cuda_wrapper(par_str par_cpu,
 
 	checkCUDAError("Start");
 	cudaThreadSynchronize();
+	// <<< END EDITABLE REGION ID=1
 
 	time4 = get_time();
 

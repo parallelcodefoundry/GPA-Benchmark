@@ -28,7 +28,7 @@ def swap_file_in_app(app: dict, swap_config: SwapConfig, temp_dir: str) -> None:
         FileNotFoundError: If the destination file doesn't exist
         IOError: If file operations fail
     """
-    dest_path = os.path.join(temp_dir, app["replace_file"])
+    dest_path = os.path.join(temp_dir, app["kernel_file"])
     backup_path = dest_path + ".bak"
     shutil.copy(dest_path, backup_path)
 
@@ -63,7 +63,7 @@ def swap_file_out_app(app: dict, temp_dir: str) -> None:
         FileNotFoundError: If the backup file doesn't exist
         IOError: If file operations fail
     """
-    dest_path = os.path.join(temp_dir, app["replace_file"])
+    dest_path = os.path.join(temp_dir, app["kernel_file"])
     backup_path = dest_path + ".bak"
     shutil.copy(backup_path, dest_path)
     os.remove(backup_path)

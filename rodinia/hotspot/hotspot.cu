@@ -97,10 +97,11 @@ void readinput(float *vect, int grid_rows, int grid_cols, char *file){
 
 }
 
+// >>> START EDITABLE REGION ID=0
 #define IN_RANGE(x, min, max)   ((x)>=(min) && (x)<=(max))
 #define CLAMP_RANGE(x, min, max) x = (x<(min)) ? min : ((x>(max)) ? max : x )
 #define MIN(a, b) ((a)<=(b) ? (a) : (b))
-// >>> START EDITABLE REGION
+
 __global__ void calculate_temp(int iteration,  //number of iteration
                                float *power,   //power input
                                float *temp_src,    //temperature input/output
@@ -214,7 +215,7 @@ __global__ void calculate_temp(int iteration,  //number of iteration
           temp_dst[index]= temp_t[ty][tx];		
       }
 }
-// <<< END EDITABLE REGION
+
 /*
    compute N time steps
 */
@@ -250,6 +251,7 @@ int compute_tran_temp(float *MatrixPower,float *MatrixTemp[2], int col, int row,
 	}
         return dst;
 }
+// <<< END EDITABLE REGION ID=0
 
 void usage(int argc, char **argv)
 {

@@ -8,7 +8,7 @@
 #include "math.h"
 #include "cuda.h"
 
-// >>> START EDITABLE REGION
+// >>> START EDITABLE REGION ID=0
 __global__ void
 bpnn_layerforward_CUDA(float *input_cuda,
 	                   float *output_hidden_cuda,
@@ -76,7 +76,7 @@ bpnn_layerforward_CUDA(float *input_cuda,
    }
 
 }
-// <<< END EDITABLE REGION
+// <<< END EDITABLE REGION ID=0
 
 __global__ void bpnn_adjust_weights_cuda(float * delta,   
 										 int hid,         

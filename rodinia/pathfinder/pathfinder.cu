@@ -68,7 +68,7 @@ fatal(char *s)
 #define IN_RANGE(x, min, max)   ((x)>=(min) && (x)<=(max))
 #define CLAMP_RANGE(x, min, max) x = (x<(min)) ? min : ((x>(max)) ? max : x )
 #define MIN(a, b) ((a)<=(b) ? (a) : (b))
-// >>> START EDITABLE REGION
+// >>> START EDITABLE REGION ID=0
 __global__ void dynproc_kernel(
                 int iteration, 
                 int *gpuWall,
@@ -150,7 +150,7 @@ __global__ void dynproc_kernel(
           gpuResults[xidx]=result[tx];		
       }
 }
-// <<< END EDITABLE REGION
+
 /*
    compute N time steps
 */
@@ -172,6 +172,7 @@ int calc_path(int *gpuWall, int *gpuResult[2], int rows, int cols, \
 	}
         return dst;
 }
+// <<< END EDITABLE REGION ID=0
 
 int main(int argc, char** argv)
 {

@@ -41,7 +41,7 @@ Point *p;
 
 static int iter = 0;		// counter for total# of iteration
 
-// >>> START EDITABLE REGION
+// >>> START EDITABLE REGION ID=0
 //=======================================
 // Euclidean Distance
 //=======================================
@@ -87,7 +87,7 @@ kernel_compute_cost(int num, int dim, long x, Point *p, int K, int stride,
 		}
 	}
 }
-// <<< END EDITABLE REGION
+// <<< END EDITABLE REGION ID=0
 //=======================================
 // Allocate Device Memory
 //=======================================
@@ -233,6 +233,7 @@ float pgain( long x, Points *points, float z, long int *numcenters, int kmax, bo
 	cudaEventRecord(start,0);
 #endif
 	
+	// >>> START EDITABLE REGION ID=1
 	//=======================================
 	// KERNEL: CALCULATE COST
 	//=======================================
@@ -255,6 +256,7 @@ float pgain( long x, Points *points, float z, long int *numcenters, int kmax, bo
 															switch_membership_d		// out:  changes in membership
 															);
 	cudaThreadSynchronize();
+	// <<< END EDITABLE REGION ID=1
 	
 	// error check
 	error = cudaGetLastError();

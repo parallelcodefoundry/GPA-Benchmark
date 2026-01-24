@@ -144,6 +144,7 @@ void runTest( int argc, char** argv)
 	cudaMemcpy(referrence_cuda, referrence, sizeof(int) * size, cudaMemcpyHostToDevice);
 	cudaMemcpy(matrix_cuda, input_itemsets, sizeof(int) * size, cudaMemcpyHostToDevice);
 
+	// >>> START EDITABLE REGION ID=0
     dim3 dimGrid;
 	dim3 dimBlock(BLOCK_SIZE, 1);
 	int block_width = ( max_cols - 1 )/BLOCK_SIZE;
@@ -156,6 +157,7 @@ void runTest( int argc, char** argv)
 		needle_cuda_shared_1<<<dimGrid, dimBlock>>>(referrence_cuda, matrix_cuda
 		                                      ,max_cols, penalty, i, block_width); 
 	}
+	// <<< END EDITABLE REGION ID=0
 	printf("Processing bottom-right matrix\n");
     //process bottom-right matrix
 	for( int i = block_width - 1  ; i >= 1 ; i--){

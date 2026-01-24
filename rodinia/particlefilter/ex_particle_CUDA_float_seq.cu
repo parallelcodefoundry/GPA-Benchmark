@@ -239,7 +239,7 @@ __global__ void sum_kernel(double* partial_sums, int Nparticles) {
     }
 }
 
-// >>> START EDITABLE REGION
+// >>> START EDITABLE REGION ID=0
 /********************************
  * CALC LIKELIHOOD SUM
  * DETERMINES THE LIKELIHOOD SUM BASED ON THE FORMULA: SUM( (IK[IND] - 100)^2 - (IK[IND] - 228)^2)/ 100
@@ -366,7 +366,7 @@ __global__ void likelihood_kernel(double * arrayX, double * arrayY, double * xj,
 
     
 }
-// <<< END EDITABLE REGION
+// <<< END EDITABLE REGION ID=0
 
 __global__ void normalize_weights_kernel(double * weights, int Nparticles, double* partial_sums, double * CDF, double * u, int * seed) {
     int block_id = blockIdx.x;
@@ -730,6 +730,7 @@ void particleFilter(unsigned char * I, int IszX, int IszY, int Nfr, int * seed, 
     check_error(cudaMemcpy(seed_GPU, seed, sizeof (int) *Nparticles, cudaMemcpyHostToDevice));
     long long send_end = get_time();
     printf("TIME TO SEND TO GPU: %f\n", elapsed_time(send_start, send_end));
+    // >>> START EDITABLE REGION ID=1
     int num_blocks = ceil((double) Nparticles / (double) threads_per_block);
 
 
@@ -744,7 +745,7 @@ void particleFilter(unsigned char * I, int IszX, int IszY, int Nfr, int * seed, 
         find_index_kernel << < num_blocks, threads_per_block >> > (arrayX_GPU, arrayY_GPU, CDF_GPU, u_GPU, xj_GPU, yj_GPU, weights_GPU, Nparticles);
 
     }//end loop
-
+    // <<< END EDITABLE REGION ID=1
     //block till kernels are finished
     cudaThreadSynchronize();
     long long back_time = get_time();

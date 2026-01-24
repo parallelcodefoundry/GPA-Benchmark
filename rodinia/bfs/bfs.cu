@@ -174,6 +174,8 @@ void BFSGraph( int argc, char** argv)
 
 	printf("Copied Everything to GPU memory\n");
 
+	// >>> START EDITABLE REGION ID=0
+
 	// setup execution parameters
 	dim3  grid( num_of_blocks, 1, 1);
 	dim3  threads( num_of_threads_per_block, 1, 1);
@@ -200,6 +202,7 @@ void BFSGraph( int argc, char** argv)
 	}
 	while(stop);
 
+	// <<< END EDITABLE REGION ID=0
 
 	printf("Kernel Executed %d times\n",k);
 

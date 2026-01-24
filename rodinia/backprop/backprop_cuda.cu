@@ -77,6 +77,7 @@ void bpnn_train_cuda(BPNN *net, float *eo, float *eh)
   float sum;
   float *input_weights_one_dim;
   float *input_weights_prev_one_dim;
+  // >>> START EDITABLE REGION ID=0
   num_blocks = in / 16;
   dim3  grid( 1 , num_blocks);
   dim3  threads(16 , 16);
@@ -119,15 +120,14 @@ void bpnn_train_cuda(BPNN *net, float *eo, float *eh)
   cudaMemcpy(input_hidden_cuda, input_weights_one_dim, (in + 1) * (hid + 1) * sizeof(float), cudaMemcpyHostToDevice);
 
 
-
   bpnn_layerforward_CUDA<<< grid, threads >>>(input_cuda,
 	                                          output_hidden_cuda,
 											  input_hidden_cuda,
 											  hidden_partial_sum,
 											  in,
 											  hid);
-
   cudaThreadSynchronize();
+  // <<< END EDITABLE REGION ID=0
 
   cudaError_t error = cudaGetLastError();
 	if (error != cudaSuccess) {

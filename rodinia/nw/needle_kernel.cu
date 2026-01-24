@@ -4,7 +4,7 @@
 
 
 #define SDATA( index)      CUT_BANK_CHECKER(sdata, index)
-// >>> START EDITABLE REGION
+// >>> START EDITABLE REGION ID=0
 __device__ __host__ int 
 maximum( int a,
 		 int b,
@@ -102,7 +102,7 @@ needle_cuda_shared_1(  int* referrence,
   matrix_cuda[index + ty * cols] = temp[ty+1][tx+1];
 
 }
-// <<< END EDITABLE REGION
+// <<< END EDITABLE REGION ID=0
 
 __global__ void
 needle_cuda_shared_2(  int* referrence,

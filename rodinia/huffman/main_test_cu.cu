@@ -49,6 +49,7 @@ int main(int argc, char* argv[]){
     return 0;
 }
 
+// >>> START EDITABLE REGION ID=0
 void runVLCTest(char *file_name, uint num_block_threads, uint num_blocks) {
     printf("CUDA! Starting VLC Tests!\n");
     unsigned int num_elements; //uint num_elements = num_blocks * num_block_threads; 
@@ -178,4 +179,4 @@ void runVLCTest(char *file_name, uint num_block_threads, uint num_blocks) {
     CUDA_SAFE_CALL(cudaFree(d_cindex)); CUDA_SAFE_CALL(cudaFree(d_cindex2));
     free(cindex2);
 }
-
+// <<< END EDITABLE REGION ID=0

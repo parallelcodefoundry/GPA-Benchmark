@@ -33,7 +33,7 @@
 		TURN ON CACHING FOR HIGH ENTROPY DATA!
 */
 
-// >>> START EDITABLE REGION
+// >>> START EDITABLE REGION ID=0
 __global__ static void vlc_encode_kernel_sm64huff(unsigned int* data,
 								  const unsigned int* gm_codewords, const unsigned int* gm_codewordlens,
 							#ifdef TESTING
@@ -159,7 +159,7 @@ __global__ static void vlc_encode_kernel_sm64huff(unsigned int* data,
 
 }
 //////////////////////////////////////////////////////////////////////////////								  
-// <<< END EDITABLE REGION
+// <<< END EDITABLE REGION ID=0
 #endif
 
 #endif
