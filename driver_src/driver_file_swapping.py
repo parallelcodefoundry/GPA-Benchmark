@@ -28,6 +28,8 @@ def swap_file_in_app(app: dict, swap_config: SwapConfig, temp_dir: str) -> None:
         FileNotFoundError: If the destination file doesn't exist
         IOError: If file operations fail
     """
+    # TODO: Once new results collected, add support for replacing in extra files, and remove region
+    # code as opt gen code handles region substitution
     dest_path = os.path.join(temp_dir, app["kernel_file"])
     backup_path = dest_path + ".bak"
     shutil.copy(dest_path, backup_path)
