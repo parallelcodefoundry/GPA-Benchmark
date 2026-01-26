@@ -60,8 +60,8 @@ def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] 
     if config.swaps:
         swaps_dict = build_swaps_dict(config.swaps, config.app, app_config)
         return app_config, swaps_dict, env
-    else:
-        return app_config, None, env
+
+    return app_config, None, env
 
 
 def determine_operations(config: DriverConfig) -> list[Operation]:

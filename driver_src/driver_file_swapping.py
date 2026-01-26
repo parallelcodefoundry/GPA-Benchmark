@@ -47,6 +47,7 @@ def swap_file_in_app(swap_config: SwapConfig, temp_dir: str, detect_regions: boo
             # Replace entire file with swap file code
             with open(dest_path, "w", encoding="utf-8") as dest_file:
                 dest_file.write(file_swap.code)
+            print(f"Replaced entire file {dest_path} with swap file {file_swap.swap_file_src_path}")
             continue
 
         # Replace only the editable region
@@ -56,6 +57,8 @@ def swap_file_in_app(swap_config: SwapConfig, temp_dir: str, detect_regions: boo
 
         with open(dest_path, "w", encoding="utf-8") as dest_file:
             dest_file.write(dest_text)
+        print(f"Replaced editable region in {dest_path} with swap file " \
+            + f"{file_swap.swap_file_src_path}")
 
 
 def swap_file_out_app(app: dict, temp_dir: str, swap_config: SwapConfig | None = None) -> None:
@@ -79,10 +82,12 @@ def swap_file_out_app(app: dict, temp_dir: str, swap_config: SwapConfig | None =
         for file_swap in swap_config.file_swaps:
             dest_path = os.path.join(temp_dir, file_swap.swap_file_dest_name)
             backup_path = dest_path + ".bak"
-
             if os.path.exists(backup_path):
                 shutil.copy(backup_path, dest_path)
                 os.remove(backup_path)
+            else:
+                raise FileNotFoundError(f"No backup file ({backup_path}) found for {dest_path}")
+            print(f"Restored file {dest_path}")
     else:
         # Fallback: restore all .bak files found in temp_dir (for backward compatibility)
         # This handles the case where swap_config is not provided
@@ -92,9 +97,123 @@ def swap_file_out_app(app: dict, temp_dir: str, swap_config: SwapConfig | None =
             if os.path.exists(backup_path):
                 shutil.copy(backup_path, dest_path)
                 os.remove(backup_path)
+            else:
+                raise FileNotFoundError(f"No backup file ({backup_path}) found for {dest_path}")
+            print(f"Restored file {dest_path}")
+        else:
+            raise FileNotFoundError(f"No kernel file ({dest_path}) found for {app.get('name')}")
 
 
-def build_swaps_dict(swaps: str, app: str, app_config: dict) -> dict[str, SwapConfig]:
+def _try_match_filename(target_filename: str, curr_filename: str, root: str,
+                        partial_target_filename: str | None = None) -> tuple[str | None, int | None,
+                                                                             int | None]:
+    """Try to match the filename to the target filename.
+
+    Args:
+        target_filename: The target filename to match
+        curr_filename: The current filename to match
+        root: The root directory of the current filename
+        partial_target_filename: The partial target filename to match, if provided it will be used
+                                 to match the run_num and optimized_code_num in the directory
+                                 structure
+
+    Returns:
+        The app name, run number, and optimized code number if the filename matches the target
+        None, None, None if the filename does not match the target filename(s) specified
+    """
+    if match := re.match(target_filename, curr_filename):
+        path_parts = root.split("/")
+        if len(path_parts) >= 3:
+            app_name = "_".join(path_parts[-3].split("_")[:-1])
+        else:
+            return None, None, None
+
+        if partial_target_filename:
+            for part in path_parts:
+                if match_run := re.search(partial_target_filename, part):
+                    return app_name, int(match_run.group(1)), int(match_run.group(2))
+            return None, None, None
+        return app_name, int(match.group(1)), int(match.group(2))
+    return None, None, None
+
+
+def _find_grouped_files(swaps: str) -> dict[tuple[str, int, int], list[tuple[str, str]]]:
+    """Find the grouped files in the swaps directory.
+
+    Args:
+        swaps: Path to the directory containing swap files
+
+    Returns:
+        Dictionary mapping a unique key to a list of tuples containing the full path and code
+        of the swap files
+    """
+    grouped_files: dict[tuple[str, int, int], list[tuple[str, str]]] = {}
+
+    for root, _, files in os.walk(swaps):
+        for file in files:
+            run_num = None
+            optimized_code_num = None
+            app_name = None
+
+            # Try pattern: run_<num>_optimized_code_<num>_file_<n>.cu (new format)
+            app_name, run_num, optimized_code_num = \
+                _try_match_filename(r"run_(\d+)_optimized_code_(\d+)_file_(\d+)\.cu$", file, root)
+            if app_name is None or run_num is None or optimized_code_num is None:
+                # Try pattern: *_file_<n>.cu (new format, run_num/optimized_code_num in directory)
+                app_name, run_num, optimized_code_num = \
+                    _try_match_filename(r".*_file_(\d+)\.cu$", file, root,
+                                        partial_target_filename=r"run_(\d+)_optimized_code_(\d+)")
+                if app_name is None or run_num is None or optimized_code_num is None:
+                    # Try old pattern: run_<num>_optimized_code_<num>.cu (backward compatibility)
+                    app_name, run_num, optimized_code_num = \
+                        _try_match_filename(r"run_(\d+)_optimized_code_(\d+)\.cu$", file, root)
+                    if app_name is None or run_num is None or optimized_code_num is None:
+                        continue
+
+            full_path = os.path.join(root, file)
+            key = (app_name, run_num, optimized_code_num)
+
+            with open(full_path, "r", encoding="utf-8") as f:
+                code = f.read()
+
+            if key not in grouped_files:
+                grouped_files[key] = []
+            grouped_files[key].append((full_path, code))
+
+    return grouped_files
+
+
+def _get_swappable_files(app_config: dict, app_name: str) -> list[str]:
+    """Get the list of files that can be swapped for an app.
+
+    Args:
+        app_config: The application configuration dictionary
+        app_name: The name of the application
+
+    Returns:
+        The list of files that can be swapped for the app
+    """
+    # Find the app config for this app
+    app_dict = None
+    for app_entry in app_config.get("apps", []):
+        if app_entry["name"] == app_name:
+            app_dict = app_entry
+            break
+
+    if app_dict is None:
+        return []
+
+    # Get list of files that can be swapped (kernel_file + extra_files)
+    swappable_files = [app_dict.get("kernel_file")]
+    if "extra_files" in app_dict:
+        swappable_files.extend(app_dict["extra_files"])
+    swappable_files = [f for f in swappable_files if f]  # Remove None values
+
+    return swappable_files
+
+
+def build_swaps_dict(swaps: str | dict[tuple[str, int, int], list[tuple[str, str]]], app: str,
+                     app_config: dict) -> dict[str, SwapConfig]:
     """Build the swaps dictionary from a directory of swap files.
 
     Scans the directory for files matching the pattern "*_file_<n>.cu" where n is an index,
@@ -103,7 +222,8 @@ def build_swaps_dict(swaps: str, app: str, app_config: dict) -> dict[str, SwapCo
     extra_files from the app config.
 
     Args:
-        swaps: Path to the directory containing swap files
+        swaps: Path to the directory containing swap files or a dictionary of files grouped by
+               (app_name, run_num, optimized_code_num)
         app: Name of the application to build swaps for (or "all")
         app_config: Application configuration dictionary
 
@@ -114,62 +234,27 @@ def build_swaps_dict(swaps: str, app: str, app_config: dict) -> dict[str, SwapCo
         FileNotFoundError: If the swaps directory doesn't exist
         IOError: If file reading fails
     """
+    if isinstance(swaps, str):
+        grouped_files = _find_grouped_files(swaps)
+    else:
+        grouped_files = swaps
+    return _build_swaps_dict_from_grouped_files(grouped_files, app_config, app)
+
+
+def _build_swaps_dict_from_grouped_files(grouped_files: dict[tuple[str, int, int],
+                                                             list[tuple[str, str]]],
+                                        app_config: dict, app: str) -> dict[str, SwapConfig]:
+    """Build the swaps dictionary from a dictionary of grouped files.
+
+    Args:
+        grouped_files: The dictionary of grouped files
+        app_config: The application configuration dictionary
+        app: The name of the application to build swaps for (or "all")
+
+    Returns:
+        Dictionary mapping a unique key to SwapConfig objects
+    """
     swaps_dict: dict[str, SwapConfig] = {}
-
-    # Group files by (app_name, run_num, optimized_code_num)
-    grouped_files: dict[tuple[str, str, str], list[tuple[str, str]]] = {}
-
-    for root, _, files in os.walk(swaps):
-        for file in files:
-            run_num = None
-            optimized_code_num = None
-            app_name = None
-
-            # Try pattern: run_<num>_optimized_code_<num>_file_<n>.cu (new format)
-            if match := re.match(r"run_(\d+)_optimized_code_(\d+)_file_(\d+)\.cu$", file):
-                run_num = match.group(1)
-                optimized_code_num = match.group(2)
-                # App name is everything before the last _ in the directory three levels up
-                path_parts = root.split("/")
-                if len(path_parts) >= 3:
-                    app_name = "_".join(path_parts[-3].split("_")[:-1])
-                else:
-                    continue
-            # Try pattern: *_file_<n>.cu (new format, run_num/optimized_code_num in directory)
-            elif match := re.match(r".*_file_(\d+)\.cu$", file):
-                # Extract run_num and optimized_code_num from directory structure
-                path_parts = root.split("/")
-                if len(path_parts) >= 3:
-                    app_name = "_".join(path_parts[-3].split("_")[:-1])
-                else:
-                    continue
-
-                # Look for pattern run_<num>_optimized_code_<num> in the path
-                for part in path_parts:
-                    if match_run := re.search(r"run_(\d+)_optimized_code_(\d+)", part):
-                        run_num = match_run.group(1)
-                        optimized_code_num = match_run.group(2)
-                        break
-            # Try old pattern: run_<num>_optimized_code_<num>.cu (backward compatibility)
-            elif match := re.match(r"run_(\d+)_optimized_code_(\d+)\.cu$", file):
-                run_num = match.group(1)
-                optimized_code_num = match.group(2)
-                # App name is everything before the last _ in the directory three levels up
-                path_parts = root.split("/")
-                if len(path_parts) >= 3:
-                    app_name = "_".join(path_parts[-3].split("_")[:-1])
-                else:
-                    continue
-
-            if run_num is None or optimized_code_num is None or app_name is None:
-                continue
-
-            full_path = os.path.join(root, file)
-            key = (app_name, run_num, optimized_code_num)
-
-            if key not in grouped_files:
-                grouped_files[key] = []
-            grouped_files[key].append((full_path, file))
 
     # Process each group to create SwapConfig objects
     for (app_name, run_num, optimized_code_num), file_list in grouped_files.items():
@@ -177,29 +262,15 @@ def build_swaps_dict(swaps: str, app: str, app_config: dict) -> dict[str, SwapCo
         if app != "all" and app_name != app:
             continue
 
-        # Find the app config for this app
-        app_dict = None
-        for app_entry in app_config.get("apps", []):
-            if app_entry["name"] == app_name:
-                app_dict = app_entry
-                break
-
-        if app_dict is None:
+        # Get the list of files that can be swapped for this app
+        swappable_files = _get_swappable_files(app_config, app_name)
+        if not swappable_files:
             continue
-
-        # Get list of files that can be swapped (kernel_file + extra_files)
-        swappable_files = [app_dict.get("kernel_file")]
-        if "extra_files" in app_dict:
-            swappable_files.extend(app_dict["extra_files"])
-        swappable_files = [f for f in swappable_files if f]  # Remove None values
 
         # Process each file in this group
         file_swaps: list[FileSwap] = []
-        for full_path, file in file_list:
+        for full_path, code in file_list:
             try:
-                with open(full_path, "r", encoding="utf-8") as f:
-                    code = f.read()
-
                 # First line contains comment indicating target filename
                 first_line = code.splitlines()[0] if code.splitlines() else ""
                 # Extract filename from first line (typically at the end)
@@ -251,8 +322,11 @@ def build_swaps_dict(swaps: str, app: str, app_config: dict) -> dict[str, SwapCo
             swaps_dict[config_key] = SwapConfig(
                 app_name=app_name,
                 file_swaps=file_swaps,
-                run_num=run_num,
-                optimized_code_num=optimized_code_num
+                run_num=str(run_num),
+                optimized_code_num=str(optimized_code_num)
             )
+        else:
+            print(f"Warning: No files to swap for {app_name} run {run_num} optimized code " \
+                + f"{optimized_code_num} in {file_list}")
 
     return swaps_dict
