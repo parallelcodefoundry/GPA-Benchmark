@@ -12,8 +12,7 @@ import shutil
 from driver_src.driver_models import SwapConfig, FileSwap
 
 
-def swap_file_in_app(app: dict, swap_config: SwapConfig, temp_dir: str,
-                     detect_regions: bool) -> None:
+def swap_file_in_app(swap_config: SwapConfig, temp_dir: str, detect_regions: bool) -> None:
     """Swap files in the application directory on disk.
 
     For each file in the swap configuration, backs up the original file. If the file
@@ -22,7 +21,6 @@ def swap_file_in_app(app: dict, swap_config: SwapConfig, temp_dir: str,
     entire file.
 
     Args:
-        app: Application configuration dictionary
         swap_config: Swap configuration containing the files to swap in
         temp_dir: Temporary directory where working copy of application directory is located
         detect_regions: Whether to detect if the kernel file to swap into contains editable region
@@ -227,7 +225,6 @@ def build_swaps_dict(swaps: str, app: str, app_config: dict) -> dict[str, SwapCo
                     # Check if this target filename is in the swappable files list
                     # Match by basename or full path
                     target_basename = os.path.basename(target_filename)
-                    matched = False
                     for swappable_file in swappable_files:
                         swappable_basename = os.path.basename(swappable_file)
                         if target_filename == swappable_file or target_basename == swappable_basename:
@@ -240,9 +237,8 @@ def build_swaps_dict(swaps: str, app: str, app_config: dict) -> dict[str, SwapCo
                                 swap_file_dest_name=swappable_file,
                                 code=rest_of_code
                             ))
-                            matched = True
                             break
-            except (IOError, UnicodeDecodeError) as e:
+            except (IOError, UnicodeDecodeError):
                 # Skip files that can't be read
                 continue
 

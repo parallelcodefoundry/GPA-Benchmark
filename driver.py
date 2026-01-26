@@ -67,7 +67,7 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace, temp_dir: st
     if not args.postprocess_nsys:
         # Swap file in if this is a swap pass
         if swap_config:
-            swap_file_in_app(app, swap_config, temp_dir, args.detect_regions)
+            swap_file_in_app(swap_config, temp_dir, args.detect_regions)
 
         try:
             # Build
