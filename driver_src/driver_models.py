@@ -38,7 +38,7 @@ class DriverConfig:
         num_samples: Number of times to collect ncu/nsys profiles (default: 3)
         output_file: File to save the long results to (default: "driver_results.json")
         temp_dir: Temporary directory to use (default: None, uses /tmp)
-        verbose: Verbosity level: 0=default, 1=-v, 2=-vv (default: 0)
+        log_level: Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL (default: "WARNING")
         no_progress: Do not display a progress bar (default: False)
     """
     sm_version: int
@@ -55,7 +55,7 @@ class DriverConfig:
     num_samples: int = 3
     output_file: str = "driver_results.json"
     temp_dir: str | None = None
-    verbose: int = 0
+    log_level: str = "WARNING"
     no_progress: bool = False
 
     def __init__(self, app: str,
@@ -72,7 +72,7 @@ class DriverConfig:
                  num_samples: int,
                  output_file: str,
                  temp_dir: str | None,
-                 verbose: int,
+                 log_level: str,
                  no_progress: bool):
         self.app = app
         self.sm_version = sm_version if sm_version is not None else detect_sm_version()
@@ -88,7 +88,7 @@ class DriverConfig:
         self.num_samples = num_samples
         self.output_file = output_file
         self.temp_dir = temp_dir
-        self.verbose = verbose
+        self.log_level = log_level
         self.no_progress = no_progress
 
     @classmethod
@@ -116,7 +116,7 @@ class DriverConfig:
             num_samples=args.num_samples,
             output_file=args.output_file,
             temp_dir=args.temp_dir,
-            verbose=args.verbose,
+            log_level=args.log_level,
             no_progress=args.no_progress
         )
 

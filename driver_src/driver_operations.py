@@ -11,7 +11,7 @@ from driver_src.driver_utils import subprocess_wrapper, get_bin_path, get_run_pa
 
 
 def build_app(app: dict, sm_version: int, no_clean: bool,env: dict, temp_dir: str,
-              verbose: int = 0) -> tuple[bool, subprocess.CompletedProcess]:
+              log_level: str = "WARNING") -> tuple[bool, subprocess.CompletedProcess]:
     """Build the application.
 
     Cleans the application (unless no_clean is True), then builds it with the
@@ -23,7 +23,7 @@ def build_app(app: dict, sm_version: int, no_clean: bool,env: dict, temp_dir: st
         no_clean: If True, skip the clean step
         env: Environment variables dictionary
         temp_dir: Temporary directory where working copy of application directory is located
-        verbose: Verbosity level (0=default, 1=-v, 2=-vv)
+        log_level: Logging level (default: "WARNING")
 
     Returns:
         Tuple of (success: bool, result: CompletedProcess)
@@ -35,7 +35,7 @@ def build_app(app: dict, sm_version: int, no_clean: bool,env: dict, temp_dir: st
         clean_command = app["clean_command"].split() if "clean_command" in app \
             else ["make", "clean"]
         clean_result = subprocess_wrapper(clean_command, build_path, env, quiet=True,
-                                          verbose=verbose)
+                                          log_level=log_level)
 
         if clean_result.returncode != 0:
             # Directly remove executable if make clean fails
@@ -49,12 +49,12 @@ def build_app(app: dict, sm_version: int, no_clean: bool,env: dict, temp_dir: st
         build_command = app["build_command"].split()
     build_command.append(f"SM_VERSION={sm_version}")
 
-    result = subprocess_wrapper(build_command, build_path, env, verbose=verbose)
+    result = subprocess_wrapper(build_command, build_path, env, log_level=log_level)
     return result.returncode == 0, result
 
 
 def run_app(app: dict, env: dict, temp_dir: str,
-            verbose: int = 0) -> tuple[bool, subprocess.CompletedProcess]:
+            log_level: str = "WARNING") -> tuple[bool, subprocess.CompletedProcess]:
     """Run the application.
 
     Removes the test output file if it exists, then runs the application.
@@ -63,7 +63,7 @@ def run_app(app: dict, env: dict, temp_dir: str,
         app: Application configuration dictionary
         env: Environment variables dictionary
         temp_dir: Temporary directory where working copy of application directory is located
-        verbose: Verbosity level (0=default, 1=-v, 2=-vv)
+        log_level: Logging level (default: "WARNING")
 
     Returns:
         Tuple of (success: bool, result: CompletedProcess)
@@ -76,6 +76,6 @@ def run_app(app: dict, env: dict, temp_dir: str,
 
     run_path = get_run_path(app, temp_dir)
     run_command = app["run_command"].split()
-    result = subprocess_wrapper(run_command, run_path, env, verbose=verbose)
+    result = subprocess_wrapper(run_command, run_path, env, log_level=log_level)
 
     return result.returncode == 0, result

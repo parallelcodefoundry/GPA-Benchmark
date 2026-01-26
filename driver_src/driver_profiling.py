@@ -5,6 +5,7 @@ Profiling Functions for GPA-Benchmark Driver
 This module provides functions for profiling applications with Nsight Systems
 and Nsight Compute, and for postprocessing profiling data.
 """
+import logging
 import os
 from typing import Any
 from collections.abc import Hashable
@@ -13,6 +14,8 @@ import pandas as pd
 
 from driver_src.driver_models import SwapConfig
 from driver_src.driver_utils import subprocess_wrapper, setup_profile_dir, get_run_path
+
+logger = logging.getLogger("GPA-Benchmark")
 
 
 # Default NCU arguments for profiling
@@ -46,8 +49,9 @@ def _update_pbar(pbar: Any | None, num_samples_finished: int, num_samples: int) 
             pbar()
 
 
-def nsys_profile_app(app: dict, env: dict, temp_dir: str, num_samples: int, verbose: int = 0,
-                     swap_config: SwapConfig | None = None, pbar: Any | None = None) -> bool:
+def nsys_profile_app(app: dict, env: dict, temp_dir: str, num_samples: int,
+                     log_level: str = "WARNING", swap_config: SwapConfig | None = None,
+                     pbar: Any | None = None) -> bool:
     """Profile the application with Nsight Systems.
 
     Args:
@@ -55,7 +59,7 @@ def nsys_profile_app(app: dict, env: dict, temp_dir: str, num_samples: int, verb
         env: Environment variables dictionary
         temp_dir: Temporary directory where working copy of application directory is located
         num_samples: Number of times to collect profiles
-        verbose: Verbosity level (0=default, 1=-v, 2=-vv)
+        log_level: Logging level (default: "WARNING")
         swap_config: Swap configuration containing the code to swap in
         pbar: Progress bar to update
 
@@ -77,11 +81,11 @@ def nsys_profile_app(app: dict, env: dict, temp_dir: str, num_samples: int, verb
         nsys_command.extend(app["run_command"].split())
 
         run_path = get_run_path(app, temp_dir)
-        result = subprocess_wrapper(nsys_command, run_path, env, verbose=verbose)
+        result = subprocess_wrapper(nsys_command, run_path, env, log_level=log_level)
 
         profile_file = profile_output + ".nsys-rep"
         if not (result.returncode == 0 and os.path.exists(profile_file)):
-            print(f"Warning: could not find Nsight Systems profile file {profile_file}")
+            logger.warning("Could not find Nsight Systems profile file %s", profile_file)
             _update_pbar(pbar, num_samples_finished, num_samples)
             return False
 
@@ -92,8 +96,9 @@ def nsys_profile_app(app: dict, env: dict, temp_dir: str, num_samples: int, verb
     return True
 
 
-def ncu_profile_app(app: dict, env: dict, temp_dir: str, num_samples: int, verbose: int = 0,
-                    swap_config: SwapConfig | None = None, pbar: Any | None = None) -> bool:
+def ncu_profile_app(app: dict, env: dict, temp_dir: str, num_samples: int,
+                    log_level: str = "WARNING", swap_config: SwapConfig | None = None,
+                    pbar: Any | None = None) -> bool:
     """Profile the application with Nsight Compute.
 
     Args:
@@ -101,7 +106,7 @@ def ncu_profile_app(app: dict, env: dict, temp_dir: str, num_samples: int, verbo
         env: Environment variables dictionary
         temp_dir: Temporary directory where working copy of application directory is located
         num_samples: Number of times to collect profiles
-        verbose: Verbosity level (0=default, 1=-v, 2=-vv)
+        log_level: Logging level (default: "WARNING")
         swap_config: Swap configuration containing the code to swap in
         pbar: Progress bar to update
 
@@ -126,11 +131,11 @@ def ncu_profile_app(app: dict, env: dict, temp_dir: str, num_samples: int, verbo
         ncu_command.extend(app["run_command"].split())
 
         run_path = get_run_path(app, temp_dir)
-        result = subprocess_wrapper(ncu_command, run_path, env, verbose=verbose)
+        result = subprocess_wrapper(ncu_command, run_path, env, log_level=log_level)
 
         profile_file = profile_output + ".ncu-rep"
         if not (result.returncode == 0 and os.path.exists(profile_file)):
-            print(f"Warning: could not find Nsight Compute profile file {profile_file}")
+            logger.warning("Could not find Nsight Compute profile file %s", profile_file)
             _update_pbar(pbar, num_samples_finished, num_samples)
             return False
 
@@ -166,7 +171,7 @@ def _parse_ncu_args(app: dict) -> tuple[str, int]:
     return kernel_name, launch_skip
 
 
-def postprocess_nsys_app(app: dict, env: dict, num_samples: int, verbose: int = 0,
+def postprocess_nsys_app(app: dict, env: dict, num_samples: int, log_level: str = "WARNING",
                          swap_config: SwapConfig | None = None,
                          pbar: Any | None = None) -> list[dict[Hashable, Any]] | None:
     """Postprocess the Nsight Systems profile.
@@ -177,9 +182,8 @@ def postprocess_nsys_app(app: dict, env: dict, num_samples: int, verbose: int = 
     Args:
         app: Application configuration dictionary
         env: Environment variables dictionary
-        temp_dir: Temporary directory where working copy of application directory is located
         num_samples: Number of times to collect profiles
-        verbose: Verbosity level (0=default, 1=-v, 2=-vv)
+        log_level: Logging level (default: "WARNING")
         swap_config: Swap configuration containing the code to swap in
         pbar: Progress bar to update
 
@@ -200,21 +204,21 @@ def postprocess_nsys_app(app: dict, env: dict, num_samples: int, verbose: int = 
         nsys_rep_file = os.path.join(profile_dir, nsys_name + ".nsys-rep")
 
         if not os.path.exists(nsys_rep_file):
-            print(f"Warning: could not find Nsight Systems profile file {nsys_rep_file}")
+            logger.warning("Could not find Nsight Systems profile file %s", nsys_rep_file)
             _update_pbar(pbar, num_samples_finished, num_samples)
             return None
 
         # Convert nsys-rep to sqlite
         postprocess_command = ["nsys", "export", "-f", "true", "-t", "sqlite", nsys_rep_file]
         if subprocess_wrapper(postprocess_command, profile_dir, env,
-                              verbose=verbose).returncode != 0:
-            print(f"Warning: could not postprocess Nsight Systems profile file {nsys_rep_file}")
+                              log_level=log_level).returncode != 0:
+            logger.warning("Could not postprocess Nsight Systems profile file %s", nsys_rep_file)
             _update_pbar(pbar, num_samples_finished, num_samples)
             return None
 
         sqlite_file = os.path.join(profile_dir, nsys_name + ".sqlite")
         if not os.path.exists(sqlite_file):
-            print(f"Warning: could not find sqlite file {sqlite_file}")
+            logger.warning("Could not find sqlite file %s", sqlite_file)
             _update_pbar(pbar, num_samples_finished, num_samples)
             return None
 
@@ -240,8 +244,8 @@ def postprocess_nsys_app(app: dict, env: dict, num_samples: int, verbose: int = 
         try:
             kernel_row = df[df["shortName"] == kernel_name].iloc[[launch_skip]]
         except IndexError:
-            print(f"Warning: could not find kernel {kernel_name} in Nsight Systems profile for " \
-                + f"{app['name']} at launch skip {launch_skip}")
+            logger.warning("Could not find kernel %s in Nsight Systems profile for %s at launch " \
+                + "skip %s", kernel_name, app['name'], launch_skip)
             _update_pbar(pbar, num_samples_finished, num_samples)
             return None
 

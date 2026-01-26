@@ -5,8 +5,11 @@ Reporting Functions for GPA-Benchmark Driver
 This module provides functions for displaying results and saving output to files.
 """
 import json
+import logging
 
 from driver_src.driver_models import AppResults, Operation, DriverPassResult
+
+logger = logging.getLogger("GPA-Benchmark")
 
 
 def print_report_table(results: dict[str, AppResults], operations: list[Operation]) -> None:
@@ -29,9 +32,9 @@ def print_report_table(results: dict[str, AppResults], operations: list[Operatio
     header = f"{'Application':<{app_name_width}}"
     for op in operations:
         header += f" | {op.value:<{col_width}}"
-    print("\n" + "=" * len(header))
-    print(header)
-    print("=" * len(header))
+    header_str = "\n" + "=" * len(header) + "\n" + header + "\n" + "=" * len(header)
+    for line in header_str.split("\n"):
+        logger.info(line)
 
     # Print rows
     for app_name, app_results in results.items():
@@ -47,10 +50,10 @@ def print_report_table(results: dict[str, AppResults], operations: list[Operatio
             else:
                 symbol = "-"
             row += f" | {symbol:<{col_width}}"
-        print(row)
+        logger.info(row)
 
-    print("=" * len(header))
-    print()
+    logger.info("=" * len(header))
+    logger.info("")
 
 
 def save_results(long_results: dict[str, list[DriverPassResult]], output_file: str) -> None:

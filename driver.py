@@ -26,6 +26,7 @@ API Usage:
     )
 """
 import argparse
+import logging
 import os
 import tempfile
 import shutil
@@ -42,6 +43,7 @@ from driver_src.driver_profiling import nsys_profile_app, ncu_profile_app, postp
 from driver_src.driver_config import setup_app_config, determine_operations
 from driver_src.driver_reporting import print_report_table, save_results
 
+logger = logging.getLogger("GPA-Benchmark")
 
 APP_DIRS = ["Castro", "darknet", "ExaTENSOR", "LULESH", "PeleC", "Quicksilver","rodinia", "XSBench"]
 
@@ -137,7 +139,7 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
                                               for fs in swap_config.file_swaps])
     else:
         result.swap_file_src_path = None
-    verbose = config.verbose
+    log_level = config.log_level
 
     # Skip build/run/validate if only postprocessing
     if not config.postprocess_nsys:
@@ -148,7 +150,7 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
         try:
             # Build
             build_success, build_result = build_app(
-                app, config.sm_version, config.no_clean, env, temp_dir, verbose
+                app, config.sm_version, config.no_clean, env, temp_dir, log_level
             )
             result.build_stdout = build_result.stdout.decode("utf-8")
             result.build_stderr = build_result.stderr.decode("utf-8")
@@ -171,7 +173,7 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
                 return result
 
             # Run
-            run_success, run_result = run_app(app, env, temp_dir, verbose)
+            run_success, run_result = run_app(app, env, temp_dir, log_level)
             result.run_stdout = run_result.stdout.decode("utf-8")
             result.run_stderr = run_result.stderr.decode("utf-8")
             result.run = run_success
@@ -188,7 +190,7 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
 
             # Validate
             validate_success = validate_app(app, run_result, temp_dir)
-            print(f"Validate success: {validate_success}")
+            logger.debug("Validate success: %s", validate_success)
             result.validate = validate_success
 
             if pbar is not None:
@@ -203,13 +205,13 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
 
             # NSYS Profile
             if config.nsys:
-                nsys_success = nsys_profile_app(app, env, temp_dir, config.num_samples, verbose,
+                nsys_success = nsys_profile_app(app, env, temp_dir, config.num_samples, log_level,
                                                 swap_config=swap_config or None, pbar=pbar)
                 result.nsys_profile = nsys_success
 
             # NCU Profile
             if config.ncu:
-                ncu_success = ncu_profile_app(app, env, temp_dir, config.num_samples, verbose,
+                ncu_success = ncu_profile_app(app, env, temp_dir, config.num_samples, log_level,
                                               swap_config=swap_config or None, pbar=pbar)
                 result.ncu_profile = ncu_success
 
@@ -220,7 +222,7 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
 
     # Postprocess NSYS (either standalone or after profiling)
     if config.postprocess_nsys or (config.nsys and result.nsys_profile):
-        postprocess_nsys_result = postprocess_nsys_app(app, env, config.num_samples, verbose,
+        postprocess_nsys_result = postprocess_nsys_app(app, env, config.num_samples, log_level,
                                                        swap_config=swap_config or None, pbar=pbar)
         result.nsys_post = postprocess_nsys_result is not None
         result.nsys_data = postprocess_nsys_result
@@ -323,7 +325,7 @@ def run_driver(
     num_samples: int = 3,
     output_file: str = "driver_results.json",
     temp_dir: str | None = None,
-    verbose: int = 0,
+    log_level: str = "WARNING",
     no_progress: bool = False
 ) -> tuple[dict[str, AppResults], list[Operation], dict[str, list[DriverPassResult]]]:
     """Run the driver programmatically with the same interface as the CLI.
@@ -347,7 +349,7 @@ def run_driver(
         num_samples: Number of times to collect ncu/nsys profiles (default: 3)
         output_file: File to save the long results to (default: "driver_results.json")
         temp_dir: Temporary directory to use (default: None, uses /tmp)
-        verbose: Verbosity level: 0=default, 1=-v, 2=-vv (default: 0)
+        log_level: Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL (default: WARNING)
         no_progress: Do not display a progress bar (default: False)
 
     Returns:
@@ -376,7 +378,7 @@ def run_driver(
         num_samples=num_samples,
         output_file=output_file,
         temp_dir=temp_dir,
-        verbose=verbose,
+        log_level=log_level,
         no_progress=no_progress
     )
 
@@ -480,17 +482,15 @@ def parse_args() -> argparse.Namespace:
         help="The temporary directory to use for the driver, must exist (default: /tmp)"
     )
     parser.add_argument(
-        "-v", "--verbose", action="count", default=0,
-        help="Increase verbosity: -v outputs stdout/stderr on failure, "
-             "-vv always outputs stdout and stderr"
+        "-l", "--log-level", type=str, default="WARNING",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Set logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL (default: WARNING)"
     )
     parser.add_argument(
         "--no-progress", action="store_true",
         help="Do not display a progress bar"
     )
     return parser.parse_args()
-
-# TODO: Switch to using logging instead of print statements
 
 def main() -> None:
     """Main function for driver.
@@ -502,9 +502,16 @@ def main() -> None:
         ValueError: If configuration is invalid
         FileNotFoundError: If required files don't exist
     """
-    print("Start driver.py")
-
     args = parse_args()
+
+    # Configure logging
+    log_level = getattr(logging, args.log_level.upper(), logging.WARNING)
+    logging.basicConfig(
+        level=log_level,
+        format='%(asctime)s [%(levelname)s] - %(message)s'
+    )
+
+    logger.info("Start driver.py")
 
     # Convert argparse.Namespace to DriverConfig
     driver_config = DriverConfig.from_args(args)

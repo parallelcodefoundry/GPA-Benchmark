@@ -5,9 +5,12 @@ Validation Functions for GPA-Benchmark Driver
 This module provides functions for validating application output against
 reference outputs using various validation strategies.
 """
+import logging
 import os
 import re
 import subprocess
+
+logger = logging.getLogger("GPA-Benchmark")
 
 
 def _get_test_output(app: dict, result: subprocess.CompletedProcess, temp_dir: str) -> str:
@@ -24,8 +27,8 @@ def _get_test_output(app: dict, result: subprocess.CompletedProcess, temp_dir: s
     if "test_output" in app:
         test_output_path = os.path.join(temp_dir, app["test_output"])
         if not os.path.exists(test_output_path):
-            print(f"Warning: could not find test output file {app['test_output']} for " \
-                + f"{app['name']}, trying stdout instead")
+            logger.warning("Could not find test output file %s for %s, trying stdout instead",
+                           app['test_output'], app['name'])
             return result.stdout.decode("utf-8")
         else:
             with open(test_output_path, "r", encoding="utf-8") as test_file:
@@ -153,8 +156,8 @@ def validate_float(test_output: str, app: dict, ref_output: str) -> bool:
                         + f"float pattern after '{float_grep}'")
 
     if not float_match:
-        print(f"Warning: No float found in test output for {app['name']}, " \
-              + f"looking for pattern after '{float_grep}'")
+        logger.warning("No float found in test output for %s, looking for pattern after '%s'",
+                       app['name'], float_grep)
         return False
 
     float_value = float(float_match.group(1))

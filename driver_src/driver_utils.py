@@ -5,42 +5,46 @@ Utility Functions for GPA-Benchmark Driver
 This module provides utility functions for subprocess execution, path resolution,
 directory setup, and system detection.
 """
+import logging
 import os
 import subprocess
 
+logger = logging.getLogger("GPA-Benchmark")
 
-def subprocess_wrapper(command: list[str], cwd: str, env: dict,
-                       quiet: bool = False, verbose: int = 0) -> subprocess.CompletedProcess:
-    """Wrapper for subprocess.run to capture stdout and stderr, print command before running.
+
+def subprocess_wrapper(command: list[str], cwd: str, env: dict, quiet: bool = False,
+                       log_level: str = "WARNING") -> subprocess.CompletedProcess:
+    """Wrapper for subprocess.run to capture stdout and stderr, log command before running.
 
     Args:
         command: Command to run as a list of strings
         cwd: Working directory for the command
         env: Environment variables dictionary
         quiet: If True, suppress default output
-        verbose: Verbosity level (0=default, 1=-v, 2=-vv)
-            - 0: Default behavior (never print stdout or stderr)
-            - 1: Print stdout and stderr on failure (except when quiet=True)
-            - 2: Always print stdout and stderr (even when quiet=True)
+        log_level: Logging level (default: "WARNING")
+            - DEBUG: Always log stdout and stderr
+            - INFO: Log stdout and stderr on failure (except when quiet=True)
+            - WARNING/ERROR/CRITICAL: Never log stdout or stderr
 
     Returns:
         CompletedProcess object with returncode, stdout, and stderr attributes
     """
-    print(f"Running command {' '.join(command)} in directory {cwd}")
+    logger.debug("Running command %s in directory %s", ' '.join(command), cwd)
     result = subprocess.run(command, cwd=cwd, env=env, check=False, capture_output=True)
 
-    if verbose >= 2:
-        # -vv: Always print stdout and stderr, even with quiet=True
-        print(result.stdout.decode("utf-8"))
-        print(result.stderr.decode("utf-8"))
-    elif verbose >= 1:
-        # -v: Print stdout and stderr on failure, unless quiet=True (then don't print anything)
-        if not quiet:
-            print(result.stdout.decode("utf-8"))
-            if result.returncode != 0:
-                print(result.stderr.decode("utf-8"))
-        # If quiet=True, don't print anything even with -v
-    # else: Default behavior (verbose=0): never print stdout or stderr
+    if log_level == "DEBUG":
+        # DEBUG: Always log stdout and stderr, even with quiet=True
+        logger.debug("Command stdout:\n%s", result.stdout.decode('utf-8'))
+        logger.debug("Command stderr:\n%s", result.stderr.decode('utf-8'))
+    elif log_level == "INFO":
+        # INFO: Log stdout and stderr on failure, unless quiet=True (then don't log anything)
+        if not quiet and result.returncode != 0:
+            if result.stdout:
+                logger.info("Command stdout:\n%s", result.stdout.decode('utf-8'))
+            if result.stderr:
+                logger.info("Command stderr:\n%s", result.stderr.decode('utf-8'))
+        # If quiet=True, don't log anything even with INFO
+    # else: Default behavior (WARNING/ERROR/CRITICAL): never log stdout or stderr
 
     return result
 
@@ -134,5 +138,5 @@ def detect_sm_version() -> int:
         sm_version = int(sm_version_str)
         return sm_version
     except (subprocess.CalledProcessError, ValueError, IndexError, FileNotFoundError) as e:
-        print(f"Warning: Could not detect SM version from nvidia-smi ({e}). Defaulting to 90.")
+        logger.warning("Could not detect SM version from nvidia-smi (%s). Defaulting to 90.", e)
         return 90

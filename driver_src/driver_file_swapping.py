@@ -5,11 +5,14 @@ File Swapping Operations for GPA-Benchmark Driver
 This module handles swapping code files in and out of applications for testing
 optimizations.
 """
+import logging
 import os
 import re
 import shutil
 
 from driver_src.driver_models import SwapConfig, FileSwap
+
+logger = logging.getLogger("GPA-Benchmark")
 
 
 def swap_file_in_app(swap_config: SwapConfig, temp_dir: str, detect_regions: bool) -> None:
@@ -47,7 +50,8 @@ def swap_file_in_app(swap_config: SwapConfig, temp_dir: str, detect_regions: boo
             # Replace entire file with swap file code
             with open(dest_path, "w", encoding="utf-8") as dest_file:
                 dest_file.write(file_swap.code)
-            print(f"Replaced entire file {dest_path} with swap file {file_swap.swap_file_src_path}")
+            logger.debug("Replaced entire file %s with swap file %s", dest_path,
+                         file_swap.swap_file_src_path)
             continue
 
         # Replace only the editable region
@@ -57,8 +61,8 @@ def swap_file_in_app(swap_config: SwapConfig, temp_dir: str, detect_regions: boo
 
         with open(dest_path, "w", encoding="utf-8") as dest_file:
             dest_file.write(dest_text)
-        print(f"Replaced editable region in {dest_path} with swap file " \
-            + f"{file_swap.swap_file_src_path}")
+        logger.debug("Replaced editable region in %s with swap file %s", dest_path,
+                     file_swap.swap_file_src_path)
 
 
 def swap_file_out_app(app: dict, temp_dir: str, swap_config: SwapConfig | None = None) -> None:
@@ -87,7 +91,7 @@ def swap_file_out_app(app: dict, temp_dir: str, swap_config: SwapConfig | None =
                 os.remove(backup_path)
             else:
                 raise FileNotFoundError(f"No backup file ({backup_path}) found for {dest_path}")
-            print(f"Restored file {dest_path}")
+            logger.debug("Restored file %s", dest_path)
     else:
         # Fallback: restore all .bak files found in temp_dir (for backward compatibility)
         # This handles the case where swap_config is not provided
@@ -99,7 +103,7 @@ def swap_file_out_app(app: dict, temp_dir: str, swap_config: SwapConfig | None =
                 os.remove(backup_path)
             else:
                 raise FileNotFoundError(f"No backup file ({backup_path}) found for {dest_path}")
-            print(f"Restored file {dest_path}")
+            logger.debug("Restored file %s", dest_path)
         else:
             raise FileNotFoundError(f"No kernel file ({dest_path}) found for {app.get('name')}")
 
@@ -339,7 +343,7 @@ def _build_swaps_dict_from_grouped_files(grouped_files: dict[tuple[str, int, int
             if file_swap:
                 file_swaps.append(file_swap)
             else:
-                print(f"Warning: No file swap found for {target_filename} in {full_path}")
+                logger.warning("No file swap found for %s in %s", target_filename, full_path)
 
         # Only create SwapConfig if we have at least one file swap
         if file_swaps:
@@ -353,7 +357,7 @@ def _build_swaps_dict_from_grouped_files(grouped_files: dict[tuple[str, int, int
                 optimized_code_num=str(optimized_code_num)
             )
         else:
-            print(f"Warning: No files to swap for {app_name} run {run_num} optimized code " \
-                + f"{optimized_code_num} in {file_list}")
+            logger.warning("No files to swap for %s run %s optimized code %s in %s",
+                           app_name, run_num, optimized_code_num, file_list)
 
     return swaps_dict
