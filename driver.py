@@ -490,6 +490,7 @@ def parse_args() -> argparse.Namespace:
     )
     return parser.parse_args()
 
+# TODO: Switch to using logging instead of print statements
 
 def main() -> None:
     """Main function for driver.

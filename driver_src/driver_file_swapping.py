@@ -147,6 +147,7 @@ def _find_grouped_files(swaps: str) -> dict[tuple[str, int, int], list[tuple[str
         Dictionary mapping a unique key to a list of tuples containing the full path and code
         of the swap files
     """
+    # TODO: Handle filenames with additional experiment metadata (e.g. optimized_code_drgpu_only)
     grouped_files: dict[tuple[str, int, int], list[tuple[str, str]]] = {}
 
     for root, _, files in os.walk(swaps):
@@ -241,6 +242,65 @@ def build_swaps_dict(swaps: str | dict[tuple[str, int, int], list[tuple[str, str
     return _build_swaps_dict_from_grouped_files(grouped_files, app_config, app)
 
 
+def _extract_target_filename(first_line: str) -> str | None:
+    """Try to extract the target filename from the first line of the code.
+
+    Args:
+        first_line: The first line of the code
+
+    Returns:
+        The target filename if it is found
+    """
+    # Try to extract from comment
+    if "//" in first_line:
+        parts = first_line.split("//")
+        if len(parts) > 1:
+            return parts[-1].strip().split()[-1]
+    elif "#" in first_line:
+        parts = first_line.split("#")
+        if len(parts) > 1:
+            return parts[-1].strip().split()[-1]
+    else:
+        # Fallback: last word in first line
+        words = first_line.strip().split()
+        if words:
+            return words[-1]
+    return None
+
+
+def _find_file_swap(target_filename: str | None, swappable_files: list[str], code: str,
+                    full_path: str) -> FileSwap | None:
+    """Find the file swap for the target filename.
+
+    Args:
+        target_filename: The target filename to match
+        swappable_files: The list of files that can be swapped
+        code: The code of the file to swap
+        full_path: The full path to the file to swap
+
+    Returns:
+        The FileSwap object if it is found
+    """
+    if target_filename is None:
+        return None
+
+    target_basename = os.path.basename(target_filename)
+    for swappable_file in swappable_files:
+        swappable_basename = os.path.basename(swappable_file)
+        if target_filename == swappable_file or target_basename == swappable_basename:
+            # Extract code (skip first line and any markdown code fences)
+            rest_of_code = "\n".join([line for line in code.splitlines()[1:]
+                                      if not line.startswith("```")])
+
+            return FileSwap(
+                swap_file_src_path=full_path,
+                swap_file_dest_name=swappable_file,
+                code=rest_of_code
+            )
+
+    return None
+
+
 def _build_swaps_dict_from_grouped_files(grouped_files: dict[tuple[str, int, int],
                                                              list[tuple[str, str]]],
                                         app_config: dict, app: str) -> dict[str, SwapConfig]:
@@ -270,54 +330,21 @@ def _build_swaps_dict_from_grouped_files(grouped_files: dict[tuple[str, int, int
         # Process each file in this group
         file_swaps: list[FileSwap] = []
         for full_path, code in file_list:
-            try:
-                # First line contains comment indicating target filename
-                first_line = code.splitlines()[0] if code.splitlines() else ""
-                # Extract filename from first line (typically at the end)
-                # Try different patterns: could be "// filename" or "# filename" or just ends with
-                # filename
-                target_filename = None
+            # Extract the target filename from the first line of the code
+            target_filename = _extract_target_filename(code.splitlines()[0]
+                                                       if code.splitlines() else "")
 
-                # Try to extract from comment
-                if "//" in first_line:
-                    parts = first_line.split("//")
-                    if len(parts) > 1:
-                        target_filename = parts[-1].strip().split()[-1]
-                elif "#" in first_line:
-                    parts = first_line.split("#")
-                    if len(parts) > 1:
-                        target_filename = parts[-1].strip().split()[-1]
-                else:
-                    # Fallback: last word in first line
-                    words = first_line.strip().split()
-                    if words:
-                        target_filename = words[-1]
-
-                if target_filename:
-                    # Check if this target filename is in the swappable files list
-                    # Match by basename or full path
-                    target_basename = os.path.basename(target_filename)
-                    for swappable_file in swappable_files:
-                        swappable_basename = os.path.basename(swappable_file)
-                        if target_filename == swappable_file \
-                            or target_basename == swappable_basename:
-                            # Extract code (skip first line and any markdown code fences)
-                            rest_of_code = "\n".join([line for line in code.splitlines()[1:]
-                                                      if not line.startswith("```")])
-
-                            file_swaps.append(FileSwap(
-                                swap_file_src_path=full_path,
-                                swap_file_dest_name=swappable_file,
-                                code=rest_of_code
-                            ))
-                            break
-            except (IOError, UnicodeDecodeError):
-                # Skip files that can't be read
-                continue
+            # Find the file swap for the target filename
+            file_swap = _find_file_swap(target_filename, swappable_files, code, full_path)
+            if file_swap:
+                file_swaps.append(file_swap)
+            else:
+                print(f"Warning: No file swap found for {target_filename} in {full_path}")
 
         # Only create SwapConfig if we have at least one file swap
         if file_swaps:
             # Use a unique key for this swap config
+            # TODO: Handle additional experiment metadata (e.g. optimized_code_drgpu_only)
             config_key = f"{app_name}_run_{run_num}_opt_{optimized_code_num}"
             swaps_dict[config_key] = SwapConfig(
                 app_name=app_name,
