@@ -8,11 +8,22 @@ operations across one or more applications, optionally with code swapping for te
 optimizations.
 
 The driver supports:
-- Building applications with specified SM versions
+- Building applications with specified or auto-detected SM versions
 - Running applications and capturing output
 - Validating output against reference outputs
 - Profiling with Nsight Systems and Nsight Compute
 - Testing multiple code variants via file swapping
+
+API Usage:
+    The driver can be used programmatically via the run_driver() function:
+
+    from driver import run_driver
+
+    results, operations, long_results = run_driver(
+        app="XSBench",
+        nsys=True,
+        num_samples=5
+    )
 """
 import argparse
 import os
@@ -20,8 +31,9 @@ import tempfile
 import shutil
 from alive_progress import alive_bar
 
-from driver_src.driver_models import Operation, SwapConfig, DriverPassResult, AppResults
-from driver_src.driver_utils import get_bin_path, detect_sm_version
+from driver_src.driver_models import Operation, SwapConfig, DriverPassResult, AppResults, \
+    DriverConfig
+from driver_src.driver_utils import get_bin_path
 from driver_src.driver_file_swapping import swap_file_in_app, swap_file_out_app
 from driver_src.driver_validation import validate_app
 from driver_src.driver_operations import build_app, run_app
@@ -33,7 +45,7 @@ from driver_src.driver_reporting import print_report_table, save_results
 APP_DIRS = ["Castro", "darknet", "ExaTENSOR", "LULESH", "PeleC", "Quicksilver","rodinia", "XSBench"]
 
 
-def run_driver_pass(app: dict, env: dict, args: argparse.Namespace, temp_dir: str,
+def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
                     swap_config: SwapConfig | None = None) -> DriverPassResult:
     """Run a single driver pass for an application.
 
@@ -44,7 +56,8 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace, temp_dir: st
     Args:
         app: Application configuration dictionary
         env: Environment variables dictionary
-        args: Parsed command line arguments
+        config: Driver configuration object
+        temp_dir: Temporary directory where working copy of application directory is located
         swap_config: Optional swap configuration for testing optimized code
 
     Returns:
@@ -58,21 +71,22 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace, temp_dir: st
     result.run_num = swap_config.run_num if swap_config else None
     result.swap_num = swap_config.optimized_code_num if swap_config else None
     if swap_config and swap_config.file_swaps:
-        result.swap_file_src_path = ",".join([fs.swap_file_src_path for fs in swap_config.file_swaps])
+        result.swap_file_src_path = ",".join([fs.swap_file_src_path
+                                              for fs in swap_config.file_swaps])
     else:
         result.swap_file_src_path = None
-    verbose = getattr(args, 'verbose', 0)
+    verbose = config.verbose
 
     # Skip build/run/validate if only postprocessing
-    if not args.postprocess_nsys:
+    if not config.postprocess_nsys:
         # Swap file in if this is a swap pass
         if swap_config:
-            swap_file_in_app(swap_config, temp_dir, args.detect_regions)
+            swap_file_in_app(swap_config, temp_dir, config.detect_regions)
 
         try:
             # Build
             build_success, build_result = build_app(
-                app, args.sm_version, args.no_clean, env, temp_dir, verbose
+                app, config.sm_version, config.no_clean, env, temp_dir, verbose
             )
             result.build_stdout = build_result.stdout.decode("utf-8")
             result.build_stderr = build_result.stderr.decode("utf-8")
@@ -83,7 +97,7 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace, temp_dir: st
                           os.access(bin_path, os.X_OK))
 
             # Early return if build-only mode or build failed
-            if args.build or result.build is False:
+            if config.build or result.build is False:
                 if swap_config is None:
                     raise ValueError(f"Build failed for baseline ({app['name']})")
                 return result
@@ -110,14 +124,14 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace, temp_dir: st
                 return result
 
             # NSYS Profile
-            if args.nsys:
-                nsys_success = nsys_profile_app(app, env, temp_dir, args.num_samples, verbose,
+            if config.nsys:
+                nsys_success = nsys_profile_app(app, env, temp_dir, config.num_samples, verbose,
                                                 swap_config=swap_config or None)
                 result.nsys_profile = nsys_success
 
             # NCU Profile
-            if args.ncu:
-                ncu_success = ncu_profile_app(app, env, temp_dir, args.num_samples, verbose,
+            if config.ncu:
+                ncu_success = ncu_profile_app(app, env, temp_dir, config.num_samples, verbose,
                                               swap_config=swap_config or None)
                 result.ncu_profile = ncu_success
 
@@ -127,8 +141,8 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace, temp_dir: st
                 swap_file_out_app(app, temp_dir, swap_config)
 
     # Postprocess NSYS (either standalone or after profiling)
-    if args.postprocess_nsys or (args.nsys and result.nsys_profile):
-        postprocess_nsys_result = postprocess_nsys_app(app, env, args.num_samples, verbose,
+    if config.postprocess_nsys or (config.nsys and result.nsys_profile):
+        postprocess_nsys_result = postprocess_nsys_app(app, env, config.num_samples, verbose,
                                                        swap_config=swap_config or None)
         result.nsys_post = postprocess_nsys_result is not None
         result.nsys_data = postprocess_nsys_result
@@ -137,7 +151,7 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace, temp_dir: st
 
 
 def run_all(app_config: dict, swaps_dict: dict[str, SwapConfig] | None, env: dict,
-            args: argparse.Namespace) -> tuple[dict[str, AppResults], list[Operation],
+            config: DriverConfig) -> tuple[dict[str, AppResults], list[Operation],
                                                dict[str, list[DriverPassResult]]]:
     """Run all applications with their configured operations.
 
@@ -148,7 +162,7 @@ def run_all(app_config: dict, swaps_dict: dict[str, SwapConfig] | None, env: dic
         app_config: Application configuration dictionary
         swaps_dict: Optional dictionary of swap configurations
         env: Environment variables dictionary
-        args: Parsed command line arguments
+        config: Driver configuration object
 
     Returns:
         Tuple of:
@@ -158,21 +172,21 @@ def run_all(app_config: dict, swaps_dict: dict[str, SwapConfig] | None, env: dic
     """
     results: dict[str, AppResults] = {}
     long_results: dict[str, list[DriverPassResult]] = {}
-    operations = determine_operations(args)
+    operations = determine_operations(config)
 
     # Calculate total number of passes for progress bar
-    num_apps = len(app_config["apps"]) if args.app == "all" else 1
+    num_apps = len(app_config["apps"]) if config.app == "all" else 1
     if swaps_dict:
         num_apps = len(set([swap.app_name for swap in swaps_dict.values()]))
     num_runs = num_apps + (len(swaps_dict) if swaps_dict else 0)
 
-    with alive_bar(num_runs, disable=args.no_progress) as pbar:
+    with alive_bar(num_runs, disable=config.no_progress) as pbar:
         for app in app_config["apps"]:
             # Filter by app name if specified
-            if args.app != "all" and app["name"] != args.app:
+            if config.app != "all" and app["name"] != config.app:
                 continue
 
-            with tempfile.TemporaryDirectory(dir=args.temp_dir) as temp_dir:
+            with tempfile.TemporaryDirectory(dir=config.temp_dir) as temp_dir:
                 app_dir = next(app_dir for app_dir in APP_DIRS if app_dir in app["path"])
                 shutil.copytree(app_dir, os.path.join(temp_dir, app_dir))
 
@@ -190,7 +204,7 @@ def run_all(app_config: dict, swaps_dict: dict[str, SwapConfig] | None, env: dic
 
                 # Run each pass
                 for driver_pass in driver_passes:
-                    pass_results = run_driver_pass(app, env, args, temp_dir,
+                    pass_results = run_driver_pass(app, env, config, temp_dir,
                                                    swap_config=driver_pass)
                     is_swap = driver_pass is not None
                     results[app_name].update_from_pass_result(pass_results, is_swap)
@@ -198,6 +212,109 @@ def run_all(app_config: dict, swaps_dict: dict[str, SwapConfig] | None, env: dic
 
                     if pbar is not None:
                         pbar()  # pylint: disable=not-callable
+
+    return results, operations, long_results
+
+
+def run_driver(
+    app: str = "all",
+    sm_version: int | None = None,
+    cuda_home: str | None = None,
+    no_clean: bool = False,
+    build: bool = False,
+    nsys: bool = False,
+    ncu: bool = False,
+    config: str = "driver_apps.yaml",
+    swaps: str | None = None,
+    detect_regions: bool = False,
+    postprocess_nsys: bool = False,
+    num_samples: int = 3,
+    output_file: str = "driver_results.json",
+    temp_dir: str | None = None,
+    verbose: int = 0,
+    no_progress: bool = False
+) -> tuple[dict[str, AppResults], list[Operation], dict[str, list[DriverPassResult]]]:
+    """Run the driver programmatically with the same interface as the CLI.
+
+    This function provides a programmatic API that accepts the same parameters
+    as the command-line interface. It can be called from other Python packages
+    to run the driver functionality.
+
+    Args:
+        app: The application to run (default: "all")
+        sm_version: The SM version to use (default: None, will auto-detect from nvidia-smi)
+        cuda_home: Path to the CUDA installation to use (default: None)
+        no_clean: Do not clean the application before building (default: False)
+        build: Only build the application (skip run and validate) (default: False)
+        nsys: Profile the application with Nsight Systems (default: False)
+        ncu: Profile the application with Nsight Compute (default: False)
+        config: The app config file to use (default: "driver_apps.yaml")
+        swaps: Path to the directory containing code files to swap in (default: None)
+        detect_regions: Detect editable region markers in swap files (default: False)
+        postprocess_nsys: Only postprocess nsys-rep file(s) (default: False)
+        num_samples: Number of times to collect ncu/nsys profiles (default: 3)
+        output_file: File to save the long results to (default: "driver_results.json")
+        temp_dir: Temporary directory to use (default: None, uses /tmp)
+        verbose: Verbosity level: 0=default, 1=-v, 2=-vv (default: 0)
+        no_progress: Do not display a progress bar (default: False)
+
+    Returns:
+        Tuple of:
+        - results: Dictionary mapping app names to AppResults
+        - operations: List of operations that were performed
+        - long_results: Dictionary mapping app names to lists of DriverPassResult objects
+
+    Raises:
+        ValueError: If configuration is invalid
+        FileNotFoundError: If required files don't exist
+    """
+    # Create DriverConfig from parameters
+    driver_config = DriverConfig(
+        app=app,
+        sm_version=sm_version,
+        cuda_home=cuda_home,
+        no_clean=no_clean,
+        build=build,
+        nsys=nsys,
+        ncu=ncu,
+        config=config,
+        swaps=swaps,
+        detect_regions=detect_regions,
+        postprocess_nsys=postprocess_nsys,
+        num_samples=num_samples,
+        output_file=output_file,
+        temp_dir=temp_dir,
+        verbose=verbose,
+        no_progress=no_progress
+    )
+
+    return run_driver_config(driver_config)
+
+
+def run_driver_config(config: DriverConfig) -> tuple[dict[str, AppResults], list[Operation],
+                                                     dict[str, list[DriverPassResult]]]:
+    """Run the driver with a DriverConfig object.
+
+    Args:
+        config: Driver configuration object
+
+    Returns:
+        Tuple of:
+        - results: Dictionary mapping app names to AppResults
+        - operations: List of operations that were performed
+        - long_results: Dictionary mapping app names to lists of DriverPassResult objects
+    """
+    # Setup configuration
+    app_config, swaps_dict, env = setup_app_config(config)
+
+    # Run all applications
+    results, operations, long_results = run_all(app_config, swaps_dict, env, config)
+
+    # Display results
+    print_report_table(results, operations)
+
+    # Save results
+    save_results(long_results, config.output_file)
 
     return results, operations, long_results
 
@@ -217,7 +334,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--sm-version", type=int, default=None,
-        help="The SM version to use (default: auto-detect from nvidia-smi)"
+        help="The SM version to use (default: None, will auto-detect from nvidia-smi)"
     )
     parser.add_argument(
         "--cuda-home", type=str, default=None,
@@ -296,21 +413,11 @@ def main() -> None:
 
     args = parse_args()
 
-    # Auto-detect SM version if not provided
-    if args.sm_version is None:
-        args.sm_version = detect_sm_version()
+    # Convert argparse.Namespace to DriverConfig
+    driver_config = DriverConfig.from_args(args)
 
-    # Setup configuration
-    app_config, swaps_dict, env = setup_app_config(args)
-
-    # Run all applications
-    results, operations, long_results = run_all(app_config, swaps_dict, env, args)
-
-    # Display results
-    print_report_table(results, operations)
-
-    # Save results
-    save_results(long_results, args.output_file)
+    # Call run_driver_config with the driver_config
+    run_driver_config(driver_config)
 
 
 if __name__ == "__main__":

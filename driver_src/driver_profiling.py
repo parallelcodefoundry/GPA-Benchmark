@@ -53,8 +53,9 @@ def nsys_profile_app(app: dict, env: dict, temp_dir: str, num_samples: int, verb
     for i in range(num_samples):
         profile_output = os.path.join(profile_dir, app["name"])
         if swap_config:
-            profile_output += f"_{swap_config.file_swaps[0].swap_file_src_path\
-                .split('/')[-1].replace('.cu', '')}"
+            swap_filename = swap_config.file_swaps[0].swap_file_src_path.split('/')[-1]\
+                .replace('.cu', '')
+            profile_output += f"_{swap_filename}"
         profile_output += f"_sample_{i}"
 
         nsys_command = ["nsys", "profile", "-o", profile_output, "-f", "true"]
@@ -90,8 +91,9 @@ def ncu_profile_app(app: dict, env: dict, temp_dir: str, num_samples: int, verbo
     for i in range(num_samples):
         profile_output = os.path.join(profile_dir, app["name"])
         if swap_config:
-            profile_output += f"_{swap_config.file_swaps[0].swap_file_src_path\
-                .split('/')[-1].replace('.cu', '')}"
+            swap_filename = swap_config.file_swaps[0].swap_file_src_path.split('/')[-1]\
+                .replace('.cu', '')
+            profile_output += f"_{swap_filename}"
         profile_output += f"_sample_{i}"
 
         ncu_command = ["ncu", "-o", profile_output, "-f"]
@@ -159,8 +161,9 @@ def postprocess_nsys_app(app: dict, env: dict, num_samples: int, verbose: int = 
     for i in range(num_samples):
         nsys_name = app["name"]
         if swap_config:
-            nsys_name += f"_{swap_config.file_swaps[0].swap_file_src_path\
-                .split('/')[-1].replace('.cu', '')}"
+            swap_filename = swap_config.file_swaps[0].swap_file_src_path.split('/')[-1]\
+                .replace('.cu', '')
+            nsys_name += f"_{swap_filename}"
         nsys_name += f"_sample_{i}"
         nsys_rep_file = os.path.join(profile_dir, nsys_name + ".nsys-rep")
 

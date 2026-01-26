@@ -6,21 +6,20 @@ This module handles loading and validating application configuration, determinin
 which operations to perform, and setting up the environment.
 """
 import os
-import argparse
 import yaml
 
-from driver_src.driver_models import Operation, SwapConfig
+from driver_src.driver_models import Operation, SwapConfig, DriverConfig
 from driver_src.driver_file_swapping import build_swaps_dict
 
 
-def setup_app_config(args: argparse.Namespace) -> tuple[dict, dict[str, SwapConfig] | None, dict]:
+def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] | None, dict]:
     """Setup the application configuration.
 
     Loads the YAML configuration file, validates arguments, sets up environment
     variables, and optionally loads swap configurations.
 
     Args:
-        args: Parsed command line arguments
+        config: Driver configuration object
 
     Returns:
         Tuple of (app_config, swaps_dict, env)
@@ -34,22 +33,22 @@ def setup_app_config(args: argparse.Namespace) -> tuple[dict, dict[str, SwapConf
         yaml.YAMLError: If config file is invalid YAML
     """
     # Validate argument combinations
-    if args.postprocess_nsys and (args.nsys or args.swaps or args.ncu or args.build):
+    if config.postprocess_nsys and (config.nsys or config.swaps or config.ncu or config.build):
         raise ValueError("Cannot postprocess Nsight Systems profiles only if other operations " \
             + "are specified.")
-    if args.build and (args.nsys or args.ncu or args.swaps or args.postprocess_nsys):
+    if config.build and (config.nsys or config.ncu or config.swaps or config.postprocess_nsys):
         raise ValueError("Cannot build applications only if other operations are specified.")
 
     # Load config file
-    with open(args.config, "r", encoding="utf-8") as f:
+    with open(config.config, "r", encoding="utf-8") as f:
         app_config: dict = yaml.safe_load(f)
 
     # Validate app name
-    if args.app != "all" and args.app not in [app["name"] for app in app_config["apps"]]:
-        raise ValueError(f"Application {args.app} not found in config file {args.config}")
+    if config.app != "all" and config.app not in [app["name"] for app in app_config["apps"]]:
+        raise ValueError(f"Application {config.app} not found in config file {config.config}")
 
     # Setup CUDA environment
-    cuda_home = (args.cuda_home or
+    cuda_home = (config.cuda_home or
                  os.getenv("CUDA_HOME") or
                  os.getenv("CUDA_PATH") or
                  os.getenv("CUDA_ROOT") or
@@ -58,49 +57,49 @@ def setup_app_config(args: argparse.Namespace) -> tuple[dict, dict[str, SwapConf
     env["CUDA_HOME"] = cuda_home
 
     # Load swaps if specified
-    if args.swaps:
-        swaps_dict = build_swaps_dict(args.swaps, args.app, app_config)
+    if config.swaps:
+        swaps_dict = build_swaps_dict(config.swaps, config.app, app_config)
         return app_config, swaps_dict, env
     else:
         return app_config, None, env
 
 
-def determine_operations(args: argparse.Namespace) -> list[Operation]:
-    """Determine which operations will be performed based on command line arguments.
+def determine_operations(config: DriverConfig) -> list[Operation]:
+    """Determine which operations will be performed based on driver configuration.
 
     Args:
-        args: Parsed command line arguments
+        config: Driver configuration object
 
     Returns:
         List of Operation enums that will be performed
     """
     operations: list[Operation] = []
 
-    if not args.postprocess_nsys:
+    if not config.postprocess_nsys:
         operations.append(Operation.BUILD)
-        if not args.build:
+        if not config.build:
             operations.append(Operation.RUN)
             operations.append(Operation.VALIDATE)
 
-    if args.nsys:
+    if config.nsys:
         operations.append(Operation.NSYS_PROFILE)
 
-    if args.nsys or args.postprocess_nsys:
+    if config.nsys or config.postprocess_nsys:
         operations.append(Operation.NSYS_POST)
 
-    if args.ncu:
+    if config.ncu:
         operations.append(Operation.NCU_PROFILE)
 
-    if args.swaps:
+    if config.swaps:
         operations.append(Operation.SWAP_BUILDS)
-        if not args.build:
+        if not config.build:
             operations.append(Operation.SWAP_RUNS)
             operations.append(Operation.SWAP_VALID)
-            if args.nsys:
+            if config.nsys:
                 operations.append(Operation.SWAP_NSYS)
-            if args.ncu:
+            if config.ncu:
                 operations.append(Operation.SWAP_NCU)
-            if args.postprocess_nsys:
+            if config.postprocess_nsys:
                 operations.append(Operation.SWAP_NSYS_POST)
 
     return operations

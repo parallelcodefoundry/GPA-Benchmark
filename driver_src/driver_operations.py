@@ -53,7 +53,8 @@ def build_app(app: dict, sm_version: int, no_clean: bool,env: dict, temp_dir: st
     return result.returncode == 0, result
 
 
-def run_app(app: dict, env: dict, temp_dir: str, verbose: int = 0) -> tuple[bool, subprocess.CompletedProcess]:
+def run_app(app: dict, env: dict, temp_dir: str,
+            verbose: int = 0) -> tuple[bool, subprocess.CompletedProcess]:
     """Run the application.
 
     Removes the test output file if it exists, then runs the application.

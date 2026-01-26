@@ -203,7 +203,8 @@ def build_swaps_dict(swaps: str, app: str, app_config: dict) -> dict[str, SwapCo
                 # First line contains comment indicating target filename
                 first_line = code.splitlines()[0] if code.splitlines() else ""
                 # Extract filename from first line (typically at the end)
-                # Try different patterns: could be "// filename" or "# filename" or just ends with filename
+                # Try different patterns: could be "// filename" or "# filename" or just ends with
+                # filename
                 target_filename = None
 
                 # Try to extract from comment
@@ -227,7 +228,8 @@ def build_swaps_dict(swaps: str, app: str, app_config: dict) -> dict[str, SwapCo
                     target_basename = os.path.basename(target_filename)
                     for swappable_file in swappable_files:
                         swappable_basename = os.path.basename(swappable_file)
-                        if target_filename == swappable_file or target_basename == swappable_basename:
+                        if target_filename == swappable_file \
+                            or target_basename == swappable_basename:
                             # Extract code (skip first line and any markdown code fences)
                             rest_of_code = "\n".join([line for line in code.splitlines()[1:]
                                                       if not line.startswith("```")])
