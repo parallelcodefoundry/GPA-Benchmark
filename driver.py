@@ -57,7 +57,10 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace, temp_dir: st
     result.app_name = app["name"]
     result.run_num = swap_config.run_num if swap_config else None
     result.swap_num = swap_config.optimized_code_num if swap_config else None
-    result.swap_file_src_path = swap_config.swap_file_src_path if swap_config else None
+    if swap_config and swap_config.file_swaps:
+        result.swap_file_src_path = ",".join([fs.swap_file_src_path for fs in swap_config.file_swaps])
+    else:
+        result.swap_file_src_path = None
     verbose = getattr(args, 'verbose', 0)
 
     # Skip build/run/validate if only postprocessing
@@ -119,9 +122,9 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace, temp_dir: st
                 result.ncu_profile = ncu_success
 
         finally:
-            # Always restore original file if we swapped
+            # Always restore original files if we swapped
             if swap_config:
-                swap_file_out_app(app, temp_dir)
+                swap_file_out_app(app, temp_dir, swap_config)
 
     # Postprocess NSYS (either standalone or after profiling)
     if args.postprocess_nsys or (args.nsys and result.nsys_profile):

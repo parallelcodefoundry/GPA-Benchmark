@@ -45,23 +45,33 @@ class Operation(Enum):
 
 
 @dataclass
+class FileSwap:
+    """Represents a single file swap operation.
+
+    Attributes:
+        swap_file_src_path: Path to the source swap file
+        swap_file_dest_name: Destination filename for the swap
+        code: The code content to swap in
+    """
+    swap_file_src_path: str
+    swap_file_dest_name: str
+    code: str
+
+
+@dataclass
 class SwapConfig:
     """Represents a swap configuration for replacing code in an application.
 
     Attributes:
         app_name: Name of the application
-        swap_file_src_path: Path to the source swap file
-        swap_file_dest_name: Destination filename for the swap
+        file_swaps: List of file swaps to perform
         run_num: Run number identifier
         optimized_code_num: Optimized code number identifier
-        code: The code content to swap in
     """
     app_name: str
-    swap_file_src_path: str
-    swap_file_dest_name: str
+    file_swaps: list[FileSwap]
     run_num: str
     optimized_code_num: str
-    code: str
 
 
 @dataclass

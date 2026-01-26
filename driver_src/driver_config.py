@@ -59,7 +59,7 @@ def setup_app_config(args: argparse.Namespace) -> tuple[dict, dict[str, SwapConf
 
     # Load swaps if specified
     if args.swaps:
-        swaps_dict = build_swaps_dict(args.swaps, args.app)
+        swaps_dict = build_swaps_dict(args.swaps, args.app, app_config)
         return app_config, swaps_dict, env
     else:
         return app_config, None, env
