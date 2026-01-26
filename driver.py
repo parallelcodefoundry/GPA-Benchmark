@@ -29,6 +29,7 @@ import argparse
 import os
 import tempfile
 import shutil
+from typing import Any
 from alive_progress import alive_bar
 
 from driver_src.driver_models import Operation, SwapConfig, DriverPassResult, AppResults, \
@@ -45,8 +46,68 @@ from driver_src.driver_reporting import print_report_table, save_results
 APP_DIRS = ["Castro", "darknet", "ExaTENSOR", "LULESH", "PeleC", "Quicksilver","rodinia", "XSBench"]
 
 
+def count_operations_per_pass(config: DriverConfig) -> int:
+    """Count the number of operations that will be performed in a single driver pass.
+
+    Args:
+        config: Driver configuration object
+
+    Returns:
+        Number of operations per pass
+    """
+    count = 0
+
+    if not config.postprocess_nsys:
+        count += 1 # BUILD always runs (unless only postprocessing)
+        if not config.build:
+            count += 2 # RUN and VALIDATE run if not build-only
+            if config.nsys:
+                count += config.num_samples
+            if config.ncu:
+                count += config.num_samples
+
+    if config.postprocess_nsys or config.nsys:
+        count += config.num_samples
+
+    return count
+
+
+def update_progress_for_skipped_operations(config: DriverConfig, pbar: Any,
+                                           failure_stage: str) -> None:
+    """Update progress bar for operations that will be skipped due to a failure.
+
+    Args:
+        config: Driver configuration object
+        pbar: Progress bar to update
+        failure_stage: Stage where failure occurred: 'build', 'run', 'validate', or 'nsys_profile'
+    """
+    if pbar is None:
+        return
+
+    skipped_ops = 0
+
+    if config.build:
+        return
+    if failure_stage == 'build':
+        skipped_ops += 1 # RUN
+    if failure_stage in ['run', 'build']:
+        skipped_ops += 1 # VALIDATE
+    if failure_stage in ['build', 'run', 'validate']:
+        if config.nsys:
+            skipped_ops += config.num_samples # NSYS_PROFILE
+        if config.ncu:
+            skipped_ops += config.num_samples # NCU_PROFILE
+    if failure_stage in ['build', 'run', 'validate', 'nsys_profile']:
+        if config.postprocess_nsys or config.nsys:
+            skipped_ops += config.num_samples # NSYS_POST
+
+    for _ in range(skipped_ops):
+        pbar()
+
+
 def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
-                    swap_config: SwapConfig | None = None) -> DriverPassResult:
+                    swap_config: SwapConfig | None = None,
+                    pbar: Any = None) -> DriverPassResult:
     """Run a single driver pass for an application.
 
     A driver pass consists of building, running, validating, and optionally
@@ -59,6 +120,7 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
         config: Driver configuration object
         temp_dir: Temporary directory where working copy of application directory is located
         swap_config: Optional swap configuration for testing optimized code
+        pbar: Optional progress bar to update after each operation
 
     Returns:
         DriverPassResult object containing all results from this pass
@@ -96,10 +158,16 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
                           os.path.exists(bin_path) and
                           os.access(bin_path, os.X_OK))
 
+            if pbar is not None:
+                pbar()  # Update progress for BUILD operation
+
             # Early return if build-only mode or build failed
             if config.build or result.build is False:
                 if swap_config is None:
                     raise ValueError(f"Build failed for baseline ({app['name']})")
+                # Update progress for skipped operations due to build failure
+                if not config.build:
+                    update_progress_for_skipped_operations(config, pbar, 'build')
                 return result
 
             # Run
@@ -108,9 +176,14 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
             result.run_stderr = run_result.stderr.decode("utf-8")
             result.run = run_success
 
+            if pbar is not None:
+                pbar()  # Update progress for RUN operation
+
             if result.run is False:
                 if swap_config is None:
                     raise ValueError(f"Run failed for baseline ({app['name']})")
+                # Update progress for skipped operations due to run failure
+                update_progress_for_skipped_operations(config, pbar, 'run')
                 return result
 
             # Validate
@@ -118,21 +191,26 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
             print(f"Validate success: {validate_success}")
             result.validate = validate_success
 
+            if pbar is not None:
+                pbar()  # Update progress for VALIDATE operation
+
             if result.validate is False:
                 if swap_config is None:
                     raise ValueError(f"Validation failed for baseline ({app['name']})")
+                # Update progress for skipped operations due to validation failure
+                update_progress_for_skipped_operations(config, pbar, 'validate')
                 return result
 
             # NSYS Profile
             if config.nsys:
                 nsys_success = nsys_profile_app(app, env, temp_dir, config.num_samples, verbose,
-                                                swap_config=swap_config or None)
+                                                swap_config=swap_config or None, pbar=pbar)
                 result.nsys_profile = nsys_success
 
             # NCU Profile
             if config.ncu:
                 ncu_success = ncu_profile_app(app, env, temp_dir, config.num_samples, verbose,
-                                              swap_config=swap_config or None)
+                                              swap_config=swap_config or None, pbar=pbar)
                 result.ncu_profile = ncu_success
 
         finally:
@@ -143,9 +221,13 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
     # Postprocess NSYS (either standalone or after profiling)
     if config.postprocess_nsys or (config.nsys and result.nsys_profile):
         postprocess_nsys_result = postprocess_nsys_app(app, env, config.num_samples, verbose,
-                                                       swap_config=swap_config or None)
+                                                       swap_config=swap_config or None, pbar=pbar)
         result.nsys_post = postprocess_nsys_result is not None
         result.nsys_data = postprocess_nsys_result
+    elif config.nsys:
+        # NSYS_POST was expected but didn't run because nsys_profile failed
+        # Still update progress bar for this skipped operation
+        update_progress_for_skipped_operations(config, pbar, 'nsys_profile')
 
     return result
 
@@ -174,13 +256,26 @@ def run_all(app_config: dict, swaps_dict: dict[str, SwapConfig] | None, env: dic
     long_results: dict[str, list[DriverPassResult]] = {}
     operations = determine_operations(config)
 
-    # Calculate total number of passes for progress bar
-    num_apps = len(app_config["apps"]) if config.app == "all" else 1
-    if swaps_dict:
-        num_apps = len(set([swap.app_name for swap in swaps_dict.values()]))
-    num_runs = num_apps + (len(swaps_dict) if swaps_dict else 0)
+    # Calculate total number of operations for progress bar
+    # Count operations per pass
+    ops_per_pass = count_operations_per_pass(config)
 
-    with alive_bar(num_runs, disable=config.no_progress) as pbar:
+    # Count number of passes (baseline + swaps) for each app
+    num_passes = 0
+    for app in app_config["apps"]:
+        # Filter by app name if specified
+        if config.app != "all" and app["name"] != config.app:
+            continue
+        # Baseline pass
+        num_passes += 1
+        # Swap passes for this app
+        if swaps_dict:
+            num_passes += sum(1 for swap in swaps_dict.values() if swap.app_name == app["name"])
+
+    # Total operations = operations per pass * number of passes
+    total_operations = ops_per_pass * num_passes
+
+    with alive_bar(total_operations, disable=config.no_progress) as pbar:
         for app in app_config["apps"]:
             # Filter by app name if specified
             if config.app != "all" and app["name"] != config.app:
@@ -205,13 +300,10 @@ def run_all(app_config: dict, swaps_dict: dict[str, SwapConfig] | None, env: dic
                 # Run each pass
                 for driver_pass in driver_passes:
                     pass_results = run_driver_pass(app, env, config, temp_dir,
-                                                   swap_config=driver_pass)
+                                                   swap_config=driver_pass, pbar=pbar)
                     is_swap = driver_pass is not None
                     results[app_name].update_from_pass_result(pass_results, is_swap)
                     long_results[app_name].append(pass_results)
-
-                    if pbar is not None:
-                        pbar()  # pylint: disable=not-callable
 
     return results, operations, long_results
 

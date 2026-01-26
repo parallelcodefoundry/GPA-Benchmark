@@ -33,8 +33,21 @@ NCU_ARGS = [
 ]
 
 
+def _update_pbar(pbar: Any | None, num_samples_finished: int, num_samples: int) -> None:
+    """Update the progress bar.
+
+    Args:
+        pbar: Progress bar to update
+        num_samples_finished: Number of samples finished
+        num_samples: Number of samples to collect
+    """
+    if pbar is not None:
+        for _ in range(num_samples - num_samples_finished):
+            pbar()
+
+
 def nsys_profile_app(app: dict, env: dict, temp_dir: str, num_samples: int, verbose: int = 0,
-                     swap_config: SwapConfig | None = None) -> bool:
+                     swap_config: SwapConfig | None = None, pbar: Any | None = None) -> bool:
     """Profile the application with Nsight Systems.
 
     Args:
@@ -44,11 +57,13 @@ def nsys_profile_app(app: dict, env: dict, temp_dir: str, num_samples: int, verb
         num_samples: Number of times to collect profiles
         verbose: Verbosity level (0=default, 1=-v, 2=-vv)
         swap_config: Swap configuration containing the code to swap in
+        pbar: Progress bar to update
 
     Returns:
         True if profiling succeeded and output file exists, False otherwise
     """
     profile_dir = setup_profile_dir()
+    num_samples_finished = 0
 
     for i in range(num_samples):
         profile_output = os.path.join(profile_dir, app["name"])
@@ -66,13 +81,19 @@ def nsys_profile_app(app: dict, env: dict, temp_dir: str, num_samples: int, verb
 
         profile_file = profile_output + ".nsys-rep"
         if not (result.returncode == 0 and os.path.exists(profile_file)):
+            print(f"Warning: could not find Nsight Systems profile file {profile_file}")
+            _update_pbar(pbar, num_samples_finished, num_samples)
             return False
+
+        num_samples_finished += 1
+        if pbar is not None:
+            pbar()
 
     return True
 
 
 def ncu_profile_app(app: dict, env: dict, temp_dir: str, num_samples: int, verbose: int = 0,
-                    swap_config: SwapConfig | None = None) -> bool:
+                    swap_config: SwapConfig | None = None, pbar: Any | None = None) -> bool:
     """Profile the application with Nsight Compute.
 
     Args:
@@ -82,11 +103,13 @@ def ncu_profile_app(app: dict, env: dict, temp_dir: str, num_samples: int, verbo
         num_samples: Number of times to collect profiles
         verbose: Verbosity level (0=default, 1=-v, 2=-vv)
         swap_config: Swap configuration containing the code to swap in
+        pbar: Progress bar to update
 
     Returns:
         True if profiling succeeded and output file exists, False otherwise
     """
     profile_dir = setup_profile_dir()
+    num_samples_finished = 0
 
     for i in range(num_samples):
         profile_output = os.path.join(profile_dir, app["name"])
@@ -107,7 +130,13 @@ def ncu_profile_app(app: dict, env: dict, temp_dir: str, num_samples: int, verbo
 
         profile_file = profile_output + ".ncu-rep"
         if not (result.returncode == 0 and os.path.exists(profile_file)):
+            print(f"Warning: could not find Nsight Compute profile file {profile_file}")
+            _update_pbar(pbar, num_samples_finished, num_samples)
             return False
+
+        num_samples_finished += 1
+        if pbar is not None:
+            pbar()
 
     return True
 
@@ -138,7 +167,8 @@ def _parse_ncu_args(app: dict) -> tuple[str, int]:
 
 
 def postprocess_nsys_app(app: dict, env: dict, num_samples: int, verbose: int = 0,
-                         swap_config: SwapConfig | None = None) -> list[dict[Hashable, Any]] | None:
+                         swap_config: SwapConfig | None = None,
+                         pbar: Any | None = None) -> list[dict[Hashable, Any]] | None:
     """Postprocess the Nsight Systems profile.
 
     Converts the nsys-rep file to SQLite format, extracts kernel data, and
@@ -151,12 +181,14 @@ def postprocess_nsys_app(app: dict, env: dict, num_samples: int, verbose: int = 
         num_samples: Number of times to collect profiles
         verbose: Verbosity level (0=default, 1=-v, 2=-vv)
         swap_config: Swap configuration containing the code to swap in
+        pbar: Progress bar to update
 
     Returns:
         List of dictionaries of kernel data if successful, None otherwise
     """
     profile_dir = setup_profile_dir()
     kernel_rows = []
+    num_samples_finished = 0
 
     for i in range(num_samples):
         nsys_name = app["name"]
@@ -169,6 +201,7 @@ def postprocess_nsys_app(app: dict, env: dict, num_samples: int, verbose: int = 
 
         if not os.path.exists(nsys_rep_file):
             print(f"Warning: could not find Nsight Systems profile file {nsys_rep_file}")
+            _update_pbar(pbar, num_samples_finished, num_samples)
             return None
 
         # Convert nsys-rep to sqlite
@@ -176,11 +209,13 @@ def postprocess_nsys_app(app: dict, env: dict, num_samples: int, verbose: int = 
         if subprocess_wrapper(postprocess_command, profile_dir, env,
                               verbose=verbose).returncode != 0:
             print(f"Warning: could not postprocess Nsight Systems profile file {nsys_rep_file}")
+            _update_pbar(pbar, num_samples_finished, num_samples)
             return None
 
         sqlite_file = os.path.join(profile_dir, nsys_name + ".sqlite")
         if not os.path.exists(sqlite_file):
             print(f"Warning: could not find sqlite file {sqlite_file}")
+            _update_pbar(pbar, num_samples_finished, num_samples)
             return None
 
         # Read sqlite file into pandas dataframes
@@ -207,11 +242,16 @@ def postprocess_nsys_app(app: dict, env: dict, num_samples: int, verbose: int = 
         except IndexError:
             print(f"Warning: could not find kernel {kernel_name} in Nsight Systems profile for " \
                 + f"{app['name']} at launch skip {launch_skip}")
+            _update_pbar(pbar, num_samples_finished, num_samples)
             return None
 
         # Return as dict (matching original behavior: to_dict() on DataFrame)
         # This returns a dict where keys are column names and values are Series
         # For a single row, each Series contains one value
         kernel_rows.append(kernel_row.to_dict('records')[0])
+
+        num_samples_finished += 1
+        if pbar is not None:
+            pbar()
 
     return kernel_rows
