@@ -64,7 +64,7 @@ def run_driver_pass(app: dict, env: dict, args: argparse.Namespace, temp_dir: st
     if not args.postprocess_nsys:
         # Swap file in if this is a swap pass
         if swap_config:
-            swap_file_in_app(app, swap_config, temp_dir)
+            swap_file_in_app(app, swap_config, temp_dir, args.detect_regions)
 
         try:
             # Build
@@ -245,6 +245,11 @@ def parse_args() -> argparse.Namespace:
         "--swaps", type=str, default=None,
         help="The path to the directory containing code files to swap in for the "
              "kernel, with the filename being run_<num>_optimized_code_<num>.cu"
+    )
+    parser.add_argument(
+        "--detect-regions", action="store_true",
+        help="Detect if the kernel file to swap into contains editable region markers and "
+             "substitute into them rather than replacing the entire file"
     )
     parser.add_argument(
         "--postprocess-nsys", action="store_true",

@@ -12,7 +12,8 @@ import shutil
 from driver_src.driver_models import SwapConfig
 
 
-def swap_file_in_app(app: dict, swap_config: SwapConfig, temp_dir: str) -> None:
+def swap_file_in_app(app: dict, swap_config: SwapConfig, temp_dir: str,
+                     detect_regions: bool) -> None:
     """Swap the file in the application directory on disk.
 
     Backs up the original file. If the file contains ">>> START EDITABLE REGION"
@@ -23,13 +24,12 @@ def swap_file_in_app(app: dict, swap_config: SwapConfig, temp_dir: str) -> None:
         app: Application configuration dictionary
         swap_config: Swap configuration containing the code to swap in
         temp_dir: Temporary directory where working copy of application directory is located
-
+        detect_regions: Whether to detect if the kernel file to swap into contains editable region
+                        markers and substitute into them rather than replacing the entire file
     Raises:
         FileNotFoundError: If the destination file doesn't exist
         IOError: If file operations fail
     """
-    # TODO: Once new results collected, add support for replacing in extra files, and remove region
-    # code as opt gen code handles region substitution
     dest_path = os.path.join(temp_dir, app["kernel_file"])
     backup_path = dest_path + ".bak"
     shutil.copy(dest_path, backup_path)
@@ -37,7 +37,8 @@ def swap_file_in_app(app: dict, swap_config: SwapConfig, temp_dir: str) -> None:
     with open(dest_path, "r", encoding="utf-8") as dest_file:
         dest_text = dest_file.read()
 
-    if ">>> START EDITABLE REGION" not in dest_text or "<<< END EDITABLE REGION" not in dest_text:
+    if not detect_regions or ">>> START EDITABLE REGION" not in dest_text \
+        or "<<< END EDITABLE REGION" not in dest_text:
         # Replace entire file with swap file code
         with open(dest_path, "w", encoding="utf-8") as dest_file:
             dest_file.write(swap_config.code)
