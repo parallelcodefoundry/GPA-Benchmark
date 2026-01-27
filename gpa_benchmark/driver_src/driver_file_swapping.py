@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 File Swapping Operations for GPA-Benchmark Driver
 
@@ -10,7 +9,7 @@ import os
 import re
 import shutil
 
-from driver_src.driver_models import SwapConfig, FileSwap
+from gpa_benchmark.driver_src.driver_models import SwapConfig, FileSwap
 
 logger = logging.getLogger("GPA-Benchmark")
 

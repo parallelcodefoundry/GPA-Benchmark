@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Configuration Management for GPA-Benchmark Driver
 
@@ -8,8 +7,8 @@ which operations to perform, and setting up the environment.
 import os
 import yaml
 
-from driver_src.driver_models import Operation, SwapConfig, DriverConfig
-from driver_src.driver_file_swapping import build_swaps_dict
+from gpa_benchmark.driver_src.driver_models import Operation, SwapConfig, DriverConfig
+from gpa_benchmark.driver_src.driver_file_swapping import build_swaps_dict
 
 
 def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] | None, dict]:
@@ -42,6 +41,8 @@ def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] 
     # Load config file
     with open(config.config, "r", encoding="utf-8") as f:
         app_config: dict = yaml.safe_load(f)
+
+    # TODO: Update all paths in config file with path prefix if provided
 
     # Validate app name
     if config.app != "all" and config.app not in [app["name"] for app in app_config["apps"]]:

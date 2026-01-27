@@ -33,15 +33,16 @@ import shutil
 from typing import Any
 from alive_progress import alive_bar
 
-from driver_src.driver_models import Operation, SwapConfig, DriverPassResult, AppResults, \
-    DriverConfig
-from driver_src.driver_utils import get_bin_path
-from driver_src.driver_file_swapping import swap_file_in_app, swap_file_out_app
-from driver_src.driver_validation import validate_app
-from driver_src.driver_operations import build_app, run_app
-from driver_src.driver_profiling import nsys_profile_app, ncu_profile_app, postprocess_nsys_app
-from driver_src.driver_config import setup_app_config, determine_operations
-from driver_src.driver_reporting import print_report_table, save_results
+from gpa_benchmark.driver_src.driver_models import Operation, SwapConfig, DriverPassResult, \
+    AppResults, DriverConfig
+from gpa_benchmark.driver_src.driver_utils import get_bin_path
+from gpa_benchmark.driver_src.driver_file_swapping import swap_file_in_app, swap_file_out_app
+from gpa_benchmark.driver_src.driver_validation import validate_app
+from gpa_benchmark.driver_src.driver_operations import build_app, run_app
+from gpa_benchmark.driver_src.driver_profiling import nsys_profile_app, ncu_profile_app, \
+    postprocess_nsys_app
+from gpa_benchmark.driver_src.driver_config import setup_app_config, determine_operations
+from gpa_benchmark.driver_src.driver_reporting import print_report_table, save_results
 
 logger = logging.getLogger("GPA-Benchmark")
 
@@ -452,8 +453,8 @@ def parse_args() -> argparse.Namespace:
         help="Profile the application with Nsight Compute (profiles stored under profiles/)"
     )
     parser.add_argument(
-        "--config", type=str, default="driver_apps.yaml",
-        help="The app config file to use (default: driver_apps.yaml)"
+        "--config", type=str, default="gpa_benchmark/driver_apps.yaml",
+        help="The app config file to use (default: gpa_benchmark/driver_apps.yaml)"
     )
     parser.add_argument(
         "--swaps", type=str, default=None,

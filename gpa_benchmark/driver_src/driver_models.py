@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Data Models for GPA-Benchmark Driver
 
@@ -13,7 +12,7 @@ import argparse
 
 from numpy import mean
 
-from driver_src.driver_utils import detect_sm_version
+from gpa_benchmark.driver_src.driver_utils import detect_sm_version
 
 
 @dataclass

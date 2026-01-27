@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Reporting Functions for GPA-Benchmark Driver
 
@@ -7,7 +6,7 @@ This module provides functions for displaying results and saving output to files
 import json
 import logging
 
-from driver_src.driver_models import AppResults, Operation, DriverPassResult
+from gpa_benchmark.driver_src.driver_models import AppResults, Operation, DriverPassResult
 
 logger = logging.getLogger("GPA-Benchmark")
 

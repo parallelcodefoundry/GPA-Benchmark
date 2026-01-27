@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Profiling Functions for GPA-Benchmark Driver
 
@@ -12,8 +11,9 @@ from collections.abc import Hashable
 import sqlite3
 import pandas as pd
 
-from driver_src.driver_models import SwapConfig
-from driver_src.driver_utils import subprocess_wrapper, setup_profile_dir, get_run_path
+from gpa_benchmark.driver_src.driver_models import SwapConfig
+from gpa_benchmark.driver_src.driver_utils import subprocess_wrapper, setup_profile_dir, \
+    get_run_path
 
 logger = logging.getLogger("GPA-Benchmark")
 
