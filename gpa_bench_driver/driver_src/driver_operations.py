@@ -10,7 +10,7 @@ from gpa_bench_driver.driver_src.driver_utils import subprocess_wrapper, get_bin
     get_run_path, get_build_path
 
 
-def build_app(app: dict, sm_version: int, no_clean: bool,env: dict, temp_dir: str,
+def build_app(app: dict, sm_version: int, no_clean: bool, env: dict, temp_dir: str,
               log_level: str = "WARNING") -> tuple[bool, subprocess.CompletedProcess]:
     """Build the application.
 

@@ -62,7 +62,7 @@ def count_operations_per_pass(config: DriverConfig) -> int:
 
     if not config.postprocess_nsys:
         count += 1 # BUILD always runs (unless only postprocessing)
-        if not config.build:
+        if not config.build_only:
             count += 2 # RUN and VALIDATE run if not build-only
             if config.nsys:
                 count += config.num_samples
@@ -89,7 +89,7 @@ def update_progress_for_skipped_operations(config: DriverConfig, pbar: Any,
 
     skipped_ops = 0
 
-    if config.build:
+    if config.build_only:
         return
     if failure_stage == 'build':
         skipped_ops += 1 # RUN
@@ -165,11 +165,11 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
                 pbar()  # Update progress for BUILD operation
 
             # Early return if build-only mode or build failed
-            if config.build or result.build is False:
+            if config.build_only or result.build is False:
                 if swap_config is None:
                     raise ValueError(f"Build failed for baseline ({app['name']})")
                 # Update progress for skipped operations due to build failure
-                if not config.build:
+                if not config.build_only:
                     update_progress_for_skipped_operations(config, pbar, 'build')
                 return result
 
@@ -316,18 +316,18 @@ def run_driver(
     sm_version: int | None = None,
     cuda_home: str | None = None,
     no_clean: bool = False,
-    build: bool = False,
+    build_only: bool = False,
     nsys: bool = False,
     ncu: bool = False,
-    config: str = "driver_apps.yaml",
+    config: str | None = None,
     swaps: str | None = None,
     detect_regions: bool = False,
     postprocess_nsys: bool = False,
     num_samples: int = 3,
-    output_file: str = "driver_results.json",
+    output_file: str | None= None,
     temp_dir: str | None = None,
     log_level: str = "WARNING",
-    no_progress: bool = False,
+    no_progress: bool = True,
     swaps_override: dict[str, str] | None = None
 ) -> tuple[dict[str, AppResults], list[Operation], dict[str, list[DriverPassResult]]]:
     """Run the driver programmatically with the same interface as the CLI.
@@ -341,18 +341,18 @@ def run_driver(
         sm_version: The SM version to use (default: None, will auto-detect from nvidia-smi)
         cuda_home: Path to the CUDA installation to use (default: None)
         no_clean: Do not clean the application before building (default: False)
-        build: Only build the application (skip run and validate) (default: False)
+        build_only: Only build the application (skip run and validate) (default: False)
         nsys: Profile the application with Nsight Systems (default: False)
         ncu: Profile the application with Nsight Compute (default: False)
-        config: The app config file to use (default: "driver_apps.yaml")
+        config: The app config file to use (default: None, will use "driver_apps.yaml")
         swaps: Path to the directory containing code files to swap in (default: None)
         detect_regions: Detect editable region markers in swap files (default: False)
         postprocess_nsys: Only postprocess nsys-rep file(s) (default: False)
         num_samples: Number of times to collect ncu/nsys profiles (default: 3)
-        output_file: File to save the long results to (default: "driver_results.json")
+        output_file: File to save the long results to (default: None, no output file will be saved)
         temp_dir: Temporary directory to use (default: None, uses /tmp)
         log_level: Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL (default: WARNING)
-        no_progress: Do not display a progress bar (default: False)
+        no_progress: Do not display a progress bar (default: True)
         swaps_override: Override the swaps dictionary with a custom one for a single app, where keys
                         are filenames and values are code contents (default: None)
 
@@ -372,10 +372,10 @@ def run_driver(
         sm_version=sm_version,
         cuda_home=cuda_home,
         no_clean=no_clean,
-        build=build,
+        build_only=build_only,
         nsys=nsys,
         ncu=ncu,
-        config=config,
+        config=config or os.path.join(os.path.dirname(__file__), "..", "driver_apps.yaml"),
         swaps=swaps,
         detect_regions=detect_regions,
         postprocess_nsys=postprocess_nsys,
@@ -413,7 +413,8 @@ def run_driver_config(config: DriverConfig) -> tuple[dict[str, AppResults], list
     print_report_table(results, operations)
 
     # Save results
-    save_results(long_results, config.output_file)
+    if config.output_file:
+        save_results(long_results, config.output_file)
 
     return results, operations, long_results
 
@@ -444,7 +445,7 @@ def parse_args() -> argparse.Namespace:
         help="Do not clean the application before building"
     )
     parser.add_argument(
-        "--build", action="store_true",
+        "--build-only", action="store_true",
         help="Only build the application (skip run and validate)"
     )
     parser.add_argument(

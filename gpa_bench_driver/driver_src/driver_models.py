@@ -45,7 +45,7 @@ class DriverConfig:
     app: str = "all"
     cuda_home: str | None = None
     no_clean: bool = False
-    build: bool = False
+    build_only: bool = False
     nsys: bool = False
     ncu: bool = False
     config: str = "driver_apps.yaml"
@@ -53,7 +53,7 @@ class DriverConfig:
     detect_regions: bool = False
     postprocess_nsys: bool = False
     num_samples: int = 3
-    output_file: str = "driver_results.json"
+    output_file: str | None = "driver_results.json"
     temp_dir: str | None = None
     log_level: str = "WARNING"
     no_progress: bool = False
@@ -63,7 +63,7 @@ class DriverConfig:
                  sm_version: int | None,
                  cuda_home: str | None,
                  no_clean: bool,
-                 build: bool,
+                 build_only: bool,
                  nsys: bool,
                  ncu: bool,
                  config: str,
@@ -71,7 +71,7 @@ class DriverConfig:
                  detect_regions: bool,
                  postprocess_nsys: bool,
                  num_samples: int,
-                 output_file: str,
+                 output_file: str | None,
                  temp_dir: str | None,
                  log_level: str,
                  no_progress: bool,
@@ -80,7 +80,7 @@ class DriverConfig:
         self.sm_version = sm_version if sm_version is not None else detect_sm_version()
         self.cuda_home = cuda_home
         self.no_clean = no_clean
-        self.build = build
+        self.build_only = build_only
         self.nsys = nsys
         self.ncu = ncu
         self.config = config
@@ -109,7 +109,7 @@ class DriverConfig:
             sm_version=args.sm_version,
             cuda_home=args.cuda_home,
             no_clean=args.no_clean,
-            build=args.build,
+            build_only=args.build_only,
             nsys=args.nsys,
             ncu=args.ncu,
             config=args.config,

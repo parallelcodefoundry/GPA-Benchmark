@@ -32,11 +32,11 @@ def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] 
         yaml.YAMLError: If config file is invalid YAML
     """
     # Validate argument combinations
-    if config.postprocess_nsys and (config.nsys or config.swaps or config.ncu or config.build \
+    if config.postprocess_nsys and (config.nsys or config.swaps or config.ncu or config.build_only \
         or config.swaps_override):
         raise ValueError("Cannot postprocess Nsight Systems profiles only if other operations " \
             + "are specified.")
-    if config.build and (config.nsys or config.ncu or config.swaps or config.postprocess_nsys \
+    if config.build_only and (config.nsys or config.ncu or config.swaps or config.postprocess_nsys \
         or config.swaps_override):
         raise ValueError("Cannot build applications only if other operations are specified.")
     if config.swaps_override and config.swaps:
@@ -87,7 +87,7 @@ def determine_operations(config: DriverConfig) -> list[Operation]:
 
     if not config.postprocess_nsys:
         operations.append(Operation.BUILD)
-        if not config.build:
+        if not config.build_only:
             operations.append(Operation.RUN)
             operations.append(Operation.VALIDATE)
 
@@ -102,7 +102,7 @@ def determine_operations(config: DriverConfig) -> list[Operation]:
 
     if config.swaps or config.swaps_override:
         operations.append(Operation.SWAP_BUILDS)
-        if not config.build:
+        if not config.build_only:
             operations.append(Operation.SWAP_RUNS)
             operations.append(Operation.SWAP_VALID)
             if config.nsys:
