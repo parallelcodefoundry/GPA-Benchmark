@@ -9,7 +9,7 @@ import os
 import re
 import shutil
 
-from gpa_benchmark.driver_src.driver_models import SwapConfig, FileSwap
+from gpa_bench_driver.driver_src.driver_models import SwapConfig, FileSwap
 
 logger = logging.getLogger("GPA-Benchmark")
 

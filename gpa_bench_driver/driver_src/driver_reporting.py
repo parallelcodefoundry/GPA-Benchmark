@@ -6,7 +6,7 @@ This module provides functions for displaying results and saving output to files
 import json
 import logging
 
-from gpa_benchmark.driver_src.driver_models import AppResults, Operation, DriverPassResult
+from gpa_bench_driver.driver_src.driver_models import AppResults, Operation, DriverPassResult
 
 logger = logging.getLogger("GPA-Benchmark")
 

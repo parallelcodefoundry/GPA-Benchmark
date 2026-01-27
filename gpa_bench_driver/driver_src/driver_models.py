@@ -12,7 +12,7 @@ import argparse
 
 from numpy import mean
 
-from gpa_benchmark.driver_src.driver_utils import detect_sm_version
+from gpa_bench_driver.driver_src.driver_utils import detect_sm_version
 
 
 @dataclass

@@ -6,8 +6,8 @@ This module provides functions for building and running applications.
 import os
 import subprocess
 
-from gpa_benchmark.driver_src.driver_utils import subprocess_wrapper, get_bin_path, get_run_path, \
-    get_build_path
+from gpa_bench_driver.driver_src.driver_utils import subprocess_wrapper, get_bin_path, \
+    get_run_path, get_build_path
 
 
 def build_app(app: dict, sm_version: int, no_clean: bool,env: dict, temp_dir: str,

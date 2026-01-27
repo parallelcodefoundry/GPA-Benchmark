@@ -7,8 +7,8 @@ which operations to perform, and setting up the environment.
 import os
 import yaml
 
-from gpa_benchmark.driver_src.driver_models import Operation, SwapConfig, DriverConfig
-from gpa_benchmark.driver_src.driver_file_swapping import build_swaps_dict
+from gpa_bench_driver.driver_src.driver_models import Operation, SwapConfig, DriverConfig
+from gpa_bench_driver.driver_src.driver_file_swapping import build_swaps_dict
 
 
 def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] | None, dict]:

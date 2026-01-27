@@ -11,8 +11,8 @@ from collections.abc import Hashable
 import sqlite3
 import pandas as pd
 
-from gpa_benchmark.driver_src.driver_models import SwapConfig
-from gpa_benchmark.driver_src.driver_utils import subprocess_wrapper, setup_profile_dir, \
+from gpa_bench_driver.driver_src.driver_models import SwapConfig
+from gpa_bench_driver.driver_src.driver_utils import subprocess_wrapper, setup_profile_dir, \
     get_run_path
 
 logger = logging.getLogger("GPA-Benchmark")
