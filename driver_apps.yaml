@@ -2,8 +2,6 @@
 # All Makefiles support SM_VERSION as a command line argument (e.g., make SM_VERSION=90)
 # The environment should have CUDA_HOME set. Rodinia apps are built from rodinia/ with make -j 8.
 
-path_prefix: ../
-
 apps:
 
 - name: exatensor

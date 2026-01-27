@@ -327,7 +327,8 @@ def run_driver(
     output_file: str = "driver_results.json",
     temp_dir: str | None = None,
     log_level: str = "WARNING",
-    no_progress: bool = False
+    no_progress: bool = False,
+    swaps_override: dict[str, str] | None = None
 ) -> tuple[dict[str, AppResults], list[Operation], dict[str, list[DriverPassResult]]]:
     """Run the driver programmatically with the same interface as the CLI.
 
@@ -352,6 +353,8 @@ def run_driver(
         temp_dir: Temporary directory to use (default: None, uses /tmp)
         log_level: Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL (default: WARNING)
         no_progress: Do not display a progress bar (default: False)
+        swaps_override: Override the swaps dictionary with a custom one for a single app, where keys
+                        are filenames and values are code contents (default: None)
 
     Returns:
         Tuple of:
@@ -380,7 +383,8 @@ def run_driver(
         output_file=output_file,
         temp_dir=temp_dir,
         log_level=log_level,
-        no_progress=no_progress
+        no_progress=no_progress,
+        swaps_override=swaps_override
     )
 
     return run_driver_config(driver_config)

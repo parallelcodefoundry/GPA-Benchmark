@@ -39,6 +39,7 @@ class DriverConfig:
         temp_dir: Temporary directory to use (default: None, uses /tmp)
         log_level: Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL (default: "WARNING")
         no_progress: Do not display a progress bar (default: False)
+        swaps_override: Override the swaps dictionary with a custom one (default: None)
     """
     sm_version: int
     app: str = "all"
@@ -56,6 +57,7 @@ class DriverConfig:
     temp_dir: str | None = None
     log_level: str = "WARNING"
     no_progress: bool = False
+    swaps_override: dict[str, str] | None = None
 
     def __init__(self, app: str,
                  sm_version: int | None,
@@ -72,7 +74,8 @@ class DriverConfig:
                  output_file: str,
                  temp_dir: str | None,
                  log_level: str,
-                 no_progress: bool):
+                 no_progress: bool,
+                 swaps_override: dict[str, str] | None = None):
         self.app = app
         self.sm_version = sm_version if sm_version is not None else detect_sm_version()
         self.cuda_home = cuda_home
@@ -89,6 +92,7 @@ class DriverConfig:
         self.temp_dir = temp_dir
         self.log_level = log_level
         self.no_progress = no_progress
+        self.swaps_override = swaps_override
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> 'DriverConfig':

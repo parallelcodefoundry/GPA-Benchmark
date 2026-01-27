@@ -32,17 +32,21 @@ def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] 
         yaml.YAMLError: If config file is invalid YAML
     """
     # Validate argument combinations
-    if config.postprocess_nsys and (config.nsys or config.swaps or config.ncu or config.build):
+    if config.postprocess_nsys and (config.nsys or config.swaps or config.ncu or config.build \
+        or config.swaps_override):
         raise ValueError("Cannot postprocess Nsight Systems profiles only if other operations " \
             + "are specified.")
-    if config.build and (config.nsys or config.ncu or config.swaps or config.postprocess_nsys):
+    if config.build and (config.nsys or config.ncu or config.swaps or config.postprocess_nsys \
+        or config.swaps_override):
         raise ValueError("Cannot build applications only if other operations are specified.")
+    if config.swaps_override and config.swaps:
+        raise ValueError("Cannot specify both swaps and swaps_override.")
+    if config.swaps_override and config.app == "all":
+        raise ValueError("Cannot specify swaps_override for apps = all.")
 
     # Load config file
     with open(config.config, "r", encoding="utf-8") as f:
         app_config: dict = yaml.safe_load(f)
-
-    # TODO: Update all paths in config file with path prefix if provided
 
     # Validate app name
     if config.app != "all" and config.app not in [app["name"] for app in app_config["apps"]]:
@@ -57,7 +61,12 @@ def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] 
     env = os.environ.copy()
     env["CUDA_HOME"] = cuda_home
 
-    # Load swaps if specified
+    # Load swaps or override swaps if specified
+    if config.swaps_override:
+        formatted_swaps = {(config.app, 0, 0): list(config.swaps_override.items())}
+        swaps_dict = build_swaps_dict(formatted_swaps, config.app, app_config)
+        return app_config, swaps_dict, env
+
     if config.swaps:
         swaps_dict = build_swaps_dict(config.swaps, config.app, app_config)
         return app_config, swaps_dict, env
@@ -91,7 +100,7 @@ def determine_operations(config: DriverConfig) -> list[Operation]:
     if config.ncu:
         operations.append(Operation.NCU_PROFILE)
 
-    if config.swaps:
+    if config.swaps or config.swaps_override:
         operations.append(Operation.SWAP_BUILDS)
         if not config.build:
             operations.append(Operation.SWAP_RUNS)
