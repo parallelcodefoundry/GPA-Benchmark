@@ -45,6 +45,8 @@ from gpa_bench_driver.driver_src.driver_config import setup_app_config, determin
 from gpa_bench_driver.driver_src.driver_reporting import print_report_table, save_results
 
 logger = logging.getLogger("GPA-Benchmark")
+#TODO: Rename logger to gpa_bench_driver
+#TODO: Update project to src/ layout
 
 APP_DIRS = ["Castro", "darknet", "ExaTENSOR", "LULESH", "PeleC", "Quicksilver", "rodinia",
             "XSBench"]
@@ -302,13 +304,23 @@ def run_all(app_config: dict, swaps_dict: dict[str, SwapConfig] | None, env: dic
                         if swap.app_name == app["name"]
                     ])
 
+                logger.debug("Driver is running %d passes for %s", len(driver_passes), app_name)
+
                 # Run each pass
-                for driver_pass in driver_passes:
+                for pass_num, driver_pass in enumerate(driver_passes):
                     pass_results = run_driver_pass(app, env, config, temp_dir,
                                                    swap_config=driver_pass, pbar=pbar)
                     is_swap = driver_pass is not None
                     results[app_name].update_from_pass_result(pass_results, is_swap)
                     long_results[app_name].append(pass_results)
+                    logger.debug("Driver pass %d results:", pass_num)
+                    logger.debug("  Build: %s", pass_results.build)
+                    logger.debug("  Run: %s", pass_results.run)
+                    logger.debug("  Validate: %s", pass_results.validate)
+                    logger.debug("  NSYS Profile: %s", pass_results.nsys_profile)
+                    logger.debug("  NCU Profile: %s", pass_results.ncu_profile)
+                    logger.debug("  NSYS Post: %s", pass_results.nsys_post)
+                    logger.debug("  NSYS Data: %s", pass_results.nsys_data)
 
     return results, operations, long_results
 
