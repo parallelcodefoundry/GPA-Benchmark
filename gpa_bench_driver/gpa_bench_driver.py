@@ -46,7 +46,8 @@ from gpa_bench_driver.driver_src.driver_reporting import print_report_table, sav
 
 logger = logging.getLogger("GPA-Benchmark")
 
-APP_DIRS = ["Castro", "darknet", "ExaTENSOR", "LULESH", "PeleC", "Quicksilver","rodinia", "XSBench"]
+APP_DIRS = ["Castro", "darknet", "ExaTENSOR", "LULESH", "PeleC", "Quicksilver", "rodinia",
+            "XSBench"]
 
 
 def count_operations_per_pass(config: DriverConfig) -> int:
@@ -286,7 +287,8 @@ def run_all(app_config: dict, swaps_dict: dict[str, SwapConfig] | None, env: dic
 
             with tempfile.TemporaryDirectory(dir=config.temp_dir) as temp_dir:
                 app_dir = next(app_dir for app_dir in APP_DIRS if app_dir in app["path"])
-                shutil.copytree(app_dir, os.path.join(temp_dir, app_dir))
+                shutil.copytree(os.path.join(os.path.dirname(__file__), "..", app_dir),
+                                os.path.join(temp_dir, app_dir))
 
                 app_name = app["name"]
                 results[app_name] = AppResults()

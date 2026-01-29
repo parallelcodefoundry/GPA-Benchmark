@@ -357,6 +357,7 @@ def _build_swaps_dict_from_grouped_files(grouped_files: dict[tuple[str, int, int
             )
         else:
             logger.warning("No files to swap for %s run %s optimized code %s in %s",
-                           app_name, run_num, optimized_code_num, file_list)
+                           app_name, run_num, optimized_code_num,
+                           [full_path for full_path, _ in file_list])
 
     return swaps_dict
