@@ -49,8 +49,17 @@ def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] 
         app_config: dict = yaml.safe_load(f)
 
     # Validate app name
-    if config.app != "all" and config.app not in [app["name"] for app in app_config["apps"]]:
-        raise ValueError(f"Application {config.app} not found in config file {config.config}")
+    if config.app != "all":
+        all_names = [app["name"].lower() for app in app_config["apps"]]
+        if config.app not in all_names:
+            # Try to convert app name alias to canonical name
+            for app in app_config["apps"]:
+                if config.app in app["aliases"]:
+                    config.app = app["name"]
+                    break
+            if config.app not in all_names:
+                raise ValueError(f"Application {config.app} not found in config file " \
+                                 + f"{config.config}")
 
     # Setup CUDA environment
     cuda_home = (config.cuda_home or

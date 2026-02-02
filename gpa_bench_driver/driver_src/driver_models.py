@@ -76,7 +76,7 @@ class DriverConfig:
                  log_level: str,
                  no_progress: bool,
                  swaps_override: dict[str, str] | None = None):
-        self.app = app
+        self.app = app.lower()
         self.sm_version = sm_version if sm_version is not None else detect_sm_version()
         self.cuda_home = cuda_home
         self.no_clean = no_clean
@@ -105,7 +105,7 @@ class DriverConfig:
             DriverConfig object
         """
         return cls(
-            app=args.app,
+            app=args.app.lower(),
             sm_version=args.sm_version,
             cuda_home=args.cuda_home,
             no_clean=args.no_clean,

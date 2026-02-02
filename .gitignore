@@ -68,3 +68,5 @@ rodinia/streamcluster/output.txt
 
 profiles/
 __pycache__/
+
+*.json

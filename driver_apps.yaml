@@ -17,6 +17,9 @@ apps:
   fail_check_text: Failed!
 
 - name: lulesh
+  aliases:
+  - lulesh2
+  - lulesh2.0
   kernel_name: ApplyMaterialPropertiesAndUpdateVolume_kernel
   path: LULESH/cuda/src
   clean_command: make -f ../build/Makefile clean
@@ -50,6 +53,9 @@ apps:
 #  fail_check_text: FAIL
 
 - name: b+tree
+  aliases:
+  - b_tree
+  - btree
   kernel_name: findRangeK
   path: rodinia/b+tree
   run_command: ./b+tree.out file ../data/b+tree/mil.txt command ../data/b+tree/command.txt
@@ -178,6 +184,8 @@ apps:
   reference_output: rodinia/pathfinder/ref-result.txt
 
 - name: srad
+  aliases:
+  - srad_v1
   kernel_name: reduce
   path: rodinia/srad/srad_v1
   run_command: ./srad 100 0.5 502 458
