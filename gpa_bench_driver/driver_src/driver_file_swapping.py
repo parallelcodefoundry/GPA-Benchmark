@@ -154,7 +154,6 @@ def _find_grouped_files(swaps: str) -> dict[tuple[str, str | None, int, int],
         Dictionary mapping a unique key to a list of tuples containing the full path and code
         of the swap files
     """
-    # TODO: Handle filenames with additional experiment metadata (e.g. optimized_code_drgpu_only)
     grouped_files: dict[tuple[str, str | None, int, int], list[tuple[str, str]]] = {}
 
     for root, _, files in os.walk(swaps):
