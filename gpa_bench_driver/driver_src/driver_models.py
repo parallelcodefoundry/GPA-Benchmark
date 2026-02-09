@@ -178,12 +178,13 @@ class SwapConfig:
         file_swaps: List of file swaps to perform
         run_num: Run number identifier
         optimized_code_num: Optimized code number identifier
+        metadata: Metadata string identifier (if any)
     """
     app_name: str
     file_swaps: list[FileSwap]
     run_num: str
     optimized_code_num: str
-
+    metadata: str | None
 
 @dataclass
 class DriverPassResult:
@@ -208,6 +209,7 @@ class DriverPassResult:
     """
     app_name: str | None = None
     run_num: str | None = None
+    metadata: str | None = None
     swap_num: str | None = None
     swap_file_src_path: str | None = None
     build: bool | None = None
@@ -234,6 +236,7 @@ class DriverPassResult:
         results = {
             "app_name": self.app_name,
             "run_num": self.run_num,
+            "metadata": self.metadata,
             "swap_num": self.swap_num,
             "swap_file_src_path": self.swap_file_src_path,
             "build": self.build,

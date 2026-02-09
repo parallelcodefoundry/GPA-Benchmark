@@ -137,6 +137,7 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
     result = DriverPassResult()
     result.app_name = app["name"]
     result.run_num = swap_config.run_num if swap_config else None
+    result.metadata = swap_config.metadata if swap_config else None
     result.swap_num = swap_config.optimized_code_num if swap_config else None
     if swap_config and swap_config.file_swaps:
         result.swap_file_src_path = ",".join([fs.swap_file_src_path
