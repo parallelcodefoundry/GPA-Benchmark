@@ -5,8 +5,8 @@
 #SBATCH --mem-per-cpu=5g
 #SBATCH -p gpu
 #SBATCH --gpus-per-task=h100:1
-#SBATCH -J drive-gpa
-#SBATCH -o drive-gpa-%j.out
+#SBATCH -J drive-gpa-drgpu
+#SBATCH -o drive-gpa-drgpu-%j.out
 
 module load cuda/gcc/11.3.0/zen2/12.3.0
 . ~/scratch/spack/share/spack/setup-env.sh
@@ -15,7 +15,7 @@ cd ~/scratch/llms4hpc/GPA-Benchmark
 . .venv/bin/activate
 
 driver_srun() {
-    srun -n 1 -c 24 --mem-per-cpu=5g --gpus-per-task 1 --exact python -m gpa_bench_driver --app "$1" --nsys --swaps ~/scratch/llms4hpc/gpa-bench-nodr --output-file nodr-"$1".json --no-progress &
+    srun -n 1 -c 24 --mem-per-cpu=5g --gpus-per-task 1 --exact python -m gpa_bench_driver --app "$1" --nsys --swaps ~/scratch/llms4hpc/gpa-bench-drgpu --output-file drgpu-"$1".json --no-progress &
 }
 
 #driver_srun backprop
