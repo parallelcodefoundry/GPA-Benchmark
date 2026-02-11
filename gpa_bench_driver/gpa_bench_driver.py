@@ -383,7 +383,7 @@ def run_driver(
     """
     # Create DriverConfig from parameters
     driver_config = DriverConfig(
-        app=app,
+        app=app.lower(),
         sm_version=sm_version,
         cuda_home=cuda_home,
         no_clean=no_clean,
