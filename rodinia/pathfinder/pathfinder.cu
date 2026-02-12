@@ -58,23 +58,26 @@ init(int argc, char** argv)
 #endif
 }
 
-void 
+void
 fatal(char *s)
 {
 	fprintf(stderr, "error: %s\n", s);
 
 }
 
+// >>> START EDITABLE REGION ID=0
 #define IN_RANGE(x, min, max)   ((x)>=(min) && (x)<=(max))
 #define CLAMP_RANGE(x, min, max) x = (x<(min)) ? min : ((x>(max)) ? max : x )
 #define MIN(a, b) ((a)<=(b) ? (a) : (b))
-// >>> START EDITABLE REGION ID=0
+// <<< END EDITABLE REGION ID=0
+
+// >>> START EDITABLE REGION ID=1
 __global__ void dynproc_kernel(
-                int iteration, 
+                int iteration,
                 int *gpuWall,
                 int *gpuSrc,
                 int *gpuResults,
-                int cols, 
+                int cols,
                 int rows,
                 int startStep,
                 int border)
@@ -85,24 +88,24 @@ __global__ void dynproc_kernel(
 
 	int bx = blockIdx.x;
 	int tx=threadIdx.x;
-	
+
         // each block finally computes result for a small block
-        // after N iterations. 
-        // it is the non-overlapping small blocks that cover 
+        // after N iterations.
+        // it is the non-overlapping small blocks that cover
         // all the input data
 
         // calculate the small block size
 	int small_block_cols = BLOCK_SIZE-iteration*HALO*2;
 
-        // calculate the boundary for the block according to 
+        // calculate the boundary for the block according to
         // the boundary of its small block
         int blkX = small_block_cols*bx-border;
         int blkXmax = blkX+BLOCK_SIZE-1;
 
         // calculate the global thread coordination
 	int xidx = blkX+tx;
-       
-        // effective range within this block that falls within 
+
+        // effective range within this block that falls within
         // the valid range of the input data
         // used to rule out computation outside the boundary.
         int validXmin = (blkX < 0) ? -blkX : 0;
@@ -110,7 +113,7 @@ __global__ void dynproc_kernel(
 
         int W = tx-1;
         int E = tx+1;
-        
+
         W = (W < validXmin) ? validXmin : W;
         E = (E > validXmax) ? validXmax : E;
 
@@ -121,7 +124,7 @@ __global__ void dynproc_kernel(
 	}
 	__syncthreads(); // [Ronny] Added sync to avoid race on prev Aug. 14 2012
         bool computed;
-        for (int i=0; i<iteration ; i++){ 
+        for (int i=0; i<iteration ; i++){
             computed = false;
             if( IN_RANGE(tx, i+1, BLOCK_SIZE-i-2) &&  \
                   isValid){
@@ -133,7 +136,7 @@ __global__ void dynproc_kernel(
                   shortest = MIN(shortest, right);
                   int index = cols*(startStep+i)+xidx;
                   result[tx] = shortest + gpuWall[index];
-	
+
             }
             __syncthreads();
             if(i==iteration-1)
@@ -144,13 +147,15 @@ __global__ void dynproc_kernel(
       }
 
       // update the global memory
-      // after the last iteration, only threads coordinated within the 
+      // after the last iteration, only threads coordinated within the
       // small block perform the calculation and switch on ``computed''
       if (computed){
-          gpuResults[xidx]=result[tx];		
+          gpuResults[xidx]=result[tx];
       }
 }
+// <<< END EDITABLE REGION ID=1
 
+// >>> START EDITABLE REGION ID=2
 /*
    compute N time steps
 */
@@ -158,21 +163,21 @@ int calc_path(int *gpuWall, int *gpuResult[2], int rows, int cols, \
 	 int pyramid_height, int blockCols, int borderCols)
 {
         dim3 dimBlock(BLOCK_SIZE);
-        dim3 dimGrid(blockCols);  
-	
+        dim3 dimGrid(blockCols);
+
         int src = 1, dst = 0;
 	for (int t = 0; t < rows-1; t+=pyramid_height) {
             int temp = src;
             src = dst;
             dst = temp;
             dynproc_kernel<<<dimGrid, dimBlock>>>(
-                MIN(pyramid_height, rows-t-1), 
+                MIN(pyramid_height, rows-t-1),
                 gpuWall, gpuResult[src], gpuResult[dst],
                 cols,rows, t, borderCols);
 	}
         return dst;
 }
-// <<< END EDITABLE REGION ID=0
+// <<< END EDITABLE REGION ID=2
 
 int main(int argc, char** argv)
 {
@@ -196,7 +201,7 @@ void run(int argc, char** argv)
 
     printf("pyramidHeight: %d\ngridSize: [%d]\nborder:[%d]\nblockSize: %d\nblockGrid:[%d]\ntargetBlock:[%d]\n",\
 	pyramid_height, cols, borderCols, BLOCK_SIZE, blockCols, smallBlockCol);
-	
+
     int *gpuWall, *gpuResult[2];
     int size = rows*cols;
 

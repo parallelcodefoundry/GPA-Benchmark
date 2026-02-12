@@ -3,15 +3,15 @@
 #include <time.h>
 #include <assert.h>
 
-#ifdef RD_WG_SIZE_0_0                                                            
-        #define BLOCK_SIZE RD_WG_SIZE_0_0                                        
-#elif defined(RD_WG_SIZE_0)                                                      
-        #define BLOCK_SIZE RD_WG_SIZE_0                                          
-#elif defined(RD_WG_SIZE)                                                        
-        #define BLOCK_SIZE RD_WG_SIZE                                            
-#else                                                                                    
-        #define BLOCK_SIZE 16                                                            
-#endif                                                                                   
+#ifdef RD_WG_SIZE_0_0
+        #define BLOCK_SIZE RD_WG_SIZE_0_0
+#elif defined(RD_WG_SIZE_0)
+        #define BLOCK_SIZE RD_WG_SIZE_0
+#elif defined(RD_WG_SIZE)
+        #define BLOCK_SIZE RD_WG_SIZE
+#else
+        #define BLOCK_SIZE 16
+#endif
 
 #define STR_SIZE 256
 
@@ -40,7 +40,7 @@ void run(int argc, char** argv);
 
 
 
-void 
+void
 fatal(char *s)
 {
 	fprintf(stderr, "error: %s\n", s);
@@ -57,7 +57,7 @@ void writeoutput(float *vect, int grid_rows, int grid_cols, char *file){
           printf( "The file was not opened\n" );
 
 
-	for (i=0; i < grid_rows; i++) 
+	for (i=0; i < grid_rows; i++)
 	 for (j=0; j < grid_cols; j++)
 	 {
 
@@ -65,8 +65,8 @@ void writeoutput(float *vect, int grid_rows, int grid_cols, char *file){
 		 fputs(str,fp);
 		 index++;
 	 }
-		
-      fclose(fp);	
+
+      fclose(fp);
 }
 
 
@@ -81,7 +81,7 @@ void readinput(float *vect, int grid_rows, int grid_cols, char *file){
             printf( "The file was not opened\n" );
 
 
-	for (i=0; i <= grid_rows-1; i++) 
+	for (i=0; i <= grid_rows-1; i++)
 	 for (j=0; j <= grid_cols-1; j++)
 	 {
 		fgets(str, STR_SIZE, fp);
@@ -93,7 +93,7 @@ void readinput(float *vect, int grid_rows, int grid_cols, char *file){
 		vect[i*grid_cols+j] = val;
 	}
 
-	fclose(fp);	
+	fclose(fp);
 
 }
 
@@ -101,22 +101,24 @@ void readinput(float *vect, int grid_rows, int grid_cols, char *file){
 #define IN_RANGE(x, min, max)   ((x)>=(min) && (x)<=(max))
 #define CLAMP_RANGE(x, min, max) x = (x<(min)) ? min : ((x>(max)) ? max : x )
 #define MIN(a, b) ((a)<=(b) ? (a) : (b))
+// <<< END EDITABLE REGION ID=0
 
+// >>> START EDITABLE REGION ID=1
 __global__ void calculate_temp(int iteration,  //number of iteration
                                float *power,   //power input
                                float *temp_src,    //temperature input/output
                                float *temp_dst,    //temperature input/output
                                int grid_cols,  //Col of grid
                                int grid_rows,  //Row of grid
-							   int border_cols,  // border offset 
+							   int border_cols,  // border offset
 							   int border_rows,  // border offset
                                float Cap,      //Capacitance
-                               float Rx, 
-                               float Ry, 
-                               float Rz, 
-                               float step, 
+                               float Rx,
+                               float Ry,
+                               float Rz,
+                               float step,
                                float time_elapsed){
-	
+
         __shared__ float temp_on_cuda[BLOCK_SIZE][BLOCK_SIZE];
         __shared__ float power_on_cuda[BLOCK_SIZE][BLOCK_SIZE];
         __shared__ float temp_t[BLOCK_SIZE][BLOCK_SIZE]; // saving temparary temperature result
@@ -124,29 +126,29 @@ __global__ void calculate_temp(int iteration,  //number of iteration
 	float amb_temp = 80.0;
         float step_div_Cap;
         float Rx_1,Ry_1,Rz_1;
-        
+
 	int bx = blockIdx.x;
         int by = blockIdx.y;
 
 	int tx=threadIdx.x;
 	int ty=threadIdx.y;
-	
+
 	step_div_Cap=step/Cap;
-	
+
 	Rx_1=1/Rx;
 	Ry_1=1/Ry;
 	Rz_1=1/Rz;
-	
+
         // each block finally computes result for a small block
-        // after N iterations. 
-        // it is the non-overlapping small blocks that cover 
+        // after N iterations.
+        // it is the non-overlapping small blocks that cover
         // all the input data
 
         // calculate the small block size
 	int small_block_rows = BLOCK_SIZE-iteration*2;//EXPAND_RATE
 	int small_block_cols = BLOCK_SIZE-iteration*2;//EXPAND_RATE
 
-        // calculate the boundary for the block according to 
+        // calculate the boundary for the block according to
         // the boundary of its small block
         int blkY = small_block_rows*by-border_rows;
         int blkX = small_block_cols*bx-border_cols;
@@ -160,14 +162,14 @@ __global__ void calculate_temp(int iteration,  //number of iteration
         // load data if it is within the valid input range
 	int loadYidx=yidx, loadXidx=xidx;
         int index = grid_cols*loadYidx+loadXidx;
-       
+
 	if(IN_RANGE(loadYidx, 0, grid_rows-1) && IN_RANGE(loadXidx, 0, grid_cols-1)){
             temp_on_cuda[ty][tx] = temp_src[index];  // Load the temperature data from global memory to shared memory
             power_on_cuda[ty][tx] = power[index];// Load the power data from global memory to shared memory
 	}
 	__syncthreads();
 
-        // effective range within this block that falls within 
+        // effective range within this block that falls within
         // the valid range of the input data
         // used to rule out computation outside the boundary.
         int validYmin = (blkY < 0) ? -blkY : 0;
@@ -179,14 +181,14 @@ __global__ void calculate_temp(int iteration,  //number of iteration
         int S = ty+1;
         int W = tx-1;
         int E = tx+1;
-        
+
         N = (N < validYmin) ? validYmin : N;
         S = (S > validYmax) ? validYmax : S;
         W = (W < validXmin) ? validXmin : W;
         E = (E > validXmax) ? validXmax : E;
 
         bool computed;
-        for (int i=0; i<iteration ; i++){ 
+        for (int i=0; i<iteration ; i++){
             computed = false;
             if( IN_RANGE(tx, i+1, BLOCK_SIZE-i-2) &&  \
                   IN_RANGE(ty, i+1, BLOCK_SIZE-i-2) &&  \
@@ -194,11 +196,11 @@ __global__ void calculate_temp(int iteration,  //number of iteration
                   IN_RANGE(ty, validYmin, validYmax) ) {
                   computed = true;
                   temp_t[ty][tx] =
-                    temp_on_cuda[ty][tx] + step_div_Cap * (power_on_cuda[ty][tx] + 
-	       	         (temp_on_cuda[S][tx] + temp_on_cuda[N][tx] - 2.0*temp_on_cuda[ty][tx]) * Ry_1 + 
-		             (temp_on_cuda[ty][E] + temp_on_cuda[ty][W] - 2.0*temp_on_cuda[ty][tx]) * Rx_1 + 
+                    temp_on_cuda[ty][tx] + step_div_Cap * (power_on_cuda[ty][tx] +
+	       	         (temp_on_cuda[S][tx] + temp_on_cuda[N][tx] - 2.0*temp_on_cuda[ty][tx]) * Ry_1 +
+		             (temp_on_cuda[ty][E] + temp_on_cuda[ty][W] - 2.0*temp_on_cuda[ty][tx]) * Rx_1 +
 		             (amb_temp - temp_on_cuda[ty][tx]) * Rz_1);
-	
+
             }
             __syncthreads();
             if(i==iteration-1)
@@ -209,23 +211,25 @@ __global__ void calculate_temp(int iteration,  //number of iteration
           }
 
       // update the global memory
-      // after the last iteration, only threads coordinated within the 
+      // after the last iteration, only threads coordinated within the
       // small block perform the calculation and switch on ``computed''
       if (computed){
-          temp_dst[index]= temp_t[ty][tx];		
+          temp_dst[index]= temp_t[ty][tx];
       }
 }
+// <<< END EDITABLE REGION ID=1
 
+// >>> START EDITABLE REGION ID=2
 /*
    compute N time steps
 */
 
 int compute_tran_temp(float *MatrixPower,float *MatrixTemp[2], int col, int row, \
-		int total_iterations, int num_iterations, int blockCols, int blockRows, int borderCols, int borderRows) 
+		int total_iterations, int num_iterations, int blockCols, int blockRows, int borderCols, int borderRows)
 {
         dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
-        dim3 dimGrid(blockCols, blockRows);  
-	
+        dim3 dimGrid(blockCols, blockRows);
+
 	float grid_height = chip_height / row;
 	float grid_width = chip_width / col;
 
@@ -241,7 +245,7 @@ int compute_tran_temp(float *MatrixPower,float *MatrixTemp[2], int col, int row,
 	time_elapsed=0.001;
 
         int src = 1, dst = 0;
-	
+
 	for (t = 0; t < total_iterations; t+=num_iterations) {
             int temp = src;
             src = dst;
@@ -251,7 +255,7 @@ int compute_tran_temp(float *MatrixPower,float *MatrixTemp[2], int col, int row,
 	}
         return dst;
 }
-// <<< END EDITABLE REGION ID=0
+// <<< END EDITABLE REGION ID=2
 
 void usage(int argc, char **argv)
 {
@@ -278,12 +282,12 @@ void run(int argc, char** argv)
 {
     int size;
     int grid_rows,grid_cols;
-    float *FilesavingTemp,*FilesavingPower,*MatrixOut; 
+    float *FilesavingTemp,*FilesavingPower,*MatrixOut;
     char *tfile, *pfile, *ofile;
-    
+
     int total_iterations = 60;
     int pyramid_height = 1; // number of iterations
-	
+
 	if (argc != 7)
 		usage(argc, argv);
 	if((grid_rows = atoi(argv[1]))<=0||
@@ -291,11 +295,11 @@ void run(int argc, char** argv)
        (pyramid_height = atoi(argv[2]))<=0||
        (total_iterations = atoi(argv[3]))<=0)
 		usage(argc, argv);
-		
+
 	tfile=argv[4];
     pfile=argv[5];
     ofile=argv[6];
-	
+
     size=grid_rows*grid_cols;
 
     /* --------------- pyramid parameters --------------- */
@@ -316,7 +320,7 @@ void run(int argc, char** argv)
 
     printf("pyramidHeight: %d\ngridSize: [%d, %d]\nborder:[%d, %d]\nblockGrid:[%d, %d]\ntargetBlock:[%d, %d]\n",\
 	pyramid_height, grid_cols, grid_rows, borderCols, borderRows, blockCols, blockRows, smallBlockCol, smallBlockRow);
-	
+
     readinput(FilesavingTemp, grid_rows, grid_cols, tfile);
     readinput(FilesavingPower, grid_rows, grid_cols, pfile);
 

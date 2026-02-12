@@ -1,10 +1,11 @@
 #include <cuda_runtime.h>
 #include <cuda.h>
 
+// >>> START EDITABLE REGION ID=0
 __global__
 void tensor_transpose(int dim_input, int dim_output, int nblocks, int tile_size,
-  int *shape_input, int *shape_output, 
-  float *shape_input_r, float *shape_output_r, 
+  int *shape_input, int *shape_output,
+  float *shape_input_r, float *shape_output_r,
   int *stride_input,
   int *stride_output_local, int *stride_output_global,
   double *input, double *output) {
@@ -23,7 +24,7 @@ void tensor_transpose(int dim_input, int dim_output, int nblocks, int tile_size,
     }
 
     __syncthreads();
-  
+
     for (int i = threadIdx.x; i < tile_size; i += blockDim.x) {
       it = i;
       int offset2 = 0, local_offset = 0;
@@ -40,3 +41,4 @@ void tensor_transpose(int dim_input, int dim_output, int nblocks, int tile_size,
     __syncthreads();
   }
 }
+// >>> END EDITABLE REGION ID=0

@@ -317,7 +317,9 @@ __global__ void Fan2(float *m_cuda, float *a_cuda, float *b_cuda,int Size, int j
 		b_cuda[xidx+1+t] -= m_cuda[Size*(xidx+1+t)+(yidx+t)] * b_cuda[t];
 	}
 }
+// <<< END EDITABLE REGION ID=0
 
+// >>> START EDITABLE REGION ID=1
 /*------------------------------------------------------
  ** ForwardSub() -- Forward substitution of Gaussian
  ** elimination.
@@ -381,7 +383,7 @@ void ForwardSub()
 	cudaFree(a_cuda);
 	cudaFree(b_cuda);
 }
-// <<< END EDITABLE REGION ID=0
+// <<< END EDITABLE REGION ID=1
 
 /*------------------------------------------------------
  ** BackSub() -- Backward substitution

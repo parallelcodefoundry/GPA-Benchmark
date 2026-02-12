@@ -8,7 +8,7 @@
  * MIT License. Read the full licence: http://www.opensource.org/licenses/mit-license.php
  *
  * If you find this program useful, please contact me and reference PAVLE home page in your work.
- * 
+ *
  */
 
 #include "stdafx.h"
@@ -49,11 +49,10 @@ int main(int argc, char* argv[]){
     return 0;
 }
 
-// >>> START EDITABLE REGION ID=0
 void runVLCTest(char *file_name, uint num_block_threads, uint num_blocks) {
     printf("CUDA! Starting VLC Tests!\n");
-    unsigned int num_elements; //uint num_elements = num_blocks * num_block_threads; 
-    unsigned int mem_size; //uint mem_size = num_elements * sizeof(int); 
+    unsigned int num_elements; //uint num_elements = num_blocks * num_block_threads;
+    unsigned int mem_size; //uint mem_size = num_elements * sizeof(int);
     unsigned int symbol_type_size = sizeof(int);
     //////// LOAD DATA ///////////////
     double H; // entropy
@@ -112,7 +111,7 @@ void runVLCTest(char *file_name, uint num_block_threads, uint num_blocks) {
 
     dim3 grid_size(num_blocks,1,1);
     dim3 block_size(num_block_threads, 1, 1);
-    unsigned int sm_size; 
+    unsigned int sm_size;
 
 
     unsigned int NT = 10; //number of runs for each execution time
@@ -127,6 +126,7 @@ void runVLCTest(char *file_name, uint num_block_threads, uint num_blocks) {
     unsigned int num_ints = refbytesize/4 + ((refbytesize%4 ==0)?0:1);
     //////////////////* END CPU *///////////////////////////////////
 
+// >>> START EDITABLE REGION ID=0
     //////////////////* SM64HUFF KERNEL *///////////////////////////////////
     grid_size.x		= num_blocks;
     block_size.x	= num_block_threads;
@@ -140,9 +140,9 @@ void runVLCTest(char *file_name, uint num_block_threads, uint num_blocks) {
 
     cudaEventRecord( start, 0 );
         for (int i=0; i<NT; i++) {
-            vlc_encode_kernel_sm64huff<<<grid_size, block_size, sm_size>>>(d_sourceData, d_codewords, d_codewordlens,  
+            vlc_encode_kernel_sm64huff<<<grid_size, block_size, sm_size>>>(d_sourceData, d_codewords, d_codewordlens,
 #ifdef TESTING
-                    d_cw32, d_cw32len, d_cw32idx, 
+                    d_cw32, d_cw32len, d_cw32idx,
 #endif
                     d_destData, d_cindex); //testedOK2
         }
@@ -152,6 +152,7 @@ void runVLCTest(char *file_name, uint num_block_threads, uint num_blocks) {
     float   elapsedTime;
     cudaEventElapsedTime( &elapsedTime,
             start, stop ) ;
+// <<< END EDITABLE REGION ID=0
 
     CUT_CHECK_ERROR("Kernel execution failed\n");
     printf("GPU Encoding time (SM64HUFF): %f (ms)\n", elapsedTime/NT);
@@ -170,13 +171,12 @@ void runVLCTest(char *file_name, uint num_block_threads, uint num_blocks) {
 
     CUDA_SAFE_CALL(cudaMemcpy(destData, d_destDataPacked, mem_size, cudaMemcpyDeviceToHost));
     compare_vectors((unsigned int*)crefData, (unsigned int*)destData, num_ints);
-#endif 
+#endif
 
-    free(sourceData); free(destData);  	free(codewords);  	free(codewordlens); free(cw32);  free(cw32len); free(crefData); 
+    free(sourceData); free(destData);  	free(codewords);  	free(codewordlens); free(cw32);  free(cw32len); free(crefData);
     CUDA_SAFE_CALL(cudaFree(d_sourceData)); 	CUDA_SAFE_CALL(cudaFree(d_destData)); CUDA_SAFE_CALL(cudaFree(d_destDataPacked));
     CUDA_SAFE_CALL(cudaFree(d_codewords)); 		CUDA_SAFE_CALL(cudaFree(d_codewordlens));
-    CUDA_SAFE_CALL(cudaFree(d_cw32)); 		CUDA_SAFE_CALL(cudaFree(d_cw32len)); 	CUDA_SAFE_CALL(cudaFree(d_cw32idx)); 
+    CUDA_SAFE_CALL(cudaFree(d_cw32)); 		CUDA_SAFE_CALL(cudaFree(d_cw32len)); 	CUDA_SAFE_CALL(cudaFree(d_cw32idx));
     CUDA_SAFE_CALL(cudaFree(d_cindex)); CUDA_SAFE_CALL(cudaFree(d_cindex2));
     free(cindex2);
 }
-// <<< END EDITABLE REGION ID=0

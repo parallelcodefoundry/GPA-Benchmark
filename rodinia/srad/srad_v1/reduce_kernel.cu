@@ -31,7 +31,7 @@ __global__ void reduce(	long d_Ne,											// number of elements in array
     __syncthreads();
     // end Lingjie Zhang's modification
 
-	// reduction of sums if all blocks are full (rare case)	
+	// reduction of sums if all blocks are full (rare case)
 	if(nf == NUMBER_THREADS){
 		// sum of every 2, 4, ..., NUMBER_THREADS elements
 		for(i=2; i<=NUMBER_THREADS; i=2*i){
@@ -50,7 +50,7 @@ __global__ void reduce(	long d_Ne,											// number of elements in array
 		}
 	}
 	// reduction of sums if last block is not full (common case)
-	else{ 
+	else{
 		// for full blocks (all except for last block)
 		if(bx != (gridDim.x - 1)){											//
 			// sum of every 2, 4, ..., NUMBER_THREADS elements

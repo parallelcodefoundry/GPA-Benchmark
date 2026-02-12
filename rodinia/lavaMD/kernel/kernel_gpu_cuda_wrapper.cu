@@ -31,7 +31,7 @@
 //	KERNEL_GPU_CUDA_WRAPPER FUNCTION
 //========================================================================================================================================================================================================200
 
-void 
+void
 kernel_gpu_cuda_wrapper(par_str par_cpu,
 						dim_str dim_cpu,
 						box_str* box_cpu,
@@ -102,21 +102,21 @@ kernel_gpu_cuda_wrapper(par_str par_cpu,
 	//	boxes
 	//==================================================50
 
-	cudaMalloc(	(void **)&d_box_gpu, 
+	cudaMalloc(	(void **)&d_box_gpu,
 				dim_cpu.box_mem);
 
 	//==================================================50
 	//	rv
 	//==================================================50
 
-	cudaMalloc(	(void **)&d_rv_gpu, 
+	cudaMalloc(	(void **)&d_rv_gpu,
 				dim_cpu.space_mem);
 
 	//==================================================50
 	//	qv
 	//==================================================50
 
-	cudaMalloc(	(void **)&d_qv_gpu, 
+	cudaMalloc(	(void **)&d_qv_gpu,
 				dim_cpu.space_mem2);
 
 	//====================================================================================================100
@@ -127,7 +127,7 @@ kernel_gpu_cuda_wrapper(par_str par_cpu,
 	//	fv
 	//==================================================50
 
-	cudaMalloc(	(void **)&d_fv_gpu, 
+	cudaMalloc(	(void **)&d_fv_gpu,
 				dim_cpu.space_mem);
 
 	time2 = get_time();
@@ -144,9 +144,9 @@ kernel_gpu_cuda_wrapper(par_str par_cpu,
 	//	boxes
 	//==================================================50
 
-	cudaMemcpy(	d_box_gpu, 
+	cudaMemcpy(	d_box_gpu,
 				box_cpu,
-				dim_cpu.box_mem, 
+				dim_cpu.box_mem,
 				cudaMemcpyHostToDevice);
 
 	//==================================================50
@@ -175,9 +175,9 @@ kernel_gpu_cuda_wrapper(par_str par_cpu,
 	//	fv
 	//==================================================50
 
-	cudaMemcpy(	d_fv_gpu, 
-				fv_cpu, 
-				dim_cpu.space_mem, 
+	cudaMemcpy(	d_fv_gpu,
+				fv_cpu,
+				dim_cpu.space_mem,
 				cudaMemcpyHostToDevice);
 
 	time3 = get_time();
@@ -194,10 +194,9 @@ kernel_gpu_cuda_wrapper(par_str par_cpu,
 											d_rv_gpu,
 											d_qv_gpu,
 											d_fv_gpu);
-
+	// <<< END EDITABLE REGION ID=1
 	checkCUDAError("Start");
 	cudaThreadSynchronize();
-	// <<< END EDITABLE REGION ID=1
 
 	time4 = get_time();
 
@@ -205,9 +204,9 @@ kernel_gpu_cuda_wrapper(par_str par_cpu,
 	//	GPU MEMORY			COPY (CONTD.)
 	//======================================================================================================================================================150
 
-	cudaMemcpy(	fv_cpu, 
-				d_fv_gpu, 
-				dim_cpu.space_mem, 
+	cudaMemcpy(	fv_cpu,
+				d_fv_gpu,
+				dim_cpu.space_mem,
 				cudaMemcpyDeviceToHost);
 
 	time5 = get_time();

@@ -173,6 +173,7 @@ __device__ int findIndexBin(double * CDF, int beginIndex, int endIndex, double v
     return -1;
 }
 
+// >>> START EDITABLE REGION ID=0
 /** added this function. was missing in original double version.
  * Takes in a double and returns an integer that approximates to that double
  * @return if the mantissa < .5 => return value < input value; else return value > input value
@@ -184,6 +185,7 @@ __device__ double dev_round_double(double value) {
     else
         return newValue++;
 }
+// <<< END EDITABLE REGION ID=0
 
 /*****************************
  * CUDA Find Index Kernel Function to replace FindIndex
@@ -239,7 +241,7 @@ __global__ void sum_kernel(double* partial_sums, int Nparticles) {
     }
 }
 
-// >>> START EDITABLE REGION ID=0
+// >>> START EDITABLE REGION ID=1
 /********************************
  * CALC LIKELIHOOD SUM
  * DETERMINES THE LIKELIHOOD SUM BASED ON THE FORMULA: SUM( (IK[IND] - 100)^2 - (IK[IND] - 228)^2)/ 100
@@ -255,7 +257,9 @@ __global__ void sum_kernel(double* partial_sums, int Nparticles) {
         likelihoodSum += (pow((double) (I[ind[index * numOnes + x]] - 100), 2) - pow((double) (I[ind[index * numOnes + x]] - 228), 2)) / 50.0;
     return likelihoodSum;
 }
+// <<< END EDITABLE REGION ID=1
 
+// >>> START EDITABLE REGION ID=2
 /*****************************
  * RANDU
  * GENERATES A UNIFORM DISTRIBUTION
@@ -271,7 +275,9 @@ __global__ void sum_kernel(double* partial_sums, int Nparticles) {
 
     return fabs(seed[index] / ((double) M));
 }
+// <<< END EDITABLE REGION ID=2
 
+// >>> START EDITABLE REGION ID=3
 __device__ double d_randn(int * seed, int index) {
     //Box-Muller algortihm
     double pi = 3.14159265358979323846;
@@ -281,7 +287,9 @@ __device__ double d_randn(int * seed, int index) {
     double rt = -2 * log(u);
     return sqrt(rt) * cosine;
 }
+// <<< END EDITABLE REGION ID=3
 
+// >>> START EDITABLE REGION ID=4
 /*****************************
  * CUDA Likelihood Kernel Function to replace FindIndex
  * param1: arrayX
@@ -304,18 +312,18 @@ __global__ void likelihood_kernel(double * arrayX, double * arrayY, double * xj,
     int block_id = blockIdx.x;
     int i = blockDim.x * block_id + threadIdx.x;
     int y;
-    
-    int indX, indY; 
+
+    int indX, indY;
     __shared__ double buffer[512];
     if (i < Nparticles) {
-        arrayX[i] = xj[i]; 
-        arrayY[i] = yj[i]; 
+        arrayX[i] = xj[i];
+        arrayY[i] = yj[i];
 
         weights[i] = 1 / ((double) (Nparticles)); //Donnie - moved this line from end of find_index_kernel to prevent all weights from being reset before calculating position on final iteration.
 
         arrayX[i] = arrayX[i] + 1.0 + 5.0 * d_randn(seed, i);
         arrayY[i] = arrayY[i] - 2.0 + 2.0 * d_randn(seed, i);
-        
+
     }
 
     __syncthreads();
@@ -325,17 +333,17 @@ __global__ void likelihood_kernel(double * arrayX, double * arrayY, double * xj,
             //added dev_round_double() to be consistent with roundDouble
             indX = dev_round_double(arrayX[i]) + objxy[y * 2 + 1];
             indY = dev_round_double(arrayY[i]) + objxy[y * 2];
-            
+
             ind[i * countOnes + y] = abs(indX * IszY * Nfr + indY * Nfr + k);
             if (ind[i * countOnes + y] >= max_size)
                 ind[i * countOnes + y] = 0;
         }
         likelihood[i] = calcLikelihoodSum(I, ind, countOnes, i);
-        
+
         likelihood[i] = likelihood[i] / countOnes;
-        
+
         weights[i] = weights[i] * exp(likelihood[i]); //Donnie Newell - added the missing exponential function call
-        
+
     }
 
     buffer[threadIdx.x] = 0.0;
@@ -354,54 +362,54 @@ __global__ void likelihood_kernel(double * arrayX, double * arrayY, double * xj,
         if (threadIdx.x < s) {
             buffer[threadIdx.x] += buffer[threadIdx.x + s];
         }
-        
+
         __syncthreads();
-            
+
     }
     if (threadIdx.x == 0) {
         partial_sums[blockIdx.x] = buffer[0];
     }
-    
+
     __syncthreads();
 
-    
+
 }
-// <<< END EDITABLE REGION ID=0
+// <<< END EDITABLE REGION ID=4
 
 __global__ void normalize_weights_kernel(double * weights, int Nparticles, double* partial_sums, double * CDF, double * u, int * seed) {
     int block_id = blockIdx.x;
     int i = blockDim.x * block_id + threadIdx.x;
     __shared__ double u1, sumWeights;
-    
+
     if(0 == threadIdx.x)
         sumWeights = partial_sums[0];
-    
+
     __syncthreads();
-    
+
     if (i < Nparticles) {
         weights[i] = weights[i] / sumWeights;
     }
-    
-    __syncthreads(); 
-    
+
+    __syncthreads();
+
     if (i == 0) {
         cdfCalc(CDF, weights, Nparticles);
         u[0] = (1 / ((double) (Nparticles))) * d_randu(seed, i); // do this to allow all threads in all blocks to use the same u1
     }
-    
+
     __syncthreads();
-    
-    if(0 == threadIdx.x) 
+
+    if(0 == threadIdx.x)
         u1 = u[0];
-    
+
     __syncthreads();
-        
+
     if (i < Nparticles) {
         u[i] = u1 + i / ((double) (Nparticles));
     }
 }
 
-/** 
+/**
  * Takes in a double and returns an integer that approximates to that double
  * @return if the mantissa < .5 => return value < input value; else return value > input value
  */
@@ -709,7 +717,7 @@ void particleFilter(unsigned char * I, int IszX, int IszY, int Nfr, int * seed, 
 
 
     //Donnie - this loop is different because in this kernel, arrayX and arrayY
-    //  are set equal to xj before every iteration, so effectively, arrayX and 
+    //  are set equal to xj before every iteration, so effectively, arrayX and
     //  arrayY will be set to xe and ye before the first iteration.
     for (x = 0; x < Nparticles; x++) {
 
@@ -730,22 +738,24 @@ void particleFilter(unsigned char * I, int IszX, int IszY, int Nfr, int * seed, 
     check_error(cudaMemcpy(seed_GPU, seed, sizeof (int) *Nparticles, cudaMemcpyHostToDevice));
     long long send_end = get_time();
     printf("TIME TO SEND TO GPU: %f\n", elapsed_time(send_start, send_end));
-    // >>> START EDITABLE REGION ID=1
+
+// >>> START EDITABLE REGION ID=5
     int num_blocks = ceil((double) Nparticles / (double) threads_per_block);
 
 
     for (k = 1; k < Nfr; k++) {
-        
+
         likelihood_kernel << < num_blocks, threads_per_block >> > (arrayX_GPU, arrayY_GPU, xj_GPU, yj_GPU, CDF_GPU, ind_GPU, objxy_GPU, likelihood_GPU, I_GPU, u_GPU, weights_GPU, Nparticles, countOnes, max_size, k, IszY, Nfr, seed_GPU, partial_sums);
 
         sum_kernel << < num_blocks, threads_per_block >> > (partial_sums, Nparticles);
 
         normalize_weights_kernel << < num_blocks, threads_per_block >> > (weights_GPU, Nparticles, partial_sums, CDF_GPU, u_GPU, seed_GPU);
-        
+
         find_index_kernel << < num_blocks, threads_per_block >> > (arrayX_GPU, arrayY_GPU, CDF_GPU, u_GPU, xj_GPU, yj_GPU, weights_GPU, Nparticles);
 
     }//end loop
-    // <<< END EDITABLE REGION ID=1
+// <<< END EDITABLE REGION ID=5
+
     //block till kernels are finished
     cudaThreadSynchronize();
     long long back_time = get_time();

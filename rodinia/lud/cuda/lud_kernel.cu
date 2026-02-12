@@ -12,7 +12,7 @@
 #endif
 
 // >>> START EDITABLE REGION ID=0
-__global__ void 
+__global__ void
 lud_diagonal(float *m, int matrix_dim, int offset)
 {
   int i,j;
@@ -41,7 +41,7 @@ lud_diagonal(float *m, int matrix_dim, int offset)
     __syncthreads();
   }
 
-  /* 
+  /*
      The first row is not modified, it
      is no need to write it back to the
      global memory
@@ -54,6 +54,7 @@ lud_diagonal(float *m, int matrix_dim, int offset)
   }
 }
 // <<< END EDITABLE REGION ID=0
+
 __global__ void
 lud_perimeter(float *m, int matrix_dim, int offset)
 {
@@ -66,13 +67,13 @@ lud_perimeter(float *m, int matrix_dim, int offset)
 
   if (threadIdx.x < BLOCK_SIZE) {
     idx = threadIdx.x;
-    
+
     array_offset = offset*matrix_dim+offset;
     for (i=0; i < BLOCK_SIZE/2; i++){
       dia[i][idx]=m[array_offset+idx];
       array_offset += matrix_dim;
     }
-    
+
     array_offset = offset*matrix_dim+offset;
     for (i=0; i < BLOCK_SIZE; i++) {
       peri_row[i][idx]=m[array_offset+(blockIdx.x+1)*BLOCK_SIZE+idx];
@@ -81,19 +82,19 @@ lud_perimeter(float *m, int matrix_dim, int offset)
 
   } else {
     idx = threadIdx.x-BLOCK_SIZE;
-    
+
     array_offset = (offset+BLOCK_SIZE/2)*matrix_dim+offset;
     for (i=BLOCK_SIZE/2; i < BLOCK_SIZE; i++){
       dia[i][idx]=m[array_offset+idx];
       array_offset += matrix_dim;
     }
-    
+
     array_offset = (offset+(blockIdx.x+1)*BLOCK_SIZE)*matrix_dim+offset;
     for (i=0; i < BLOCK_SIZE; i++) {
       peri_col[i][idx] = m[array_offset+idx];
       array_offset += matrix_dim;
     }
-  
+
   }
   __syncthreads();
 
@@ -106,7 +107,7 @@ lud_perimeter(float *m, int matrix_dim, int offset)
         peri_row[i][idx]-=dia[i][j]*peri_row[j][idx];
     }
 
-    
+
     array_offset = (offset+1)*matrix_dim+offset;
     for(i=1; i < BLOCK_SIZE; i++){
       m[array_offset+(blockIdx.x+1)*BLOCK_SIZE+idx] = peri_row[i][idx];
@@ -121,7 +122,7 @@ lud_perimeter(float *m, int matrix_dim, int offset)
     }
 
     __syncthreads();
-    
+
     array_offset = (offset+(blockIdx.x+1)*BLOCK_SIZE)*matrix_dim+offset;
     for(i=0; i < BLOCK_SIZE; i++){
       m[array_offset+idx] =  peri_col[i][idx];
@@ -145,7 +146,7 @@ lud_perimeter(float *m, int matrix_dim, int offset)
   }
 
   __syncthreads();
-    
+
   if (threadIdx.x < BLOCK_SIZE) { //peri-row
     idx=threadIdx.x;
     array_offset = (offset+1)*matrix_dim+offset;
@@ -200,7 +201,7 @@ void lud_cuda(float *m, int matrix_dim)
       lud_diagonal<<<1, BLOCK_SIZE>>>(m, matrix_dim, i);
       lud_perimeter<<<(matrix_dim-i)/BLOCK_SIZE-1, BLOCK_SIZE*2>>>(m, matrix_dim, i);
       dim3 dimGrid((matrix_dim-i)/BLOCK_SIZE-1, (matrix_dim-i)/BLOCK_SIZE-1);
-      lud_internal<<<dimGrid, dimBlock>>>(m, matrix_dim, i); 
+      lud_internal<<<dimGrid, dimBlock>>>(m, matrix_dim, i);
   }
   lud_diagonal<<<1,BLOCK_SIZE>>>(m, matrix_dim, i);
 }

@@ -62,11 +62,13 @@ tensor_transpose<<<nblocks, NTHREADS, 2 * (TILE_SIZE) * sizeof(double)>>>(dim_in
 #elif defined CUDA6
 tensor_transpose<3, 3><<<nblocks, NTHREADS, 2 * (TILE_SIZE) * sizeof(double)>>>(nblocks, tile_size, device_input, device_output);
 #else
+// >>> START EDITABLE REGION ID=0
 tensor_transpose<<<nblocks, NTHREADS>>>(dim_input, dim_output, nblocks, tile_size,
                                         device_shape_input, device_shape_output,
                                         device_shape_input_r, device_shape_output_r,
                                         device_stride_input, device_stride_output_local, device_stride_output_global,
                                         device_input, device_output);
+// >>> END EDITABLE REGION ID=0
 #endif
 }
 cudaEventRecord(event_end);

@@ -260,7 +260,7 @@ int main(int argc, char *argv []){
 
 	checkCUDAError("setup");
 
-	// >>> START EDITABLE REGION ID=0
+// >>> START EDITABLE REGION ID=0
 	//================================================================================80
 	// 	KERNEL EXECUTION PARAMETERS
 	//================================================================================80
@@ -274,7 +274,7 @@ int main(int argc, char *argv []){
 	}
 	blocks.x = blocks_x;													// define the number of blocks in the grid
 	blocks.y = 1;
-	// <<< END EDITABLE REGION ID=0
+// <<< END EDITABLE REGION ID=0
 
 	time5 = get_time();
 
@@ -317,7 +317,7 @@ int main(int argc, char *argv []){
 
 		checkCUDAError("prepare");
 
-		// >>> START EDITABLE REGION ID=1
+// >>> START EDITABLE REGION ID=1
 		// performs subsequent reductions of sums
 		blocks2.x = blocks.x;												// original number of blocks
 		blocks2.y = blocks.y;
@@ -355,7 +355,7 @@ int main(int argc, char *argv []){
 			checkCUDAError("after reduce");
 
 		}
-		// <<< END EDITABLE REGION ID=1
+// <<< END EDITABLE REGION ID=1
 
 		checkCUDAError("before copy sum");
 
