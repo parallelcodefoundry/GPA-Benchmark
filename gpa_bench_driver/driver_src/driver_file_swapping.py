@@ -89,9 +89,7 @@ def swap_file_out_app(app: dict, temp_dir: str, swap_config: SwapConfig | None =
             if os.path.exists(backup_path):
                 shutil.copy(backup_path, dest_path)
                 os.remove(backup_path)
-            else:
-                raise FileNotFoundError(f"No backup file ({backup_path}) found for {dest_path}")
-            logger.debug("Restored file %s", dest_path)
+                logger.debug("Restored file %s", dest_path)
     else:
         # Fallback: restore all .bak files found in temp_dir (for backward compatibility)
         # This handles the case where swap_config is not provided
@@ -101,9 +99,7 @@ def swap_file_out_app(app: dict, temp_dir: str, swap_config: SwapConfig | None =
             if os.path.exists(backup_path):
                 shutil.copy(backup_path, dest_path)
                 os.remove(backup_path)
-            else:
-                raise FileNotFoundError(f"No backup file ({backup_path}) found for {dest_path}")
-            logger.debug("Restored file %s", dest_path)
+                logger.debug("Restored file %s", dest_path)
         else:
             raise FileNotFoundError(f"No kernel file ({dest_path}) found for {app.get('name')}")
 
