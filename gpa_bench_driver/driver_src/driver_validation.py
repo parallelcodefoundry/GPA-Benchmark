@@ -4,6 +4,7 @@ Validation Functions for GPA-Benchmark Driver
 This module provides functions for validating application output against
 reference outputs using various validation strategies.
 """
+import difflib
 import logging
 import os
 import re
@@ -36,7 +37,8 @@ def _get_test_output(app: dict, result: subprocess.CompletedProcess, temp_dir: s
         return result.stdout.decode("utf-8")
 
 
-def validate_app(app: dict, result: subprocess.CompletedProcess, temp_dir: str) -> bool:
+def validate_app(app: dict, result: subprocess.CompletedProcess,
+                 temp_dir: str) -> tuple[bool, str | None]:
     """Validate the application output.
 
     Supports multiple validation types:
@@ -52,7 +54,9 @@ def validate_app(app: dict, result: subprocess.CompletedProcess, temp_dir: str) 
         temp_dir: Temporary directory where working copy of application directory is located
 
     Returns:
-        True if validation succeeds, False otherwise
+        Tuple of (success, validation_output). success is True if validation passes.
+        validation_output is a diagnostic string on failure (e.g. diff, found float); None on
+        success.
 
     Raises:
         ValueError: If no validation type is specified or if validation configuration is invalid
@@ -61,11 +65,17 @@ def validate_app(app: dict, result: subprocess.CompletedProcess, temp_dir: str) 
 
     # Check for fail text
     if "fail_check_text" in app:
-        return app["fail_check_text"] not in stdout_text
+        fail_text = app["fail_check_text"]
+        if fail_text in stdout_text:
+            return False, f"Fail check text '{fail_text}' was found in output."
+        return True, None
 
     # Check for pass text
     if "pass_check_text" in app:
-        return app["pass_check_text"] in stdout_text
+        pass_text = app["pass_check_text"]
+        if pass_text not in stdout_text:
+            return False, f"Pass check text '{pass_text}' was not found in output."
+        return True, None
 
     # Compare to reference output
     if "reference_output" in app:
@@ -77,7 +87,7 @@ def validate_app(app: dict, result: subprocess.CompletedProcess, temp_dir: str) 
 
         # Exact match
         if test_output == ref_output:
-            return True
+            return True, None
 
         # Window comparison
         if "output_window" in app and app["output_window"] != 0:
@@ -87,13 +97,21 @@ def validate_app(app: dict, result: subprocess.CompletedProcess, temp_dir: str) 
         if "float_grep" in app:
             return validate_float(test_output, app, ref_output)
 
-        # No match and no special validation
-        return False
+        # No match and no special validation: produce diff
+        diff_lines = difflib.unified_diff(
+            ref_output.splitlines(keepends=True),
+            test_output.splitlines(keepends=True),
+            fromfile="reference",
+            tofile="test",
+            lineterm=""
+        )
+        diff_text = "".join(diff_lines)
+        return False, f"Output did not match reference (exact match). Diff:\n{diff_text}"
 
     raise ValueError(f"No validation type specified for {app['name']}")
 
 
-def validate_output_window(test_output: str, app: dict, ref_output: str) -> bool:
+def validate_output_window(test_output: str, app: dict, ref_output: str) -> tuple[bool, str | None]:
     """Validate the output using a window of lines.
 
     Compares a specific range of lines from the test output to the reference output.
@@ -104,7 +122,7 @@ def validate_output_window(test_output: str, app: dict, ref_output: str) -> bool
         ref_output: The reference output string
 
     Returns:
-        True if the window matches, False otherwise
+        Tuple of (success, validation_output). validation_output is diagnostic text on failure.
 
     Raises:
         ValueError: If output_window is not a list of two integers
@@ -116,13 +134,25 @@ def validate_output_window(test_output: str, app: dict, ref_output: str) -> bool
     test_lines = test_output.splitlines()
     ref_lines = ref_output.splitlines()
 
-    test_window = "\n".join(test_lines[window_sizes[0]:window_sizes[1]])
-    ref_window = "\n".join(ref_lines[window_sizes[0]:window_sizes[1]])
+    start, end = window_sizes[0], window_sizes[1]
+    test_window = "\n".join(test_lines[start:end])
+    ref_window = "\n".join(ref_lines[start:end])
 
-    return test_window == ref_window
+    if test_window == ref_window:
+        return True, None
+
+    diff_lines = difflib.unified_diff(
+        ref_window.splitlines(keepends=True),
+        test_window.splitlines(keepends=True),
+        fromfile=f"reference (lines {start}:{end})",
+        tofile=f"test (lines {start}:{end})",
+        lineterm=""
+    )
+    diff_text = "".join(diff_lines)
+    return False, f"Output window [{start}:{end}] did not match.\n{diff_text}"
 
 
-def validate_float(test_output: str, app: dict, ref_output: str) -> bool:
+def validate_float(test_output: str, app: dict, ref_output: str) -> tuple[bool, str | None]:
     """Validate a float value in the test output.
 
     Locates a float value after a specific search string and compares it to the
@@ -134,7 +164,7 @@ def validate_float(test_output: str, app: dict, ref_output: str) -> bool:
         ref_output: The reference output string
 
     Returns:
-        True if the float values match within tolerance, False otherwise
+        Tuple of (success, validation_output). validation_output is diagnostic text on failure.
 
     Raises:
         ValueError: If the reference output doesn't contain the expected float pattern
@@ -154,12 +184,21 @@ def validate_float(test_output: str, app: dict, ref_output: str) -> bool:
         raise ValueError(f"Reference output {app['reference_output']} does not contain " \
                         + f"float pattern after '{float_grep}'")
 
+    ref_value = float(ref_match.group(1))
+
     if not float_match:
         logger.warning("No float found in test output for %s, looking for pattern after '%s'",
                        app['name'], float_grep)
-        return False
+        return False, (
+            f"No float found in test output after '{float_grep}'. "
+            f"Reference value (from reference output): {ref_value}."
+        )
 
     float_value = float(float_match.group(1))
-    ref_value = float(ref_match.group(1))
+    if abs(float_value - ref_value) <= tolerance:
+        return True, None
 
-    return abs(float_value - ref_value) <= tolerance
+    return False, (
+        f"Float comparison failed. Expected (reference): {ref_value}, got (test): {float_value}, "
+        f"tolerance: {tolerance}, difference: {abs(float_value - ref_value)}."
+    )

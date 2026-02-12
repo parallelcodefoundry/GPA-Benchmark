@@ -206,6 +206,7 @@ class DriverPassResult:
         build_stderr: Standard error from build process
         run_stdout: Standard output from run process
         run_stderr: Standard error from run process
+        validation_output: Diagnostic output from validation when it fails (e.g. diff, found float)
     """
     app_name: str | None = None
     run_num: str | None = None
@@ -215,6 +216,7 @@ class DriverPassResult:
     build: bool | None = None
     run: bool | None = None
     validate: bool | None = None
+    validation_output: str | None = None
     nsys_profile: bool | None = None
     ncu_profile: bool | None = None
     nsys_post: bool | None = None
@@ -242,6 +244,7 @@ class DriverPassResult:
             "build": self.build,
             "run": self.run,
             "validate": self.validate,
+            "validation_output": self.validation_output,
             "nsys_profile": self.nsys_profile,
             "ncu_profile": self.ncu_profile,
             "nsys_post": self.nsys_post,

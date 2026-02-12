@@ -194,9 +194,11 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
                 return result
 
             # Validate
-            validate_success = validate_app(app, run_result, temp_dir)
+            validate_success, validation_output = validate_app(app, run_result, temp_dir)
             logger.debug("Validate success: %s", validate_success)
             result.validate = validate_success
+            if not validate_success and validation_output is not None:
+                result.validation_output = validation_output
 
             if pbar is not None:
                 pbar()  # Update progress for VALIDATE operation
