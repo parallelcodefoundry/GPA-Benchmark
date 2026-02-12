@@ -35,11 +35,12 @@ def swap_file_in_app(swap_config: SwapConfig, temp_dir: str, detect_regions: boo
         dest_path = os.path.join(temp_dir, file_swap.swap_file_dest_name)
         backup_path = dest_path + ".bak"
 
+        # Always create a backup just in case, swap out function will always expect it to exist
+        shutil.copy(dest_path, backup_path)
+
         # Skip if file doesn't exist (as per requirement: if no replacement file found, don't swap)
         if not os.path.exists(dest_path):
             continue
-
-        shutil.copy(dest_path, backup_path)
 
         with open(dest_path, "r", encoding="utf-8") as dest_file:
             dest_text = dest_file.read()
