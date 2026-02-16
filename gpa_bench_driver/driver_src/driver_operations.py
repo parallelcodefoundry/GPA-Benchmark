@@ -44,7 +44,7 @@ def build_app(app: dict, sm_version: int, no_clean: bool, env: dict, temp_dir: s
                 os.remove(bin_path)
 
     # Build step
-    build_command = ["make", "-j", "8"]
+    build_command = ["make", "-B", "-j", "8"]
     if "build_command" in app:
         build_command = app["build_command"].split()
     build_command.append(f"SM_VERSION={sm_version}")
