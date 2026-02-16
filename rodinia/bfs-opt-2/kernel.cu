@@ -29,7 +29,7 @@ Kernel( Node* g_graph_nodes, int* g_graph_edges, bool* g_graph_mask, bool* g_upd
 		g_graph_mask[tid]=false;
 		int starting = g_graph_nodes[tid].starting;
 		int nedges = g_graph_nodes[tid].no_of_edges;
-		#pragma unroll 4
+    #pragma unroll 2
 		for(int i=starting; i<(nedges + starting); i++)
 			{
 			int id = g_graph_edges[i];

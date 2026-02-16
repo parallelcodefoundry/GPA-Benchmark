@@ -17,6 +17,8 @@ rodinia/backprop/output.txt
 rodinia/bfs-opt/bfs
 rodinia/bfs-opt/result.txt
 rodinia/bfs/result.txt
+rodinia/bfs-opt-2/bfs
+rodinia/bfs-opt-2/result.txt
 rodinia/cfd-opt/euler3d
 rodinia/cfd-opt/euler3d_double
 rodinia/cfd-opt/pre_euler3d
