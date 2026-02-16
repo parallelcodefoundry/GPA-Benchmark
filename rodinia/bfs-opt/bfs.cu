@@ -2,15 +2,15 @@
   Implementing Breadth first search on CUDA using algorithm given in HiPC'07
   paper "Accelerating Large Graph Algorithms on the GPU using CUDA"
 
-  Copyright (c) 2008 International Institute of Information Technology - Hyderabad. 
+  Copyright (c) 2008 International Institute of Information Technology - Hyderabad.
   All rights reserved.
 
-  Permission to use, copy, modify and distribute this software and its documentation for 
-  educational purpose is hereby granted without fee, provided that the above copyright 
-  notice and this permission notice appear in all copies of this software and that you do 
+  Permission to use, copy, modify and distribute this software and its documentation for
+  educational purpose is hereby granted without fee, provided that the above copyright
+  notice and this permission notice appear in all copies of this software and that you do
   not sell the software.
 
-  THE SOFTWARE IS PROVIDED "AS IS" AND WITHOUT WARRANTY OF ANY KIND,EXPRESS, IMPLIED OR 
+  THE SOFTWARE IS PROVIDED "AS IS" AND WITHOUT WARRANTY OF ANY KIND,EXPRESS, IMPLIED OR
   OTHERWISE.
 
   Created by Pawan Harish.
@@ -42,7 +42,7 @@ void BFSGraph(int argc, char** argv);
 ////////////////////////////////////////////////////////////////////////////////
 // Main Program
 ////////////////////////////////////////////////////////////////////////////////
-int main( int argc, char** argv) 
+int main( int argc, char** argv)
 {
 	no_of_nodes=0;
 	edge_list_size=0;
@@ -57,7 +57,7 @@ fprintf(stderr,"Usage: %s <input_file>\n", argv[0]);
 ////////////////////////////////////////////////////////////////////////////////
 //Apply BFS on a Graph using CUDA
 ////////////////////////////////////////////////////////////////////////////////
-void BFSGraph( int argc, char** argv) 
+void BFSGraph( int argc, char** argv)
 {
 
     char *input_f;
@@ -65,7 +65,7 @@ void BFSGraph( int argc, char** argv)
 	Usage(argc, argv);
 	exit(0);
 	}
-	
+
 	input_f = argv[1];
 	printf("Reading File\n");
 	//Read in Graph from a file
@@ -87,8 +87,8 @@ void BFSGraph( int argc, char** argv)
 	//Distribute threads across multiple Blocks if necessary
 	if(no_of_nodes>MAX_THREADS_PER_BLOCK)
 	{
-		num_of_blocks = (int)ceil(no_of_nodes/(double)MAX_THREADS_PER_BLOCK); 
-		num_of_threads_per_block = MAX_THREADS_PER_BLOCK; 
+		num_of_blocks = (int)ceil(no_of_nodes/(double)MAX_THREADS_PER_BLOCK);
+		num_of_threads_per_block = MAX_THREADS_PER_BLOCK;
 	}
 
 	// allocate host memory
@@ -97,9 +97,9 @@ void BFSGraph( int argc, char** argv)
 	bool *h_updating_graph_mask = (bool*) malloc(sizeof(bool)*no_of_nodes);
 	bool *h_graph_visited = (bool*) malloc(sizeof(bool)*no_of_nodes);
 
-	int start, edgeno;   
+	int start, edgeno;
 	// initalize the memory
-	for( unsigned int i = 0; i < no_of_nodes; i++) 
+	for( unsigned int i = 0; i < no_of_nodes; i++)
 	{
 		fscanf(fp,"%d %d",&start,&edgeno);
 		h_graph_nodes[i].starting = start;
@@ -129,7 +129,7 @@ void BFSGraph( int argc, char** argv)
 	}
 
 	if(fp)
-		fclose(fp);    
+		fclose(fp);
 
 	printf("Read File\n");
 
@@ -162,7 +162,7 @@ void BFSGraph( int argc, char** argv)
 	for(int i=0;i<no_of_nodes;i++)
 		h_cost[i]=-1;
 	h_cost[source]=0;
-	
+
 	// allocate device memory for result
 	int* d_cost;
 	cudaMalloc( (void**) &d_cost, sizeof(int)*no_of_nodes);
@@ -182,23 +182,34 @@ void BFSGraph( int argc, char** argv)
 	printf("Start traversing the tree\n");
 	bool stop;
 	//Call the Kernel untill all the elements of Frontier are not false
+	cudaEvent_t start_event, stop_event;
+	cudaEventCreate(&start_event);
+	cudaEventCreate(&stop_event);
 	do
 	{
 		//if no thread changes this value then the loop stops
 		stop=false;
 		cudaMemcpy( d_over, &stop, sizeof(bool), cudaMemcpyHostToDevice) ;
+		cudaEventRecord(start_event);
 		Kernel<<< grid, threads, 0 >>>( d_graph_nodes, d_graph_edges, d_graph_mask, d_updating_graph_mask, d_graph_visited, d_cost, no_of_nodes);
+		cudaEventRecord(stop_event);
 		// check if kernel execution generated and error
-		
+
 
 		Kernel2<<< grid, threads, 0 >>>( d_graph_mask, d_updating_graph_mask, d_graph_visited, d_over, no_of_nodes);
 		// check if kernel execution generated and error
-		
+
 
 		cudaMemcpy( &stop, d_over, sizeof(bool), cudaMemcpyDeviceToHost) ;
 		k++;
+		float elapsed_time;
+		cudaEventSynchronize(stop_event);
+		cudaEventElapsedTime(&elapsed_time, start_event, stop_event);
+		printf("%f\n", elapsed_time);
 	}
 	while(stop);
+	cudaEventDestroy(start_event);
+	cudaEventDestroy(stop_event);
 
 
 	printf("Kernel Executed %d times\n",k);
