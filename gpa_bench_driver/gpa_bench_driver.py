@@ -280,6 +280,8 @@ def run_all(app_config: dict, swaps_dict: dict[str, SwapConfig] | None, env: dic
         # Swap passes for this app
         if swaps_dict:
             num_passes += sum(1 for swap in swaps_dict.values() if swap.app_name == app["name"])
+    if num_passes == 0:
+        raise ValueError(f"No passes generated, could not find {config.app} in app_config!")
 
     # Total operations = operations per pass * number of passes
     total_operations = ops_per_pass * num_passes
@@ -385,7 +387,7 @@ def run_driver(
     """
     # Create DriverConfig from parameters
     driver_config = DriverConfig(
-        app=app.lower(),
+        app=app,
         sm_version=sm_version,
         cuda_home=cuda_home,
         no_clean=no_clean,
@@ -535,7 +537,7 @@ def main() -> None:
         format='%(asctime)s [%(levelname)s] - %(message)s'
     )
 
-    logger.info("Start driver.py")
+    logger.info("Start gpa_bench_driver.py")
 
     # Convert argparse.Namespace to DriverConfig
     driver_config = DriverConfig.from_args(args)

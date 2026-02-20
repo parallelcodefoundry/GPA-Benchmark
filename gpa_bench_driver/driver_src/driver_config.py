@@ -6,9 +6,12 @@ which operations to perform, and setting up the environment.
 """
 import os
 import yaml
+import logging
 
 from gpa_bench_driver.driver_src.driver_models import Operation, SwapConfig, DriverConfig
 from gpa_bench_driver.driver_src.driver_file_swapping import build_swaps_dict
+
+logger = logging.getLogger("GPA-Benchmark")
 
 
 def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] | None, dict]:
@@ -50,16 +53,22 @@ def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] 
 
     # Validate app name
     if config.app != "all":
-        all_names = [app["name"].lower() for app in app_config["apps"]]
+        all_names = [app["name"] for app in app_config["apps"]]
         if config.app not in all_names:
-            # Try to convert app name alias to canonical name
+            # Try lowercase matching
             for app in app_config["apps"]:
-                if config.app in app["aliases"]:
+                if config.app.lower() == app["name"].lower():
                     config.app = app["name"]
                     break
             if config.app not in all_names:
-                raise ValueError(f"Application {config.app} not found in config file " \
-                                 + f"{config.config}")
+                # Try to convert app name alias to canonical name
+                for app in app_config["apps"]:
+                    if config.app in app["aliases"]:
+                        config.app = app["name"]
+                        break
+                if config.app not in all_names:
+                    raise ValueError(f"Application {config.app} not found in config file " \
+                                     + f"{config.config}")
 
     # Setup CUDA environment
     cuda_home = (config.cuda_home or
