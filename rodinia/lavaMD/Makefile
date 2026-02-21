@@ -18,7 +18,7 @@ OMP_FLAG = -fopenmp
 
 CUD_C = $(CUDA_DIR)/bin/nvcc
 # OMP_FLAG = 	-Xcompiler paste_one_here
-CUDA_FLAG = -lineinfo
+CUDA_FLAG = -lineinfo -arch=sm_$(SM_VERSION)
 
 # link objects (binaries) together
 lavaMD:		main.o \
@@ -31,7 +31,7 @@ lavaMD:		main.o \
 			./util/num/num.o \
 			./util/timer/timer.o \
 			./util/device/device.o \
-			-lm \
+			-lm -lstdc++ \
 			-L$(CUDA_DIR)/lib64 \
 			-lcuda -lcudart \
 			$(OMP_LIB) \
@@ -80,7 +80,8 @@ main.o:		main.h \
 	$(CUD_C)			./util/device/device.cu \
 						-c \
 						-o ./util/device/device.o \
-						-O3
+						-O3 \
+						$(CUDA_FLAG)
 
 # delete all object and executable files
 clean:

@@ -757,7 +757,7 @@ void particleFilter(unsigned char * I, int IszX, int IszY, int Nfr, int * seed, 
 // <<< END EDITABLE REGION ID=5
 
     //block till kernels are finished
-    cudaThreadSynchronize();
+    cudaDeviceSynchronize();
     long long back_time = get_time();
 
     cudaFree(xj_GPU);

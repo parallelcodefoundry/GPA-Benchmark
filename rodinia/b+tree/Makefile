@@ -97,7 +97,7 @@ b+tree.out:	./main.o \
 			./util/timer/timer.o \
 			./util/num/num.o \
 			./util/cuda/cuda.o \
-			-lm \
+			-lm -lstdc++ \
 			-L$(CUDA_LIB_DIR) \
 			$(CUDA_LIB)\
                        -o b+tree.out

@@ -260,7 +260,7 @@ float pgain( long x, Points *points, float z, long int *numcenters, int kmax, bo
 															center_table_d,			// in:	center index table
 															switch_membership_d		// out:  changes in membership
 															);
-	cudaThreadSynchronize();
+	cudaDeviceSynchronize();
 // <<< END EDITABLE REGION ID=3
 
 	// error check

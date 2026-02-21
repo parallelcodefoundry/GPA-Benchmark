@@ -126,7 +126,7 @@ void bpnn_train_cuda(BPNN *net, float *eo, float *eh)
 											  hidden_partial_sum,
 											  in,
 											  hid);
-  cudaThreadSynchronize();
+  cudaDeviceSynchronize();
   // <<< END EDITABLE REGION ID=0
 
   cudaError_t error = cudaGetLastError();

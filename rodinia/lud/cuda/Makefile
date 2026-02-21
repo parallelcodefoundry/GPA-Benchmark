@@ -12,6 +12,7 @@ NVCCFLAGS += -I../common \
 			 -use_fast_math \
 			 -lineinfo \
 			 -lm \
+			 -arch=sm_$(SM_VERSION) \
 			 $(SPACE)
 
 CFLAGS += -I../common \

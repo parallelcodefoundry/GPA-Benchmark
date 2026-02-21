@@ -9,10 +9,10 @@ INCLUDE := $(CUDA_DIR)/include
 all: particlefilter_naive particlefilter_float
 
 particlefilter_naive: ex_particle_CUDA_naive_seq.cu
-	$(CC) -I$(INCLUDE) -L$(CUDA_LIB_DIR) -lcuda -g -lm -O3 -use_fast_math -lineinfo ex_particle_CUDA_naive_seq.cu -o particlefilter_naive
+	$(CC) -I$(INCLUDE) -L$(CUDA_LIB_DIR) -lcuda -g -lm -O3 -use_fast_math -lineinfo -arch=sm_$(SM_VERSION) ex_particle_CUDA_naive_seq.cu -o particlefilter_naive
 
 particlefilter_float: ex_particle_CUDA_float_seq.cu
-	$(CC) -I$(INCLUDE) -L$(CUDA_LIB_DIR) -lcuda -g -lm -O3 -use_fast_math -lineinfo ex_particle_CUDA_float_seq.cu -o particlefilter_float
+	$(CC) -I$(INCLUDE) -L$(CUDA_LIB_DIR) -lcuda -g -lm -O3 -use_fast_math -lineinfo -arch=sm_$(SM_VERSION) ex_particle_CUDA_float_seq.cu -o particlefilter_float
 
 clean:
 	rm particlefilter_naive particlefilter_float *.sqlite *.qdrep
