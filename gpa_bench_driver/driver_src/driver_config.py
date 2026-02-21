@@ -63,7 +63,7 @@ def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] 
             if config.app not in all_names:
                 # Try to convert app name alias to canonical name
                 for app in app_config["apps"]:
-                    if config.app in app["aliases"]:
+                    if "aliases" in app.keys() and config.app in app["aliases"]:
                         config.app = app["name"]
                         break
                 if config.app not in all_names:
