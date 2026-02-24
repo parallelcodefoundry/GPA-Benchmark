@@ -78,11 +78,14 @@ def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] 
                  "/usr/local/cuda")
     env = os.environ.copy()
     env["CUDA_HOME"] = cuda_home
+    cuda_lib64 = os.path.join(cuda_home, "lib64")
+    existing_ld_path = env.get("LD_LIBRARY_PATH", "")
+    env["LD_LIBRARY_PATH"] = f"{cuda_lib64}:{existing_ld_path}" if existing_ld_path else cuda_lib64
 
     # Load swaps or override swaps if specified
     if config.swaps_override:
-        formatted_swaps: dict[tuple[str, str | None, int, int], list[tuple[str, str]]] = \
-            {(config.app, None, 0, 0): list(config.swaps_override.items())}
+        formatted_swaps: dict[tuple[str, int, str | None, int], list[tuple[str, str]]] = \
+            {(config.app, 0, None, 0): list(config.swaps_override.items())}
         swaps_dict = build_swaps_dict(formatted_swaps, config.app, app_config)
         return app_config, swaps_dict, env
 
