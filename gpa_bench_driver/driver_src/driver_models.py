@@ -40,6 +40,7 @@ class DriverConfig:
         log_level: Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL (default: "WARNING")
         no_progress: Do not display a progress bar (default: False)
         swaps_override: Override the swaps dictionary with a custom one (default: None)
+        timeout: Timeout in seconds, if None, no timeout enforced (default: None)
     """
     sm_version: int
     app: str = "all"
@@ -58,6 +59,7 @@ class DriverConfig:
     log_level: str = "WARNING"
     no_progress: bool = False
     swaps_override: dict[str, str] | None = None
+    timeout: int | None = None
 
     def __init__(self, app: str,
                  sm_version: int | None,
@@ -75,7 +77,8 @@ class DriverConfig:
                  temp_dir: str | None,
                  log_level: str,
                  no_progress: bool,
-                 swaps_override: dict[str, str] | None = None):
+                 swaps_override: dict[str, str] | None = None,
+                 timeout: int | None = None):
         self.app = app
         self.sm_version = sm_version if sm_version is not None else detect_sm_version()
         self.cuda_home = cuda_home
@@ -93,6 +96,7 @@ class DriverConfig:
         self.log_level = log_level
         self.no_progress = no_progress
         self.swaps_override = swaps_override
+        self.timeout = timeout
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> 'DriverConfig':
@@ -120,7 +124,8 @@ class DriverConfig:
             output_file=args.output_file,
             temp_dir=args.temp_dir,
             log_level=args.log_level,
-            no_progress=args.no_progress
+            no_progress=args.no_progress,
+            timeout=args.timeout if args.timeout > 0 else None
         )
 
 

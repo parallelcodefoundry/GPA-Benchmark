@@ -12,7 +12,8 @@ logger = logging.getLogger("GPA-Benchmark")
 
 
 def subprocess_wrapper(command: list[str], cwd: str, env: dict, quiet: bool = False,
-                       log_level: str = "WARNING") -> subprocess.CompletedProcess:
+                       log_level: str = "WARNING",
+                       timeout: int | None = None) -> subprocess.CompletedProcess:
     """Wrapper for subprocess.run to capture stdout and stderr, log command before running.
 
     Args:
@@ -24,12 +25,17 @@ def subprocess_wrapper(command: list[str], cwd: str, env: dict, quiet: bool = Fa
             - DEBUG: Always log stdout and stderr
             - INFO: Log stdout and stderr on failure (except when quiet=True)
             - WARNING/ERROR/CRITICAL: Never log stdout or stderr
-
+        timeout: Timeout in seconds, if None, no timeout enforced (default: None)
     Returns:
         CompletedProcess object with returncode, stdout, and stderr attributes
     """
     logger.debug("Running command %s in directory %s", ' '.join(command), cwd)
-    result = subprocess.run(command, cwd=cwd, env=env, check=False, capture_output=True)
+    try:
+        result = subprocess.run(command, cwd=cwd, env=env, check=False, capture_output=True,
+                                timeout=timeout)
+    except subprocess.TimeoutExpired:
+        logger.error("Command %s timed out after %d seconds", ' '.join(command), timeout)
+        return subprocess.CompletedProcess(args=command, returncode=-1, stdout=None, stderr=None)
 
     if log_level == "DEBUG":
         # DEBUG: Always log stdout and stderr, even with quiet=True

@@ -495,7 +495,7 @@ def parse_args() -> argparse.Namespace:
         help="Only postprocess nsys-rep file(s) found under profiles/, do not run the application"
     )
     parser.add_argument(
-        "-n", "--num-samples", type=int, default=3,
+        "-n", "--num-samples", type=int, default=5,
         help="The number of times to collect ncu/nsys profiles for each application and swap"
     )
     parser.add_argument(
@@ -514,6 +514,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--no-progress", action="store_true",
         help="Do not display a progress bar"
+    )
+    parser.add_argument(
+        "--timeout", type=int, default=300,
+        help="The timeout in seconds for the driver to run, if negative, not timeout enforced"
+             "(default: 300)"
     )
     return parser.parse_args()
 
