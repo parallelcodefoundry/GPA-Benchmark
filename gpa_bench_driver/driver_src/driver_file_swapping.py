@@ -130,20 +130,18 @@ def _try_match_filename(target_filename: str, curr_filename: str, root: str) -> 
     return None, None, None, None
 
 
-def _extract_path_metadata(root: str, swaps: str, app_name: str) -> str | None:
+def _extract_path_metadata(root: str, app_name: str) -> str | None:
     """Extract metadata from path: folder names from root (inclusive) up to AgenticAnalyzer
-       (exclusive). Drops app name if found in any path part.
+       (exclusive). Drops app name if found in any path part, as well as "." and ".." parts.
 
     Args:
         root: Full path to the current directory (e.g.
               .../gpa-bench-nodr/backprop_gpt-oss-120b/AgenticAnalyzer/run_0)
-        swaps: Path to the swaps directory (root of the walk)
         app_name: The name of the application to drop if found in any path part
     Returns:
         Joined folder names as a string, or None if there are no such folders
     """
-    rel_path = os.path.relpath(root, swaps)
-    parts = [p for p in rel_path.split(os.sep) if p]
+    parts = [p for p in root.split(os.sep) if p and p not in [".", ".."]]
     try:
         agentic_idx = parts.index("AgenticAnalyzer")
     except ValueError:
@@ -154,7 +152,7 @@ def _extract_path_metadata(root: str, swaps: str, app_name: str) -> str | None:
             path_meta_parts[i] = part.replace(app_name, "").strip("_-.")
     if not path_meta_parts:
         return None
-    return " ".join(path_meta_parts).strip().lower()
+    return "_".join(path_meta_parts).strip().lower()
 
 
 def _find_grouped_files(swaps: str) -> dict[tuple[str, int, str | None, int],
@@ -186,14 +184,14 @@ def _find_grouped_files(swaps: str) -> dict[tuple[str, int, str | None, int],
 
             full_path = os.path.join(root, file)
             # Path-based metadata: folder names from swaps root up to AgenticAnalyzer (exclusive)
-            path_metadata = _extract_path_metadata(root, swaps, app_name)
+            path_metadata = _extract_path_metadata(root, app_name)
             if metadata == "":
-                metadata = None
+                metadata = "keet" # TODO: Update KEET code to put this in for us
             elif metadata is not None:
-                metadata = metadata.replace("_", " ").strip().lower()
+                metadata = metadata.strip().lower()
             # Combine path metadata with filename-derived metadata for keying
             if path_metadata is not None:
-                metadata = f"{path_metadata} {metadata}".strip() if metadata else path_metadata
+                metadata = f"{path_metadata}_{metadata}".strip() if metadata else path_metadata
             if metadata == "":
                 metadata = None
             key = (app_name, run_num, metadata, optimized_code_num)
