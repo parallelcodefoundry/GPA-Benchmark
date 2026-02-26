@@ -347,7 +347,8 @@ def run_driver(
     temp_dir: str | None = None,
     log_level: str = "WARNING",
     no_progress: bool = True,
-    swaps_override: dict[str, str] | None = None
+    swaps_override: dict[str, str] | None = None,
+    timeout: int | None = 300
 ) -> tuple[dict[str, AppResults], list[Operation], dict[str, list[DriverPassResult]]]:
     """Run the driver programmatically with the same interface as the CLI.
 
@@ -374,7 +375,8 @@ def run_driver(
         no_progress: Do not display a progress bar (default: True)
         swaps_override: Override the swaps dictionary with a custom one for a single app, where keys
                         are filenames and values are code contents (default: None)
-
+        timeout: The timeout in seconds for the driver to run, if negative, not timeout enforced
+                 (default: 300)
     Returns:
         Tuple of:
         - results: Dictionary mapping app names to AppResults
@@ -403,7 +405,8 @@ def run_driver(
         temp_dir=temp_dir,
         log_level=log_level,
         no_progress=no_progress,
-        swaps_override=swaps_override
+        swaps_override=swaps_override,
+        timeout=timeout
     )
 
     return run_driver_config(driver_config)
