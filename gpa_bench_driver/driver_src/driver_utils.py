@@ -73,7 +73,6 @@ class SubprocessRunner:
         effective_quiet = self.quiet if quiet is None else quiet
         log_level = self.log_level
         timeout = self.timeout
-        output_char_limit = self.output_char_limit
 
         logger.debug("Running command %s in directory %s", ' '.join(command), cwd)
 
@@ -108,28 +107,22 @@ class SubprocessRunner:
             args=command, returncode=returncode, stdout=stdout, stderr=stderr,
         )
 
-        def _decode_and_limit(raw: bytes | None) -> str:
-            text = raw.decode('utf-8') if raw else ""
-            return (
-                self._truncate_middle(text, output_char_limit) if output_char_limit > 0 else text
-            )
-
         if log_level == "DEBUG":
             # DEBUG: Always log stdout and stderr, even with quiet=True
             if stdout_file:
                 logger.debug("Command stdout written to file: %s", stdout_file)
             else:
-                logger.debug("Command stdout:\n%s", _decode_and_limit(result.stdout))
-            logger.debug("Command stderr:\n%s", _decode_and_limit(result.stderr))
+                logger.debug("Command stdout:\n%s", self.decode_and_limit(result.stdout))
+            logger.debug("Command stderr:\n%s", self.decode_and_limit(result.stderr))
         elif log_level == "INFO":
             # INFO: Log stdout and stderr on failure, unless quiet=True
             if not effective_quiet and result.returncode != 0:
                 if stdout_file:
                     logger.info("Command stdout written to file: %s", stdout_file)
                 elif result.stdout:
-                    logger.info("Command stdout:\n%s", _decode_and_limit(result.stdout))
+                    logger.info("Command stdout:\n%s", self.decode_and_limit(result.stdout))
                 if result.stderr:
-                    logger.info("Command stderr:\n%s", _decode_and_limit(result.stderr))
+                    logger.info("Command stderr:\n%s", self.decode_and_limit(result.stderr))
         # else: WARNING/ERROR/CRITICAL — never log stdout or stderr
 
         return result
@@ -157,7 +150,24 @@ class SubprocessRunner:
         except Exception as exc:  # pylint: disable=broad-except
             result_queue.put((-1, None, str(exc).encode()))
 
-    def _truncate_middle(self, text: str, char_limit: int) -> str:
+    def decode_and_limit(self, raw: bytes | None) -> str:
+        """Decode a bytes object to a string and truncate it if it exceeds the output character
+           limit.
+
+        Args:
+            raw: The bytes object to decode and truncate
+
+        Returns:
+            The decoded and truncated string
+        """
+        text = raw.decode("utf-8") if raw else ""
+        return (
+            self.truncate_middle(text, self.output_char_limit)
+            if self.output_char_limit > 0
+            else text
+        )
+
+    def truncate_middle(self, text: str, char_limit: int) -> str:
         """Truncate a string to char_limit characters by removing characters from the middle.
 
         If the string is within the limit it is returned unchanged. Otherwise, equal halves

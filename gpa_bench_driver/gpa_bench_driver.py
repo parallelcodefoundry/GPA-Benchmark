@@ -187,9 +187,9 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
 
             # Run
             run_success, run_result = run_app(app, runner, temp_dir)
-            result.run_stdout = run_result.stdout.decode("utf-8") \
+            result.run_stdout = runner.decode_and_limit(run_result.stdout) \
                 if run_result.stdout is not None else ""
-            result.run_stderr = run_result.stderr.decode("utf-8") \
+            result.run_stderr = runner.decode_and_limit(run_result.stderr) \
                 if run_result.stderr is not None else ""
             result.run = run_success
 
