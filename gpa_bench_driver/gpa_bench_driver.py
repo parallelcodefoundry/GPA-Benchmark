@@ -434,6 +434,8 @@ def run_driver_config(config: DriverConfig) -> tuple[dict[str, AppResults], list
     # Save results
     if config.output_file:
         save_results(long_results, config.output_file)
+    else:
+        logger.debug("Output writing disabled, results not saved")
 
     return results, operations, long_results
 
