@@ -5,16 +5,34 @@ This module provides utility functions for subprocess execution, path resolution
 directory setup, and system detection.
 """
 import logging
+import multiprocessing
 import os
 import subprocess
 
 logger = logging.getLogger("GPA-Benchmark")
 
 
+def _run_subprocess(command: list[str], cwd: str, env: dict,
+                    result_queue: multiprocessing.Queue) -> None:
+    """Target function for a worker process that executes subprocess.run and puts the result
+    (returncode, stdout, stderr) onto result_queue.  Runs without a timeout so the parent
+    process is responsible for enforcing one.
+    """
+    try:
+        proc = subprocess.run(command, cwd=cwd, env=env, check=False, capture_output=True)
+        result_queue.put((proc.returncode, proc.stdout, proc.stderr))
+    except Exception as exc:  # pylint: disable=broad-except
+        result_queue.put((-1, None, str(exc).encode()))
+
+
 def subprocess_wrapper(command: list[str], cwd: str, env: dict, quiet: bool = False,
                        log_level: str = "WARNING",
                        timeout: int | None = None) -> subprocess.CompletedProcess:
     """Wrapper for subprocess.run to capture stdout and stderr, log command before running.
+
+    When a timeout is specified, subprocess.run is executed in a dedicated child process so
+    that the driver cannot hang if subprocess.run itself blocks.  The child process is
+    forcibly terminated (SIGKILL) if it does not finish within the timeout.
 
     Args:
         command: Command to run as a list of strings
@@ -30,12 +48,30 @@ def subprocess_wrapper(command: list[str], cwd: str, env: dict, quiet: bool = Fa
         CompletedProcess object with returncode, stdout, and stderr attributes
     """
     logger.debug("Running command %s in directory %s", ' '.join(command), cwd)
-    try:
-        result = subprocess.run(command, cwd=cwd, env=env, check=False, capture_output=True,
-                                timeout=timeout)
-    except subprocess.TimeoutExpired:
+
+    result_queue: multiprocessing.Queue = multiprocessing.Queue()
+    worker = multiprocessing.Process(
+        target=_run_subprocess,
+        args=(command, cwd, env, result_queue),
+        daemon=True,
+    )
+    worker.start()
+    worker.join(timeout=timeout)
+
+    if worker.is_alive():
+        worker.kill()
+        worker.join()
         logger.error("Command %s timed out after %d seconds", ' '.join(command), timeout)
         return subprocess.CompletedProcess(args=command, returncode=-1, stdout=None, stderr=None)
+
+    if result_queue.empty():
+        logger.error("Command %s produced no result (worker exited with code %s)",
+                     ' '.join(command), worker.exitcode)
+        return subprocess.CompletedProcess(args=command, returncode=-1, stdout=None, stderr=None)
+
+    returncode, stdout, stderr = result_queue.get_nowait()
+    result = subprocess.CompletedProcess(args=command, returncode=returncode,
+                                         stdout=stdout, stderr=stderr)
 
     if log_level == "DEBUG":
         # DEBUG: Always log stdout and stderr, even with quiet=True
