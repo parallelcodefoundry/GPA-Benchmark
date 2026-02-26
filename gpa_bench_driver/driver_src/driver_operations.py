@@ -6,14 +6,13 @@ This module provides functions for building and running applications.
 import os
 import subprocess
 
-from gpa_bench_driver.driver_src.driver_utils import subprocess_wrapper, get_bin_path, \
+from gpa_bench_driver.driver_src.driver_utils import SubprocessRunner, get_bin_path, \
     get_run_path, get_build_path
 
 
-def build_app(app: dict, sm_version: int, no_clean: bool, env: dict, temp_dir: str,
-              log_level: str = "WARNING",
-              timeout: int | None = None,
-              output_char_limit: int = 25000) -> tuple[bool, subprocess.CompletedProcess]:
+def build_app(app: dict, sm_version: int, no_clean: bool,
+              runner: SubprocessRunner,
+              temp_dir: str) -> tuple[bool, subprocess.CompletedProcess]:
     """Build the application.
 
     Cleans the application (unless no_clean is True), then builds it with the
@@ -23,11 +22,9 @@ def build_app(app: dict, sm_version: int, no_clean: bool, env: dict, temp_dir: s
         app: Application configuration dictionary
         sm_version: SM version to build for (e.g., 90 for 9.0)
         no_clean: If True, skip the clean step
-        env: Environment variables dictionary
+        runner: Configured subprocess runner
         temp_dir: Temporary directory where working copy of application directory is located
-        log_level: Logging level (default: "WARNING")
-        timeout: Timeout in seconds, if None, no timeout enforced (default: None)
-        output_char_limit: Maximum characters to log for stdout/stderr (default: 25000)
+
     Returns:
         Tuple of (success: bool, result: CompletedProcess)
     """
@@ -37,9 +34,7 @@ def build_app(app: dict, sm_version: int, no_clean: bool, env: dict, temp_dir: s
     if not no_clean:
         clean_command = app["clean_command"].split() if "clean_command" in app \
             else ["make", "clean"]
-        clean_result = subprocess_wrapper(clean_command, build_path, env, quiet=True,
-                                          log_level=log_level, timeout=timeout,
-                                          output_char_limit=output_char_limit)
+        clean_result = runner.run(clean_command, build_path, quiet=True)
 
         if clean_result.returncode != 0:
             # Directly remove executable if make clean fails
@@ -53,25 +48,21 @@ def build_app(app: dict, sm_version: int, no_clean: bool, env: dict, temp_dir: s
         build_command = app["build_command"].split()
     build_command.append(f"SM_VERSION={sm_version}")
 
-    result = subprocess_wrapper(build_command, build_path, env, log_level=log_level,
-                                timeout=timeout, output_char_limit=output_char_limit)
+    result = runner.run(build_command, build_path)
     return result.returncode == 0, result
 
 
-def run_app(app: dict, env: dict, temp_dir: str, log_level: str = "WARNING",
-            timeout: int | None = None,
-            output_char_limit: int = 25000) -> tuple[bool, subprocess.CompletedProcess]:
+def run_app(app: dict, runner: SubprocessRunner,
+            temp_dir: str) -> tuple[bool, subprocess.CompletedProcess]:
     """Run the application.
 
     Removes the test output file if it exists, then runs the application.
 
     Args:
         app: Application configuration dictionary
-        env: Environment variables dictionary
+        runner: Configured subprocess runner
         temp_dir: Temporary directory where working copy of application directory is located
-        log_level: Logging level (default: "WARNING")
-        timeout: Timeout in seconds, if None, no timeout enforced (default: None)
-        output_char_limit: Maximum characters to log for stdout/stderr (default: 25000)
+
     Returns:
         Tuple of (success: bool, result: CompletedProcess)
     """
@@ -83,7 +74,6 @@ def run_app(app: dict, env: dict, temp_dir: str, log_level: str = "WARNING",
 
     run_path = get_run_path(app, temp_dir)
     run_command = app["run_command"].split()
-    result = subprocess_wrapper(run_command, run_path, env, log_level=log_level, timeout=timeout,
-                                output_char_limit=output_char_limit)
+    result = runner.run(run_command, run_path)
 
     return result.returncode == 0, result

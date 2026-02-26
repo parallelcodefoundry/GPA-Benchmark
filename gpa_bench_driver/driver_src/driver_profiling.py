@@ -12,7 +12,7 @@ import sqlite3
 import pandas as pd
 
 from gpa_bench_driver.driver_src.driver_models import SwapConfig
-from gpa_bench_driver.driver_src.driver_utils import subprocess_wrapper, setup_profile_dir, \
+from gpa_bench_driver.driver_src.driver_utils import SubprocessRunner, setup_profile_dir, \
     get_run_path
 
 logger = logging.getLogger("GPA-Benchmark")
@@ -49,22 +49,19 @@ def _update_pbar(pbar: Any | None, num_samples_finished: int, num_samples: int) 
             pbar()
 
 
-def nsys_profile_app(app: dict, env: dict, temp_dir: str, num_samples: int,
-                     log_level: str = "WARNING", swap_config: SwapConfig | None = None,
-                     pbar: Any | None = None, timeout: int | None = None,
-                     output_char_limit: int = 25000) -> bool:
+def nsys_profile_app(app: dict, runner: SubprocessRunner, temp_dir: str, num_samples: int,
+                     swap_config: SwapConfig | None = None,
+                     pbar: Any | None = None) -> bool:
     """Profile the application with Nsight Systems.
 
     Args:
         app: Application configuration dictionary
-        env: Environment variables dictionary
+        runner: Configured subprocess runner
         temp_dir: Temporary directory where working copy of application directory is located
         num_samples: Number of times to collect profiles
-        log_level: Logging level (default: "WARNING")
         swap_config: Swap configuration containing the code to swap in
         pbar: Progress bar to update
-        timeout: Timeout in seconds, if None, no timeout enforced (default: None)
-        output_char_limit: Maximum characters to log for stdout/stderr (default: 25000)
+
     Returns:
         True if profiling succeeded and output file exists, False otherwise
     """
@@ -83,8 +80,7 @@ def nsys_profile_app(app: dict, env: dict, temp_dir: str, num_samples: int,
         nsys_command.extend(app["run_command"].split())
 
         run_path = get_run_path(app, temp_dir)
-        result = subprocess_wrapper(nsys_command, run_path, env, log_level=log_level,
-                                    timeout=timeout, output_char_limit=output_char_limit)
+        result = runner.run(nsys_command, run_path)
 
         profile_file = profile_output + ".nsys-rep"
         if not (result.returncode == 0 and os.path.exists(profile_file)):
@@ -99,22 +95,19 @@ def nsys_profile_app(app: dict, env: dict, temp_dir: str, num_samples: int,
     return True
 
 
-def ncu_profile_app(app: dict, env: dict, temp_dir: str, num_samples: int,
-                    log_level: str = "WARNING", swap_config: SwapConfig | None = None,
-                    pbar: Any | None = None, timeout: int | None = None,
-                    output_char_limit: int = 25000) -> bool:
+def ncu_profile_app(app: dict, runner: SubprocessRunner, temp_dir: str, num_samples: int,
+                    swap_config: SwapConfig | None = None,
+                    pbar: Any | None = None) -> bool:
     """Profile the application with Nsight Compute.
 
     Args:
         app: Application configuration dictionary
-        env: Environment variables dictionary
+        runner: Configured subprocess runner
         temp_dir: Temporary directory where working copy of application directory is located
         num_samples: Number of times to collect profiles
-        log_level: Logging level (default: "WARNING")
         swap_config: Swap configuration containing the code to swap in
         pbar: Progress bar to update
-        timeout: Timeout in seconds, if None, no timeout enforced (default: None)
-        output_char_limit: Maximum characters to log for stdout/stderr (default: 25000)
+
     Returns:
         True if profiling succeeded and output file exists, False otherwise
     """
@@ -136,8 +129,7 @@ def ncu_profile_app(app: dict, env: dict, temp_dir: str, num_samples: int,
         ncu_command.extend(app["run_command"].split())
 
         run_path = get_run_path(app, temp_dir)
-        result = subprocess_wrapper(ncu_command, run_path, env, log_level=log_level,
-                                    timeout=timeout, output_char_limit=output_char_limit)
+        result = runner.run(ncu_command, run_path)
 
         profile_file = profile_output + ".ncu-rep"
         if not (result.returncode == 0 and os.path.exists(profile_file)):
@@ -177,11 +169,9 @@ def _parse_ncu_args(app: dict) -> tuple[str, int]:
     return kernel_name, launch_skip
 
 
-def postprocess_nsys_app(app: dict, env: dict, num_samples: int, log_level: str = "WARNING",
+def postprocess_nsys_app(app: dict, runner: SubprocessRunner, num_samples: int,
                          swap_config: SwapConfig | None = None,
-                         pbar: Any | None = None,
-                         timeout: int | None = None,
-                         output_char_limit: int = 25000) -> list[dict[Hashable, Any]] | None:
+                         pbar: Any | None = None) -> list[dict[Hashable, Any]] | None:
     """Postprocess the Nsight Systems profile.
 
     Converts the nsys-rep file to SQLite format, extracts kernel data, and
@@ -189,13 +179,11 @@ def postprocess_nsys_app(app: dict, env: dict, num_samples: int, log_level: str 
 
     Args:
         app: Application configuration dictionary
-        env: Environment variables dictionary
+        runner: Configured subprocess runner
         num_samples: Number of times to collect profiles
-        log_level: Logging level (default: "WARNING")
         swap_config: Swap configuration containing the code to swap in
         pbar: Progress bar to update
-        timeout: Timeout in seconds, if None, no timeout enforced (default: None)
-        output_char_limit: Maximum characters to log for stdout/stderr (default: 25000)
+
     Returns:
         List of dictionaries of kernel data if successful, None otherwise
     """
@@ -219,9 +207,7 @@ def postprocess_nsys_app(app: dict, env: dict, num_samples: int, log_level: str 
 
         # Convert nsys-rep to sqlite
         postprocess_command = ["nsys", "export", "-f", "true", "-t", "sqlite", nsys_rep_file]
-        if subprocess_wrapper(postprocess_command, profile_dir, env,
-                              log_level=log_level, timeout=timeout,
-                              output_char_limit=output_char_limit).returncode != 0:
+        if runner.run(postprocess_command, profile_dir).returncode != 0:
             logger.warning("Could not postprocess Nsight Systems profile file %s", nsys_rep_file)
             _update_pbar(pbar, num_samples_finished, num_samples)
             return None

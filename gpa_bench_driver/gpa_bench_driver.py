@@ -35,7 +35,7 @@ from alive_progress import alive_bar
 
 from gpa_bench_driver.driver_src.driver_models import Operation, SwapConfig, DriverPassResult, \
     AppResults, DriverConfig
-from gpa_bench_driver.driver_src.driver_utils import get_bin_path
+from gpa_bench_driver.driver_src.driver_utils import SubprocessRunner, get_bin_path
 from gpa_bench_driver.driver_src.driver_file_swapping import swap_file_in_app, swap_file_out_app
 from gpa_bench_driver.driver_src.driver_validation import validate_app
 from gpa_bench_driver.driver_src.driver_operations import build_app, run_app
@@ -144,7 +144,13 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
                                               for fs in swap_config.file_swaps])
     else:
         result.swap_file_src_path = None
-    log_level = config.log_level
+
+    runner = SubprocessRunner(
+        env=env,
+        log_level=config.log_level,
+        timeout=config.timeout,
+        output_char_limit=config.subprocess_output_char_limit,
+    )
 
     # Skip build/run/validate if only postprocessing
     if not config.postprocess_nsys:
@@ -155,8 +161,7 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
         try:
             # Build
             build_success, build_result = build_app(
-                app, config.sm_version, config.no_clean, env, temp_dir, log_level, config.timeout,
-                output_char_limit=config.subprocess_output_char_limit
+                app, config.sm_version, config.no_clean, runner, temp_dir
             )
             result.build_stdout = build_result.stdout.decode("utf-8")
             result.build_stderr = build_result.stderr.decode("utf-8")
@@ -179,8 +184,7 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
                 return result
 
             # Run
-            run_success, run_result = run_app(app, env, temp_dir, log_level, config.timeout,
-                                              output_char_limit=config.subprocess_output_char_limit)
+            run_success, run_result = run_app(app, runner, temp_dir)
             result.run_stdout = run_result.stdout.decode("utf-8")
             result.run_stderr = run_result.stderr.decode("utf-8")
             result.run = run_success
@@ -214,18 +218,14 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
 
             # NSYS Profile
             if config.nsys:
-                nsys_success = nsys_profile_app(app, env, temp_dir, config.num_samples, log_level,
-                                                swap_config=swap_config or None, pbar=pbar,
-                                                timeout=config.timeout,
-                                                output_char_limit=config.subprocess_output_char_limit)
+                nsys_success = nsys_profile_app(app, runner, temp_dir, config.num_samples,
+                                                swap_config=swap_config or None, pbar=pbar)
                 result.nsys_profile = nsys_success
 
             # NCU Profile
             if config.ncu:
-                ncu_success = ncu_profile_app(app, env, temp_dir, config.num_samples, log_level,
-                                              swap_config=swap_config or None, pbar=pbar,
-                                              timeout=config.timeout,
-                                              output_char_limit=config.subprocess_output_char_limit)
+                ncu_success = ncu_profile_app(app, runner, temp_dir, config.num_samples,
+                                              swap_config=swap_config or None, pbar=pbar)
                 result.ncu_profile = ncu_success
 
         finally:
@@ -235,9 +235,8 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
 
     # Postprocess NSYS (either standalone or after profiling)
     if config.postprocess_nsys or (config.nsys and result.nsys_profile):
-        postprocess_nsys_result = postprocess_nsys_app(app, env, config.num_samples, log_level,
-                                                       swap_config=swap_config or None, pbar=pbar,
-                                                       output_char_limit=config.subprocess_output_char_limit)
+        postprocess_nsys_result = postprocess_nsys_app(app, runner, config.num_samples,
+                                                       swap_config=swap_config or None, pbar=pbar)
         result.nsys_post = postprocess_nsys_result is not None
         result.nsys_data = postprocess_nsys_result
     elif config.nsys:
