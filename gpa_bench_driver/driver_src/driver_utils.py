@@ -47,7 +47,8 @@ class SubprocessRunner:
         self.output_char_limit = output_char_limit
 
     def run(self, command: list[str], cwd: str,
-            quiet: bool | None = None) -> subprocess.CompletedProcess:
+            quiet: bool | None = None,
+            stdout_file: str | None = None) -> subprocess.CompletedProcess:
         """Execute a command and return the completed process.
 
         When a timeout is configured, the command runs in a dedicated child process
@@ -60,9 +61,14 @@ class SubprocessRunner:
             quiet: Per-call quiet override.  When provided, takes precedence over
                 the instance-level quiet setting.  Useful for suppressing output on
                 a single call (e.g. the clean step) without changing the runner.
+            stdout_file: When provided, the subprocess stdout is written directly to
+                this file path instead of being captured in memory.  The result's
+                stdout attribute will be None in that case.  Useful for apps that
+                produce very large stdout that would cause memory/overhead issues.
 
         Returns:
-            CompletedProcess object with returncode, stdout, and stderr attributes
+            CompletedProcess object with returncode, stdout, and stderr attributes.
+            stdout will be None when stdout_file is provided.
         """
         effective_quiet = self.quiet if quiet is None else quiet
         log_level = self.log_level
@@ -74,7 +80,7 @@ class SubprocessRunner:
         result_queue: multiprocessing.Queue = multiprocessing.Queue()
         worker = multiprocessing.Process(
             target=self._run_subprocess,
-            args=(command, cwd, self.env, result_queue),
+            args=(command, cwd, self.env, result_queue, stdout_file),
             daemon=True,
         )
         worker.start()
@@ -87,7 +93,7 @@ class SubprocessRunner:
             return subprocess.CompletedProcess(
                 args=command,
                 returncode=-1,
-                stdout=f"TIMEOUT ({timeout} seconds)".encode(),
+                stdout=None if stdout_file else f"TIMEOUT ({timeout} seconds)".encode(),
                 stderr=f"TIMEOUT ({timeout} seconds)".encode(),
             )
 
@@ -110,12 +116,17 @@ class SubprocessRunner:
 
         if log_level == "DEBUG":
             # DEBUG: Always log stdout and stderr, even with quiet=True
-            logger.debug("Command stdout:\n%s", _decode_and_limit(result.stdout))
+            if stdout_file:
+                logger.debug("Command stdout written to file: %s", stdout_file)
+            else:
+                logger.debug("Command stdout:\n%s", _decode_and_limit(result.stdout))
             logger.debug("Command stderr:\n%s", _decode_and_limit(result.stderr))
         elif log_level == "INFO":
             # INFO: Log stdout and stderr on failure, unless quiet=True
             if not effective_quiet and result.returncode != 0:
-                if result.stdout:
+                if stdout_file:
+                    logger.info("Command stdout written to file: %s", stdout_file)
+                elif result.stdout:
                     logger.info("Command stdout:\n%s", _decode_and_limit(result.stdout))
                 if result.stderr:
                     logger.info("Command stderr:\n%s", _decode_and_limit(result.stderr))
@@ -124,15 +135,25 @@ class SubprocessRunner:
         return result
 
     def _run_subprocess(
-        self, command: list[str], cwd: str, env: dict, result_queue: multiprocessing.Queue
+        self, command: list[str], cwd: str, env: dict, result_queue: multiprocessing.Queue,
+        stdout_file: str | None = None,
     ) -> None:
         """Target function for a worker process that executes subprocess.run and puts the result
         (returncode, stdout, stderr) onto result_queue.  Runs without a timeout so the parent
         process is responsible for enforcing one.
+
+        When stdout_file is provided, stdout is redirected to that file and the result's stdout
+        will be None.
         """
         try:
-            proc = subprocess.run(command, cwd=cwd, env=env, check=False, capture_output=True)
-            result_queue.put((proc.returncode, proc.stdout, proc.stderr))
+            if stdout_file:
+                with open(stdout_file, "w", encoding="utf-8") as f:
+                    proc = subprocess.run(command, cwd=cwd, env=env, check=False,
+                                          stdout=f, stderr=subprocess.PIPE)
+                result_queue.put((proc.returncode, None, proc.stderr))
+            else:
+                proc = subprocess.run(command, cwd=cwd, env=env, check=False, capture_output=True)
+                result_queue.put((proc.returncode, proc.stdout, proc.stderr))
         except Exception as exc:  # pylint: disable=broad-except
             result_queue.put((-1, None, str(exc).encode()))
 
@@ -156,6 +177,37 @@ class SubprocessRunner:
         omitted = len(text) - char_limit
         placeholder = f"\n... [{omitted} characters omitted] ...\n"
         return text[:half] + placeholder + text[len(text) - half:]
+
+
+STDOUT_REDIRECT_FILENAME = "driver-subprocess-stdout.txt"
+
+
+def stdout_uses_file(app: dict) -> bool:
+    """Return True if the app's validation output comes from stdout (not a file).
+
+    Apps that have a reference_output but no test_output write their output directly
+    to stdout.  For these apps the stdout should be redirected to a file to avoid
+    capturing potentially megabytes of output in memory.
+
+    Args:
+        app: Application configuration dictionary
+
+    Returns:
+        True if stdout should be redirected to STDOUT_REDIRECT_FILENAME
+    """
+    return "reference_output" in app and "test_output" not in app
+
+
+def get_stdout_redirect_path(temp_dir: str) -> str:
+    """Get the path for the stdout redirect file in the temporary directory.
+
+    Args:
+        temp_dir: Temporary directory where working copy of application directory is located
+
+    Returns:
+        Absolute path to the stdout redirect file
+    """
+    return os.path.join(temp_dir, STDOUT_REDIRECT_FILENAME)
 
 
 def get_bin_path(app: dict, temp_dir: str) -> str:

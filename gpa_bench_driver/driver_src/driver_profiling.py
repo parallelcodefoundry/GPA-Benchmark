@@ -13,7 +13,7 @@ import pandas as pd
 
 from gpa_bench_driver.driver_src.driver_models import SwapConfig
 from gpa_bench_driver.driver_src.driver_utils import SubprocessRunner, setup_profile_dir, \
-    get_run_path
+    get_run_path, stdout_uses_file, get_stdout_redirect_path
 
 logger = logging.getLogger("GPA-Benchmark")
 
@@ -80,7 +80,8 @@ def nsys_profile_app(app: dict, runner: SubprocessRunner, temp_dir: str, num_sam
         nsys_command.extend(app["run_command"].split())
 
         run_path = get_run_path(app, temp_dir)
-        result = runner.run(nsys_command, run_path)
+        stdout_file = get_stdout_redirect_path(temp_dir) if stdout_uses_file(app) else None
+        result = runner.run(nsys_command, run_path, stdout_file=stdout_file)
 
         profile_file = profile_output + ".nsys-rep"
         if not (result.returncode == 0 and os.path.exists(profile_file)):
@@ -129,7 +130,8 @@ def ncu_profile_app(app: dict, runner: SubprocessRunner, temp_dir: str, num_samp
         ncu_command.extend(app["run_command"].split())
 
         run_path = get_run_path(app, temp_dir)
-        result = runner.run(ncu_command, run_path)
+        stdout_file = get_stdout_redirect_path(temp_dir) if stdout_uses_file(app) else None
+        result = runner.run(ncu_command, run_path, stdout_file=stdout_file)
 
         profile_file = profile_output + ".ncu-rep"
         if not (result.returncode == 0 and os.path.exists(profile_file)):

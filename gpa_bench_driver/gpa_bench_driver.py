@@ -163,8 +163,10 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
             build_success, build_result = build_app(
                 app, config.sm_version, config.no_clean, runner, temp_dir
             )
-            result.build_stdout = build_result.stdout.decode("utf-8")
-            result.build_stderr = build_result.stderr.decode("utf-8")
+            result.build_stdout = build_result.stdout.decode("utf-8") \
+                if build_result.stdout is not None else ""
+            result.build_stderr = build_result.stderr.decode("utf-8") \
+                if build_result.stderr is not None else ""
 
             bin_path = get_bin_path(app, temp_dir)
             result.build = (build_success and
@@ -185,8 +187,10 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
 
             # Run
             run_success, run_result = run_app(app, runner, temp_dir)
-            result.run_stdout = run_result.stdout.decode("utf-8")
-            result.run_stderr = run_result.stderr.decode("utf-8")
+            result.run_stdout = run_result.stdout.decode("utf-8") \
+                if run_result.stdout is not None else ""
+            result.run_stderr = run_result.stderr.decode("utf-8") \
+                if run_result.stderr is not None else ""
             result.run = run_success
 
             if pbar is not None:

@@ -7,7 +7,7 @@ import os
 import subprocess
 
 from gpa_bench_driver.driver_src.driver_utils import SubprocessRunner, get_bin_path, \
-    get_run_path, get_build_path
+    get_run_path, get_build_path, stdout_uses_file, get_stdout_redirect_path
 
 
 def build_app(app: dict, sm_version: int, no_clean: bool,
@@ -74,6 +74,11 @@ def run_app(app: dict, runner: SubprocessRunner,
 
     run_path = get_run_path(app, temp_dir)
     run_command = app["run_command"].split()
-    result = runner.run(run_command, run_path)
+
+    stdout_file = None
+    if stdout_uses_file(app):
+        stdout_file = get_stdout_redirect_path(temp_dir)
+
+    result = runner.run(run_command, run_path, stdout_file=stdout_file)
 
     return result.returncode == 0, result

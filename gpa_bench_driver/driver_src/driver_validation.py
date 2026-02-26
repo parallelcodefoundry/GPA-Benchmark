@@ -10,11 +10,18 @@ import os
 import re
 import subprocess
 
+from gpa_bench_driver.driver_src.driver_utils import stdout_uses_file, get_stdout_redirect_path
+
 logger = logging.getLogger("GPA-Benchmark")
 
 
 def _get_test_output(app: dict, result: subprocess.CompletedProcess, temp_dir: str) -> str:
     """Get the test output from file or stdout.
+
+    For apps that redirect stdout to a file (reference_output present, no test_output),
+    the output is read from the stdout redirect file.  For apps with an explicit
+    test_output file the named file is used.  Stdout capture is used as a fallback only
+    when a named test_output file is expected but missing.
 
     Args:
         app: Application configuration dictionary
@@ -24,17 +31,25 @@ def _get_test_output(app: dict, result: subprocess.CompletedProcess, temp_dir: s
     Returns:
         The test output as a string
     """
+    # TODO: Evaluate if this check should be replaced with calling stdout_uses_file
     if "test_output" in app:
         test_output_path = os.path.join(temp_dir, app["test_output"])
         if not os.path.exists(test_output_path):
             logger.warning("Could not find test output file %s for %s, trying stdout instead",
                            app['test_output'], app['name'])
-            return result.stdout.decode("utf-8")
+            return result.stdout.decode("utf-8") if result.stdout is not None else ""
         else:
             with open(test_output_path, "r", encoding="utf-8") as test_file:
                 return test_file.read()
     else:
-        return result.stdout.decode("utf-8")
+        # stdout was redirected to a file for this app type
+        stdout_redirect_path = get_stdout_redirect_path(temp_dir)
+        if not os.path.exists(stdout_redirect_path):
+            logger.warning("Could not find stdout redirect file %s for %s",
+                           stdout_redirect_path, app['name'])
+            return result.stdout.decode("utf-8") if result.stdout is not None else ""
+        with open(stdout_redirect_path, "r", encoding="utf-8") as stdout_file:
+            return stdout_file.read()
 
 
 def validate_app(app: dict, result: subprocess.CompletedProcess,
@@ -61,7 +76,7 @@ def validate_app(app: dict, result: subprocess.CompletedProcess,
     Raises:
         ValueError: If no validation type is specified or if validation configuration is invalid
     """
-    stdout_text = result.stdout.decode("utf-8")
+    stdout_text = result.stdout.decode("utf-8") if result.stdout is not None else ""
 
     # Check for fail text
     if "fail_check_text" in app:
