@@ -12,7 +12,8 @@ from gpa_bench_driver.driver_src.driver_utils import subprocess_wrapper, get_bin
 
 def build_app(app: dict, sm_version: int, no_clean: bool, env: dict, temp_dir: str,
               log_level: str = "WARNING",
-              timeout: int | None = None) -> tuple[bool, subprocess.CompletedProcess]:
+              timeout: int | None = None,
+              output_char_limit: int = 25000) -> tuple[bool, subprocess.CompletedProcess]:
     """Build the application.
 
     Cleans the application (unless no_clean is True), then builds it with the
@@ -26,6 +27,7 @@ def build_app(app: dict, sm_version: int, no_clean: bool, env: dict, temp_dir: s
         temp_dir: Temporary directory where working copy of application directory is located
         log_level: Logging level (default: "WARNING")
         timeout: Timeout in seconds, if None, no timeout enforced (default: None)
+        output_char_limit: Maximum characters to log for stdout/stderr (default: 25000)
     Returns:
         Tuple of (success: bool, result: CompletedProcess)
     """
@@ -36,7 +38,8 @@ def build_app(app: dict, sm_version: int, no_clean: bool, env: dict, temp_dir: s
         clean_command = app["clean_command"].split() if "clean_command" in app \
             else ["make", "clean"]
         clean_result = subprocess_wrapper(clean_command, build_path, env, quiet=True,
-                                          log_level=log_level, timeout=timeout)
+                                          log_level=log_level, timeout=timeout,
+                                          output_char_limit=output_char_limit)
 
         if clean_result.returncode != 0:
             # Directly remove executable if make clean fails
@@ -51,12 +54,13 @@ def build_app(app: dict, sm_version: int, no_clean: bool, env: dict, temp_dir: s
     build_command.append(f"SM_VERSION={sm_version}")
 
     result = subprocess_wrapper(build_command, build_path, env, log_level=log_level,
-                                timeout=timeout)
+                                timeout=timeout, output_char_limit=output_char_limit)
     return result.returncode == 0, result
 
 
 def run_app(app: dict, env: dict, temp_dir: str, log_level: str = "WARNING",
-            timeout: int | None = None) -> tuple[bool, subprocess.CompletedProcess]:
+            timeout: int | None = None,
+            output_char_limit: int = 25000) -> tuple[bool, subprocess.CompletedProcess]:
     """Run the application.
 
     Removes the test output file if it exists, then runs the application.
@@ -67,6 +71,7 @@ def run_app(app: dict, env: dict, temp_dir: str, log_level: str = "WARNING",
         temp_dir: Temporary directory where working copy of application directory is located
         log_level: Logging level (default: "WARNING")
         timeout: Timeout in seconds, if None, no timeout enforced (default: None)
+        output_char_limit: Maximum characters to log for stdout/stderr (default: 25000)
     Returns:
         Tuple of (success: bool, result: CompletedProcess)
     """
@@ -78,6 +83,7 @@ def run_app(app: dict, env: dict, temp_dir: str, log_level: str = "WARNING",
 
     run_path = get_run_path(app, temp_dir)
     run_command = app["run_command"].split()
-    result = subprocess_wrapper(run_command, run_path, env, log_level=log_level, timeout=timeout)
+    result = subprocess_wrapper(run_command, run_path, env, log_level=log_level, timeout=timeout,
+                                output_char_limit=output_char_limit)
 
     return result.returncode == 0, result

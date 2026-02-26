@@ -155,7 +155,8 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
         try:
             # Build
             build_success, build_result = build_app(
-                app, config.sm_version, config.no_clean, env, temp_dir, log_level, config.timeout
+                app, config.sm_version, config.no_clean, env, temp_dir, log_level, config.timeout,
+                output_char_limit=config.subprocess_output_char_limit
             )
             result.build_stdout = build_result.stdout.decode("utf-8")
             result.build_stderr = build_result.stderr.decode("utf-8")
@@ -178,7 +179,8 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
                 return result
 
             # Run
-            run_success, run_result = run_app(app, env, temp_dir, log_level, config.timeout)
+            run_success, run_result = run_app(app, env, temp_dir, log_level, config.timeout,
+                                              output_char_limit=config.subprocess_output_char_limit)
             result.run_stdout = run_result.stdout.decode("utf-8")
             result.run_stderr = run_result.stderr.decode("utf-8")
             result.run = run_success
@@ -214,14 +216,16 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
             if config.nsys:
                 nsys_success = nsys_profile_app(app, env, temp_dir, config.num_samples, log_level,
                                                 swap_config=swap_config or None, pbar=pbar,
-                                                timeout=config.timeout)
+                                                timeout=config.timeout,
+                                                output_char_limit=config.subprocess_output_char_limit)
                 result.nsys_profile = nsys_success
 
             # NCU Profile
             if config.ncu:
                 ncu_success = ncu_profile_app(app, env, temp_dir, config.num_samples, log_level,
                                               swap_config=swap_config or None, pbar=pbar,
-                                              timeout=config.timeout)
+                                              timeout=config.timeout,
+                                              output_char_limit=config.subprocess_output_char_limit)
                 result.ncu_profile = ncu_success
 
         finally:
@@ -232,7 +236,8 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
     # Postprocess NSYS (either standalone or after profiling)
     if config.postprocess_nsys or (config.nsys and result.nsys_profile):
         postprocess_nsys_result = postprocess_nsys_app(app, env, config.num_samples, log_level,
-                                                       swap_config=swap_config or None, pbar=pbar)
+                                                       swap_config=swap_config or None, pbar=pbar,
+                                                       output_char_limit=config.subprocess_output_char_limit)
         result.nsys_post = postprocess_nsys_result is not None
         result.nsys_data = postprocess_nsys_result
     elif config.nsys:
@@ -350,7 +355,8 @@ def run_driver(
     log_level: str = "WARNING",
     no_progress: bool = True,
     swaps_override: dict[str, str] | None = None,
-    timeout: int | None = 300
+    timeout: int | None = 300,
+    subprocess_output_char_limit: int = 25000
 ) -> tuple[dict[str, AppResults], list[Operation], dict[str, list[DriverPassResult]]]:
     """Run the driver programmatically with the same interface as the CLI.
 
@@ -379,6 +385,9 @@ def run_driver(
                         are filenames and values are code contents (default: None)
         timeout: The timeout in seconds for the driver to run, if negative, no timeout enforced
                  (default: 300)
+        subprocess_output_char_limit: Maximum characters to log for subprocess stdout/stderr.
+                 Characters are removed from the middle to stay within the limit. Set to <= 0 to
+                 disable truncation. (default: 25000)
     Returns:
         Tuple of:
         - results: Dictionary mapping app names to AppResults
@@ -409,7 +418,8 @@ def run_driver(
         log_level=log_level,
         no_progress=no_progress,
         swaps_override=swaps_override,
-        timeout=timeout if timeout is not None and timeout > 0 else None
+        timeout=timeout if timeout is not None and timeout > 0 else None,
+        subprocess_output_char_limit=subprocess_output_char_limit
     )
 
     return run_driver_config(driver_config)
@@ -528,6 +538,12 @@ def parse_args() -> argparse.Namespace:
         "--timeout", type=int, default=300,
         help="The timeout in seconds for the driver to run, if negative, not timeout enforced"
              "(default: 300)"
+    )
+    parser.add_argument(
+        "--subprocess-output-char-limit", type=int, default=25000,
+        help="Maximum characters to log for subprocess stdout/stderr. Characters are removed "
+             "from the middle of the output to stay within the limit. Set to <= 0 to disable "
+             "truncation. (default: 25000)"
     )
     return parser.parse_args()
 

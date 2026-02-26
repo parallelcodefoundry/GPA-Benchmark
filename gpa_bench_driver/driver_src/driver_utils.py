@@ -25,9 +25,32 @@ def _run_subprocess(command: list[str], cwd: str, env: dict,
         result_queue.put((-1, None, str(exc).encode()))
 
 
+def _truncate_middle(text: str, char_limit: int) -> str:
+    """Truncate a string to char_limit characters by removing characters from the middle.
+
+    If the string is within the limit it is returned unchanged. Otherwise, equal halves
+    of the allowed characters are kept from the start and end of the string, with a
+    placeholder message inserted in between.
+
+    Args:
+        text: The string to truncate
+        char_limit: Maximum number of characters to keep (must be > 0)
+
+    Returns:
+        Truncated string, or original string if already within limit
+    """
+    if len(text) <= char_limit:
+        return text
+    half = char_limit // 2
+    omitted = len(text) - char_limit
+    placeholder = f"\n... [{omitted} characters omitted] ...\n"
+    return text[:half] + placeholder + text[len(text) - half:]
+
+
 def subprocess_wrapper(command: list[str], cwd: str, env: dict, quiet: bool = False,
                        log_level: str = "WARNING",
-                       timeout: int | None = None) -> subprocess.CompletedProcess:
+                       timeout: int | None = None,
+                       output_char_limit: int = 25000) -> subprocess.CompletedProcess:
     """Wrapper for subprocess.run to capture stdout and stderr, log command before running.
 
     When a timeout is specified, subprocess.run is executed in a dedicated child process so
@@ -44,6 +67,9 @@ def subprocess_wrapper(command: list[str], cwd: str, env: dict, quiet: bool = Fa
             - INFO: Log stdout and stderr on failure (except when quiet=True)
             - WARNING/ERROR/CRITICAL: Never log stdout or stderr
         timeout: Timeout in seconds, if None, no timeout enforced (default: None)
+        output_char_limit: Maximum characters to log for stdout/stderr. Characters are
+            removed from the middle of the output to stay within the limit. Set to <= 0
+            to disable truncation. (default: 25000)
     Returns:
         CompletedProcess object with returncode, stdout, and stderr attributes
     """
@@ -70,20 +96,25 @@ def subprocess_wrapper(command: list[str], cwd: str, env: dict, quiet: bool = Fa
         return subprocess.CompletedProcess(args=command, returncode=-1, stdout=None, stderr=None)
 
     returncode, stdout, stderr = result_queue.get_nowait()
-    result = subprocess.CompletedProcess(args=command, returncode=returncode,
-                                         stdout=stdout, stderr=stderr)
+    result: subprocess.CompletedProcess = subprocess.CompletedProcess(
+        args=command, returncode=returncode, stdout=stdout, stderr=stderr,
+    )
+
+    def _decode_and_limit(raw: bytes | None) -> str:
+        text = raw.decode('utf-8') if raw else ""
+        return _truncate_middle(text, output_char_limit) if output_char_limit > 0 else text
 
     if log_level == "DEBUG":
         # DEBUG: Always log stdout and stderr, even with quiet=True
-        logger.debug("Command stdout:\n%s", result.stdout.decode('utf-8'))
-        logger.debug("Command stderr:\n%s", result.stderr.decode('utf-8'))
+        logger.debug("Command stdout:\n%s", _decode_and_limit(result.stdout))
+        logger.debug("Command stderr:\n%s", _decode_and_limit(result.stderr))
     elif log_level == "INFO":
         # INFO: Log stdout and stderr on failure, unless quiet=True (then don't log anything)
         if not quiet and result.returncode != 0:
             if result.stdout:
-                logger.info("Command stdout:\n%s", result.stdout.decode('utf-8'))
+                logger.info("Command stdout:\n%s", _decode_and_limit(result.stdout))
             if result.stderr:
-                logger.info("Command stderr:\n%s", result.stderr.decode('utf-8'))
+                logger.info("Command stderr:\n%s", _decode_and_limit(result.stderr))
         # If quiet=True, don't log anything even with INFO
     # else: Default behavior (WARNING/ERROR/CRITICAL): never log stdout or stderr
 
