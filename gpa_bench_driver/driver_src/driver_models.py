@@ -62,7 +62,7 @@ class DriverConfig:
     log_level: str = "WARNING"
     no_progress: bool = False
     swaps_override: dict[str, str] | None = None
-    timeout: int | None = None
+    timeout: int | None = 300 # 5 minutes
 
     def __init__(self, app: str,
                  sm_version: int | None,
@@ -81,7 +81,7 @@ class DriverConfig:
                  log_level: str,
                  no_progress: bool,
                  swaps_override: dict[str, str] | None = None,
-                 timeout: int | None = None):
+                 timeout: int | None = 300): # 5 minutes
         logger.debug("Entering DriverConfig")
         self.app = app
         self.sm_version = sm_version if sm_version is not None else detect_sm_version()
@@ -129,7 +129,7 @@ class DriverConfig:
             temp_dir=args.temp_dir,
             log_level=args.log_level,
             no_progress=args.no_progress,
-            timeout=args.timeout if args.timeout > 0 else None
+            timeout=args.timeout if args.timeout is not None and args.timeout > 0 else None
         )
 
 

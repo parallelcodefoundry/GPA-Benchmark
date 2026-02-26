@@ -155,7 +155,7 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
         try:
             # Build
             build_success, build_result = build_app(
-                app, config.sm_version, config.no_clean, env, temp_dir, log_level
+                app, config.sm_version, config.no_clean, env, temp_dir, log_level, config.timeout
             )
             result.build_stdout = build_result.stdout.decode("utf-8")
             result.build_stderr = build_result.stderr.decode("utf-8")
@@ -178,7 +178,7 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
                 return result
 
             # Run
-            run_success, run_result = run_app(app, env, temp_dir, log_level)
+            run_success, run_result = run_app(app, env, temp_dir, log_level, config.timeout)
             result.run_stdout = run_result.stdout.decode("utf-8")
             result.run_stderr = run_result.stderr.decode("utf-8")
             result.run = run_success
@@ -213,13 +213,15 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
             # NSYS Profile
             if config.nsys:
                 nsys_success = nsys_profile_app(app, env, temp_dir, config.num_samples, log_level,
-                                                swap_config=swap_config or None, pbar=pbar)
+                                                swap_config=swap_config or None, pbar=pbar,
+                                                timeout=config.timeout)
                 result.nsys_profile = nsys_success
 
             # NCU Profile
             if config.ncu:
                 ncu_success = ncu_profile_app(app, env, temp_dir, config.num_samples, log_level,
-                                              swap_config=swap_config or None, pbar=pbar)
+                                              swap_config=swap_config or None, pbar=pbar,
+                                              timeout=config.timeout)
                 result.ncu_profile = ncu_success
 
         finally:
@@ -375,7 +377,7 @@ def run_driver(
         no_progress: Do not display a progress bar (default: True)
         swaps_override: Override the swaps dictionary with a custom one for a single app, where keys
                         are filenames and values are code contents (default: None)
-        timeout: The timeout in seconds for the driver to run, if negative, not timeout enforced
+        timeout: The timeout in seconds for the driver to run, if negative, no timeout enforced
                  (default: 300)
     Returns:
         Tuple of:
@@ -407,7 +409,7 @@ def run_driver(
         log_level=log_level,
         no_progress=no_progress,
         swaps_override=swaps_override,
-        timeout=timeout
+        timeout=timeout if timeout is not None and timeout > 0 else None
     )
 
     return run_driver_config(driver_config)
