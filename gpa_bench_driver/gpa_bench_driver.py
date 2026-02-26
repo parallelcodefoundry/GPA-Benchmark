@@ -387,6 +387,7 @@ def run_driver(
         ValueError: If configuration is invalid
         FileNotFoundError: If required files don't exist
     """
+    logger.debug("Entering run_driver")
     # Create DriverConfig from parameters
     driver_config = DriverConfig(
         app=app,
@@ -425,6 +426,7 @@ def run_driver_config(config: DriverConfig) -> tuple[dict[str, AppResults], list
         - operations: List of operations that were performed
         - long_results: Dictionary mapping app names to lists of DriverPassResult objects
     """
+    logger.debug("Entering run_driver_config")
     # Setup configuration
     app_config, swaps_dict, env = setup_app_config(config)
 

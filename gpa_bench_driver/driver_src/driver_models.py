@@ -4,6 +4,7 @@ Data Models for GPA-Benchmark Driver
 This module defines the data classes, enums, and result structures used throughout
 the driver system.
 """
+import logging
 from enum import Enum
 from dataclasses import dataclass
 from typing import Any
@@ -14,6 +15,8 @@ from numpy import mean
 
 from gpa_bench_driver.driver_src.driver_utils import detect_sm_version
 
+
+logger = logging.getLogger("GPA-Benchmark")
 
 @dataclass
 class DriverConfig:
@@ -79,6 +82,7 @@ class DriverConfig:
                  no_progress: bool,
                  swaps_override: dict[str, str] | None = None,
                  timeout: int | None = None):
+        logger.debug("Entering DriverConfig")
         self.app = app
         self.sm_version = sm_version if sm_version is not None else detect_sm_version()
         self.cuda_home = cuda_home

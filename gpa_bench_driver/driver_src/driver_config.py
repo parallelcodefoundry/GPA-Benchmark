@@ -34,6 +34,7 @@ def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] 
         FileNotFoundError: If config file doesn't exist
         yaml.YAMLError: If config file is invalid YAML
     """
+    logger.debug("Entering setup_app_config")
     # Validate argument combinations
     if config.postprocess_nsys and (config.nsys or config.swaps or config.ncu or config.build_only \
         or config.swaps_override):
@@ -50,6 +51,8 @@ def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] 
     # Load config file
     with open(config.config, "r", encoding="utf-8") as f:
         app_config: dict = yaml.safe_load(f)
+
+    logger.debug("App config loaded")
 
     # Validate app name
     if config.app != "all":
@@ -81,6 +84,8 @@ def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] 
     cuda_lib64 = os.path.join(cuda_home, "lib64")
     existing_ld_path = env.get("LD_LIBRARY_PATH", "")
     env["LD_LIBRARY_PATH"] = f"{cuda_lib64}:{existing_ld_path}" if existing_ld_path else cuda_lib64
+
+    logger.debug("CUDA environment set")
 
     # Load swaps or override swaps if specified
     if config.swaps_override:

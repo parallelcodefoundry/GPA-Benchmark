@@ -166,6 +166,7 @@ def _find_grouped_files(swaps: str) -> dict[tuple[str, int, str | None, int],
         Dictionary mapping a unique key to a list of tuples containing the full path and code
         of the swap files
     """
+    logger.debug("Entering _find_grouped_files")
     grouped_files: dict[tuple[str, int, str | None, int], list[tuple[str, str]]] = {}
 
     for root, _, files in os.walk(swaps):
@@ -257,6 +258,7 @@ def build_swaps_dict(swaps: str | dict[tuple[str, int, str | None, int], list[tu
         FileNotFoundError: If the swaps directory doesn't exist
         IOError: If file reading fails
     """
+    logger.debug("Entering build_swaps_dict")
     if isinstance(swaps, str):
         grouped_files = _find_grouped_files(swaps)
     else:
