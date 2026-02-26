@@ -517,7 +517,7 @@ def parse_args() -> argparse.Namespace:
         help="Only postprocess nsys-rep file(s) found under profiles/, do not run the application"
     )
     parser.add_argument(
-        "-n", "--num-samples", type=int, default=5,
+        "-n", "--num-samples", type=int, default=3,
         help="The number of times to collect ncu/nsys profiles for each application and swap"
     )
     parser.add_argument(
