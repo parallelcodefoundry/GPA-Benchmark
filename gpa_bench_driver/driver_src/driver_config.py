@@ -56,22 +56,7 @@ def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] 
 
     # Validate app name
     if config.app != "all":
-        all_names = [app["name"] for app in app_config["apps"]]
-        if config.app not in all_names:
-            # Try lowercase matching
-            for app in app_config["apps"]:
-                if config.app.lower() == app["name"].lower():
-                    config.app = app["name"]
-                    break
-            if config.app not in all_names:
-                # Try to convert app name alias to canonical name
-                for app in app_config["apps"]:
-                    if "aliases" in app.keys() and config.app in app["aliases"]:
-                        config.app = app["name"]
-                        break
-                if config.app not in all_names:
-                    raise ValueError(f"Application {config.app} not found in config file " \
-                                     + f"{config.config}")
+        config.app = get_canonical_app_name(config.app, app_config)
 
     # Setup CUDA environment
     cuda_home = (config.cuda_home or
@@ -99,6 +84,32 @@ def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] 
         return app_config, swaps_dict, env
 
     return app_config, None, env
+
+
+def get_canonical_app_name(app_name: str,
+                           config: str | dict = os.path.join(os.path.dirname(__file__), "..",
+                                                             "..", "driver_apps.yaml")) -> str:
+    """Get the canonical name for an application, converting aliases to the primary name.
+
+    Args:
+        app_name: The name of the application
+        config: The application configuration dictionary or YAML file path
+
+    Returns:
+        The canonical name for the application
+    """
+    if isinstance(config, str):
+        with open(config, "r", encoding="utf-8") as f:
+            app_config = yaml.safe_load(f)
+    else:
+        app_config = config
+    all_names = [app["name"] for app in app_config["apps"]]
+    if app_name in all_names:
+        return app_name
+    for app in app_config["apps"]:
+        if "aliases" in app.keys() and app_name in app["aliases"]:
+            return app["name"]
+    raise ValueError(f"Application {app_name} not found in config file")
 
 
 def determine_operations(config: DriverConfig) -> list[Operation]:

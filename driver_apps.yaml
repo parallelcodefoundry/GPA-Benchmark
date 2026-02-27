@@ -5,6 +5,8 @@
 apps:
 
 - name: exatensor
+  aliases:
+  - ExaTENSOR
   kernel_name: tensor_transpose
   path: ExaTENSOR
   clean_command: make clean
@@ -20,6 +22,8 @@ apps:
   aliases:
   - lulesh2
   - lulesh2.0
+  - LULESH
+  - LULESH2
   kernel_name: ApplyMaterialPropertiesAndUpdateVolume_kernel
   path: LULESH/cuda/src
   clean_command: make -f ../build/Makefile clean
@@ -31,6 +35,8 @@ apps:
   test_output: LULESH/cuda/src/xyz.asc
 
 - name: xsbench
+  aliases:
+  - XSBench
   kernel_name: xs_lookup_kernel
   path: XSBench/cuda
   clean_command: make clean
@@ -128,6 +134,8 @@ apps:
   pass_check_text: PASS! vectors are matching!
 
 - name: lavaMD
+  aliases:
+  - lavamd
   kernel_name: cuda_compute_flux
   path: rodinia/lavaMD
   run_command: ./lavaMD -boxes1d 10
