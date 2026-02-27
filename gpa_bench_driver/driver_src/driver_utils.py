@@ -8,6 +8,7 @@ import logging
 import multiprocessing
 import os
 import subprocess
+import tempfile
 
 logger = logging.getLogger("GPA-Benchmark")
 
@@ -15,9 +16,8 @@ logger = logging.getLogger("GPA-Benchmark")
 class SubprocessRunner:
     """Configured subprocess executor.
 
-    Bundles the execution environment and logging/timeout/truncation settings so
-    they are specified once at construction and do not need to be threaded through
-    every call site.
+    Bundles the execution environment and logging/timeout/truncation settings so they are specified
+    once at construction and do not need to be threaded through every call site.
 
     Attributes:
         env: Environment variables dictionary passed to every subprocess
@@ -27,9 +27,8 @@ class SubprocessRunner:
             - WARNING/ERROR/CRITICAL: Never log stdout or stderr
         quiet: Default quiet flag; suppresses INFO-level output on failure when True
         timeout: Default timeout in seconds; None means no limit
-        output_char_limit: Maximum characters logged for stdout/stderr; characters
-            are removed from the middle to stay within the limit.  Set to <= 0 to
-            disable truncation.
+        output_char_limit: Maximum characters logged for stdout/stderr; characters are removed from
+            the middle to stay within the limit.  Set to <= 0 to disable truncation.
     """
 
     def __init__(
@@ -51,24 +50,28 @@ class SubprocessRunner:
             stdout_file: str | None = None) -> subprocess.CompletedProcess:
         """Execute a command and return the completed process.
 
-        When a timeout is configured, the command runs in a dedicated child process
-        so the driver cannot hang if subprocess.run itself blocks.  The child is
-        forcibly terminated (SIGKILL) if it does not finish in time.
+        Stdout and stderr are always buffered through temporary files in the worker process to
+        avoid deadlocking on the pipe buffer in subprocess.run.  The content read back (up to
+        output_char_limit bytes) is returned as bytes in the CompletedProcess attributes, so
+        callers are unaffected.
+
+        When a timeout is configured, the command runs in a dedicated child process so the driver
+        cannot hang if subprocess.run itself blocks.  The child is forcibly terminated (SIGKILL) if
+        it does not finish in time.
 
         Args:
             command: Command to run as a list of strings
             cwd: Working directory for the command
-            quiet: Per-call quiet override.  When provided, takes precedence over
-                the instance-level quiet setting.  Useful for suppressing output on
-                a single call (e.g. the clean step) without changing the runner.
-            stdout_file: When provided, the subprocess stdout is written directly to
-                this file path instead of being captured in memory.  The result's
-                stdout attribute will be None in that case.  Useful for apps that
-                produce very large stdout that would cause memory/overhead issues.
+            quiet: Per-call quiet override.  When provided, takes precedence over the instance
+                -level quiet setting.  Useful for suppressing output on a single call (e.g. the
+                clean step) without changing the runner.
+            stdout_file: When provided, stdout is written to this persistent named file instead of
+                a temporary file, and result.stdout will be None. Used for apps whose stdout is the
+                validation output so it can be read back by the validation step.
 
         Returns:
-            CompletedProcess object with returncode, stdout, and stderr attributes.
-            stdout will be None when stdout_file is provided.
+            CompletedProcess object with returncode, stdout, and stderr attributes. stdout will be
+            None when stdout_file is provided.
         """
         effective_quiet = self.quiet if quiet is None else quiet
         log_level = self.log_level
@@ -79,7 +82,7 @@ class SubprocessRunner:
         result_queue: multiprocessing.Queue = multiprocessing.Queue()
         worker = multiprocessing.Process(
             target=self._run_subprocess,
-            args=(command, cwd, self.env, result_queue, stdout_file),
+            args=(command, cwd, self.env, result_queue, stdout_file, self.output_char_limit),
             daemon=True,
         )
         worker.start()
@@ -89,11 +92,12 @@ class SubprocessRunner:
             worker.kill()
             worker.join()
             logger.error("Command %s timed out after %d seconds", ' '.join(command), timeout)
+            timeout_msg = f"TIMEOUT ({timeout} seconds)".encode()
             return subprocess.CompletedProcess(
                 args=command,
                 returncode=-1,
-                stdout=None if stdout_file else f"TIMEOUT ({timeout} seconds)".encode(),
-                stderr=f"TIMEOUT ({timeout} seconds)".encode(),
+                stdout=None if stdout_file else timeout_msg,
+                stderr=timeout_msg,
             )
 
         if result_queue.empty():
@@ -127,28 +131,76 @@ class SubprocessRunner:
 
         return result
 
+    @staticmethod
+    def _read_file_truncated(path: str, char_limit: int) -> bytes:
+        """Read a file and return its content as bytes, truncated to char_limit characters.
+
+        Reads only as much of the file as needed to stay within the character limit, keeping the
+        first and last halves and discarding the middle.
+
+        Args:
+            path: Path to the file to read
+            char_limit: Maximum number of characters to return (0 or negative = no limit)
+
+        Returns:
+            File content as UTF-8 bytes, possibly with a truncation placeholder in the middle
+        """
+        size = os.path.getsize(path)
+        if char_limit <= 0 or size <= char_limit:
+            with open(path, "rb") as f:
+                return f.read()
+
+        half = char_limit // 2
+        placeholder = f"\n... [{size - char_limit} characters omitted] ...\n".encode()
+        with open(path, "rb") as f:
+            head = f.read(half)
+            f.seek(-half, 2)
+            tail = f.read(half)
+        return head + placeholder + tail
+
     def _run_subprocess(
         self, command: list[str], cwd: str, env: dict, result_queue: multiprocessing.Queue,
         stdout_file: str | None = None,
+        output_char_limit: int = 0,
     ) -> None:
         """Target function for a worker process that executes subprocess.run and puts the result
         (returncode, stdout, stderr) onto result_queue.  Runs without a timeout so the parent
         process is responsible for enforcing one.
 
-        When stdout_file is provided, stdout is redirected to that file and the result's stdout
-        will be None.
+        Stdout and stderr are always written to files to avoid deadlocking on the pipe buffer in
+        subprocess.run.  When stdout_file is provided, stdout is written to that persistent path
+        and result stdout is None; otherwise a temporary file is used and content is read back and
+        put on the queue.  Stderr always uses a temporary file and is read back.
         """
+        stderr_path = None
+        stdout_path = None
         try:
+            with tempfile.NamedTemporaryFile(delete=False) as stderr_tmp:
+                stderr_path = stderr_tmp.name
+
             if stdout_file:
-                with open(stdout_file, "w", encoding="utf-8") as f:
+                with open(stdout_file, "w", encoding="utf-8") as out_f, \
+                     open(stderr_path, "wb") as err_f:
                     proc = subprocess.run(command, cwd=cwd, env=env, check=False,
-                                          stdout=f, stderr=subprocess.PIPE)
-                result_queue.put((proc.returncode, None, proc.stderr))
+                                          stdout=out_f, stderr=err_f)
+                stderr_bytes = self._read_file_truncated(stderr_path, output_char_limit)
+                result_queue.put((proc.returncode, None, stderr_bytes))
             else:
-                proc = subprocess.run(command, cwd=cwd, env=env, check=False, capture_output=True)
-                result_queue.put((proc.returncode, proc.stdout, proc.stderr))
+                with tempfile.NamedTemporaryFile(delete=False) as stdout_tmp:
+                    stdout_path = stdout_tmp.name
+                with open(stdout_path, "wb") as out_f, open(stderr_path, "wb") as err_f:
+                    proc = subprocess.run(command, cwd=cwd, env=env, check=False,
+                                          stdout=out_f, stderr=err_f)
+                stdout_bytes = self._read_file_truncated(stdout_path, output_char_limit)
+                stderr_bytes = self._read_file_truncated(stderr_path, output_char_limit)
+                result_queue.put((proc.returncode, stdout_bytes, stderr_bytes))
         except Exception as exc:  # pylint: disable=broad-except
             result_queue.put((-1, None, str(exc).encode()))
+        finally:
+            if stdout_path and os.path.exists(stdout_path):
+                os.unlink(stdout_path)
+            if stderr_path and os.path.exists(stderr_path):
+                os.unlink(stderr_path)
 
     def decode_and_limit(self, raw: bytes | None) -> str:
         """Decode a bytes object to a string and truncate it if it exceeds the output character
@@ -170,9 +222,9 @@ class SubprocessRunner:
     def truncate_middle(self, text: str, char_limit: int) -> str:
         """Truncate a string to char_limit characters by removing characters from the middle.
 
-        If the string is within the limit it is returned unchanged. Otherwise, equal halves
-        of the allowed characters are kept from the start and end of the string, with a
-        placeholder message inserted in between.
+        If the string is within the limit it is returned unchanged. Otherwise, equal halves of the
+        allowed characters are kept from the start and end of the string, with a placeholder
+        message inserted in between.
 
         Args:
             text: The string to truncate
@@ -195,9 +247,9 @@ STDOUT_REDIRECT_FILENAME = "driver-subprocess-stdout.txt"
 def stdout_uses_file(app: dict) -> bool:
     """Return True if the app's validation output comes from stdout (not a file).
 
-    Apps that have a reference_output but no test_output write their output directly
-    to stdout.  For these apps the stdout should be redirected to a file to avoid
-    capturing potentially megabytes of output in memory.
+    Apps that have a reference_output but no test_output write their output directly to stdout.
+    For these apps the stdout should be redirected to a file to avoid capturing potentially
+    megabytes of output in memory.
 
     Args:
         app: Application configuration dictionary
