@@ -51,6 +51,16 @@ logger = logging.getLogger("GPA-Benchmark")
 APP_DIRS = ["Castro", "darknet", "ExaTENSOR", "LULESH", "PeleC", "Quicksilver", "rodinia",
             "XSBench"]
 
+class BaselineError(Exception):
+    """Exception raised for errors in the baseline pass.
+
+    Attributes:
+        message: explanation of the error
+    """
+    def __init__(self, message: str):
+        self.message = message
+        super().__init__(self.message)
+
 
 def count_operations_per_pass(config: DriverConfig) -> int:
     """Count the number of operations that will be performed in a single driver pass.
@@ -179,7 +189,8 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
             # Early return if build-only mode or build failed
             if config.build_only or result.build is False:
                 if swap_config is None:
-                    raise ValueError(f"Build failed for baseline ({app['name']})")
+                    msg = f"Build failed for baseline ({app['name']})"
+                    raise BaselineError(msg)
                 # Update progress for skipped operations due to build failure
                 if not config.build_only:
                     update_progress_for_skipped_operations(config, pbar, 'build')
@@ -198,7 +209,8 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
 
             if result.run is False:
                 if swap_config is None:
-                    raise ValueError(f"Run failed for baseline ({app['name']})")
+                    msg = f"Run failed for baseline ({app['name']})"
+                    raise BaselineError(msg)
                 # Update progress for skipped operations due to run failure
                 update_progress_for_skipped_operations(config, pbar, 'run')
                 return result
@@ -215,7 +227,8 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
 
             if result.validate is False:
                 if swap_config is None:
-                    raise ValueError(f"Validation failed for baseline ({app['name']})")
+                    msg = f"Validation failed for baseline ({app['name']})"
+                    raise BaselineError(msg)
                 # Update progress for skipped operations due to validation failure
                 update_progress_for_skipped_operations(config, pbar, 'validate')
                 return result
