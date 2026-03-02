@@ -7,7 +7,7 @@ import os
 import subprocess
 
 from gpa_bench_driver.driver_src.driver_utils import SubprocessRunner, get_bin_path, \
-    get_run_path, get_build_path, stdout_uses_file, get_stdout_redirect_path
+    get_run_path, get_build_path
 
 
 def build_app(app: dict, sm_version: int, no_clean: bool,

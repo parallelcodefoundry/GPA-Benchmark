@@ -232,21 +232,16 @@ class SubprocessRunner:
         return text[:half] + placeholder + text[len(text) - half:]
 
 
-STDOUT_REDIRECT_FILENAME = "driver-subprocess-stdout.txt"
-
-
 def stdout_uses_file(app: dict) -> bool:
     """Return True if the app's validation output comes from stdout (not a file).
 
     Apps that have a reference_output but no test_output write their output directly to stdout.
-    For these apps the stdout should be redirected to a file to avoid capturing potentially
-    megabytes of output in memory.
 
     Args:
         app: Application configuration dictionary
 
     Returns:
-        True if stdout should be redirected to STDOUT_REDIRECT_FILENAME
+        True if the app's validation output comes from stdout (not a file)
     """
     return "reference_output" in app and "test_output" not in app
 
@@ -260,7 +255,7 @@ def get_stdout_redirect_path(temp_dir: str) -> str:
     Returns:
         Absolute path to the stdout redirect file
     """
-    return os.path.join(temp_dir, STDOUT_REDIRECT_FILENAME)
+    return os.path.join(temp_dir, _RESULT_STDOUT_FILE)
 
 
 def get_bin_path(app: dict, temp_dir: str) -> str:

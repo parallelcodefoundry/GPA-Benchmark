@@ -10,7 +10,7 @@ import os
 import re
 import subprocess
 
-from gpa_bench_driver.driver_src.driver_utils import stdout_uses_file, get_stdout_redirect_path
+from gpa_bench_driver.driver_src.driver_utils import get_stdout_redirect_path
 
 logger = logging.getLogger("GPA-Benchmark")
 
