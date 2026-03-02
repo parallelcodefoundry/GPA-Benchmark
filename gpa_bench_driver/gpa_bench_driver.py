@@ -30,6 +30,8 @@ import logging
 import os
 import tempfile
 import shutil
+import faulthandler
+import signal
 from typing import Any
 from alive_progress import alive_bar
 
@@ -414,6 +416,8 @@ def run_driver(
         ValueError: If configuration is invalid
         FileNotFoundError: If required files don't exist
     """
+    faulthandler.enable()
+    faulthandler.register(signal.SIGTERM)
     logger.debug("Entering run_driver")
     # Create DriverConfig from parameters
     driver_config = DriverConfig(
