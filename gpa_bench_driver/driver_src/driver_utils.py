@@ -9,6 +9,8 @@ import multiprocessing
 import os
 import subprocess
 import tempfile
+import signal
+import faulthandler
 
 logger = logging.getLogger("GPA-Benchmark")
 
@@ -73,6 +75,7 @@ class SubprocessRunner:
             CompletedProcess object with returncode, stdout, and stderr attributes. stdout will be
             None when stdout_file is provided.
         """
+        faulthandler.enable()
         effective_quiet = self.quiet if quiet is None else quiet
         log_level = self.log_level
         timeout = self.timeout
@@ -172,6 +175,7 @@ class SubprocessRunner:
         and result stdout is None; otherwise a temporary file is used and content is read back and
         put on the queue.  Stderr always uses a temporary file and is read back.
         """
+        faulthandler.register(signal.SIGTERM)
         stderr_path = None
         stdout_path = None
         try:
