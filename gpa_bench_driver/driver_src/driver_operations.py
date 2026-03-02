@@ -75,10 +75,6 @@ def run_app(app: dict, runner: SubprocessRunner,
     run_path = get_run_path(app, temp_dir)
     run_command = app["run_command"].split()
 
-    stdout_file = None
-    if stdout_uses_file(app):
-        stdout_file = get_stdout_redirect_path(temp_dir)
-
-    result = runner.run(run_command, run_path, stdout_file=stdout_file)
+    result = runner.run(run_command, run_path)
 
     return result.returncode == 0, result

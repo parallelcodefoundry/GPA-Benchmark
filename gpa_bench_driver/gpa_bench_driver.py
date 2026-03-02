@@ -189,6 +189,8 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
             # Early return if build-only mode or build failed
             if config.build_only or result.build is False:
                 if swap_config is None:
+                    logger.error("Baseline build stdout: %s", result.build_stdout)
+                    logger.error("Baseline build stderr: %s", result.build_stderr)
                     msg = f"Build failed for baseline ({app['name']})"
                     raise BaselineError(msg)
                 # Update progress for skipped operations due to build failure
@@ -209,6 +211,8 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
 
             if result.run is False:
                 if swap_config is None:
+                    logger.error("Baseline run output: %s", result.run_stdout)
+                    logger.error("Baseline run stderr: %s", result.run_stderr)
                     msg = f"Run failed for baseline ({app['name']})"
                     raise BaselineError(msg)
                 # Update progress for skipped operations due to run failure
@@ -227,6 +231,7 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
 
             if result.validate is False:
                 if swap_config is None:
+                    logger.error("Baseline validation output: %s", validation_output)
                     msg = f"Validation failed for baseline ({app['name']})"
                     raise BaselineError(msg)
                 # Update progress for skipped operations due to validation failure

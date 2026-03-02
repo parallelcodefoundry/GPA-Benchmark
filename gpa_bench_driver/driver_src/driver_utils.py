@@ -2,7 +2,9 @@
 Utility Functions for GPA-Benchmark Driver
 
 This module provides utility functions for subprocess execution, path resolution,
-directory setup, and system detection.
+directory setup, and system detection. Subprocess results are transferred via
+disk (files written by the worker, read by the parent); no multiprocessing
+queues are used.
 """
 import logging
 import multiprocessing
@@ -13,6 +15,13 @@ import signal
 import faulthandler
 
 logger = logging.getLogger("GPA-Benchmark")
+
+# Filenames used inside the per-run result directory for disk IPC
+_RESULT_RETURNCODE_FILE = "returncode.txt"
+_RESULT_STDOUT_FILE = "stdout.bin"
+_RESULT_STDERR_FILE = "stderr.bin"
+
+MAX_OUTPUT_CHAR_LIMIT = 25000
 
 
 class SubprocessRunner:
@@ -39,7 +48,7 @@ class SubprocessRunner:
         log_level: str = "WARNING",
         quiet: bool = False,
         timeout: int | None = None,
-        output_char_limit: int = 25000,
+        output_char_limit: int = MAX_OUTPUT_CHAR_LIMIT
     ) -> None:
         self.env = env
         self.log_level = log_level
@@ -48,8 +57,7 @@ class SubprocessRunner:
         self.output_char_limit = output_char_limit
 
     def run(self, command: list[str], cwd: str,
-            quiet: bool | None = None,
-            stdout_file: str | None = None) -> subprocess.CompletedProcess:
+            quiet: bool | None = None) -> subprocess.CompletedProcess:
         """Execute a command and return the completed process.
 
         Stdout and stderr are always buffered through temporary files in the worker process to
@@ -67,13 +75,9 @@ class SubprocessRunner:
             quiet: Per-call quiet override.  When provided, takes precedence over the instance
                 -level quiet setting.  Useful for suppressing output on a single call (e.g. the
                 clean step) without changing the runner.
-            stdout_file: When provided, stdout is written to this persistent named file instead of
-                a temporary file, and result.stdout will be None. Used for apps whose stdout is the
-                validation output so it can be read back by the validation step.
 
         Returns:
-            CompletedProcess object with returncode, stdout, and stderr attributes. stdout will be
-            None when stdout_file is provided.
+            CompletedProcess object with returncode, stdout, and stderr attributes.
         """
         faulthandler.enable()
         effective_quiet = self.quiet if quiet is None else quiet
@@ -82,51 +86,74 @@ class SubprocessRunner:
 
         logger.debug("Running command %s in directory %s", ' '.join(command), cwd)
 
-        result_queue: multiprocessing.Queue = multiprocessing.Queue()
-        worker = multiprocessing.Process(
-            target=self._run_subprocess,
-            args=(command, cwd, self.env, result_queue, stdout_file, self.output_char_limit),
-            daemon=True,
-        )
-        worker.start()
-        worker.join(timeout=timeout)
-
-        if worker.is_alive():
-            worker.kill()
-            worker.join()
-            logger.error("Command %s timed out after %d seconds", ' '.join(command), timeout)
-            timeout_msg = f"TIMEOUT ({timeout} seconds)".encode()
-            return subprocess.CompletedProcess(
-                args=command,
-                returncode=-1,
-                stdout=None if stdout_file else timeout_msg,
-                stderr=timeout_msg,
+        result_dir = tempfile.mkdtemp(prefix="gpa_bench_result_")
+        try:
+            worker = multiprocessing.Process(
+                target=self._run_subprocess,
+                args=(command, cwd, self.env, result_dir),
+                daemon=True,
             )
+            worker.start()
+            worker.join(timeout=timeout)
 
-        if result_queue.empty():
-            logger.error("Command %s produced no result (worker exited with code %s)",
-                         ' '.join(command), worker.exitcode)
-            return subprocess.CompletedProcess(args=command, returncode=-1,
-                                               stdout=None, stderr=None)
+            if worker.is_alive():
+                worker.kill()
+                worker.join()
+                logger.error("Command %s timed out after %d seconds", ' '.join(command), timeout)
+                timeout_msg = f"TIMEOUT ({timeout} seconds)".encode()
+                return subprocess.CompletedProcess(
+                    args=command,
+                    returncode=-1,
+                    stdout=timeout_msg,
+                    stderr=timeout_msg,
+                )
 
-        returncode, stdout, stderr = result_queue.get_nowait()
-        result: subprocess.CompletedProcess = subprocess.CompletedProcess(
-            args=command, returncode=returncode, stdout=stdout, stderr=stderr,
-        )
+            returncode_path = os.path.join(result_dir, _RESULT_RETURNCODE_FILE)
+            if not os.path.exists(returncode_path):
+                logger.error("Command %s produced no result (worker exited with code %s)",
+                             ' '.join(command), worker.exitcode)
+                return subprocess.CompletedProcess(args=command, returncode=-1,
+                                                   stdout=None, stderr=None)
+
+            with open(returncode_path, "r", encoding="utf-8") as f:
+                returncode = int(f.read().strip())
+
+            stdout_path = os.path.join(result_dir, _RESULT_STDOUT_FILE)
+            stderr_path = os.path.join(result_dir, _RESULT_STDERR_FILE)
+
+            if os.path.exists(stdout_path):
+                with open(stdout_path, "rb") as f:
+                    stdout_bytes = f.read()
+            else:
+                stdout_bytes = f"Could not find stdout file {stdout_path}".encode()
+
+            if os.path.exists(stderr_path):
+                with open(stderr_path, "rb") as f:
+                    stderr_bytes = f.read()
+            else:
+                stderr_bytes = f"Could not find stderr file {stderr_path}".encode()
+
+            result = subprocess.CompletedProcess(
+                args=command, returncode=returncode, stdout=stdout_bytes, stderr=stderr_bytes,
+            )
+        finally:
+            try:
+                for name in os.listdir(result_dir):
+                    path = os.path.join(result_dir, name)
+                    if os.path.isfile(path):
+                        os.unlink(path)
+                os.rmdir(result_dir)
+            except OSError:
+                pass
 
         if log_level == "DEBUG":
             # DEBUG: Always log stdout and stderr, even with quiet=True
-            if stdout_file:
-                logger.debug("Command stdout written to file: %s", stdout_file)
-            else:
-                logger.debug("Command stdout:\n%s", self.decode_and_limit(result.stdout))
+            logger.debug("Command stdout:\n%s", self.decode_and_limit(result.stdout))
             logger.debug("Command stderr:\n%s", self.decode_and_limit(result.stderr))
         elif log_level == "INFO":
             # INFO: Log stdout and stderr on failure, unless quiet=True
             if not effective_quiet and result.returncode != 0:
-                if stdout_file:
-                    logger.info("Command stdout written to file: %s", stdout_file)
-                elif result.stdout:
+                if result.stdout:
                     logger.info("Command stdout:\n%s", self.decode_and_limit(result.stdout))
                 if result.stderr:
                     logger.info("Command stderr:\n%s", self.decode_and_limit(result.stderr))
@@ -134,77 +161,37 @@ class SubprocessRunner:
 
         return result
 
-    @staticmethod
-    def _read_file_truncated(path: str, char_limit: int) -> bytes:
-        """Read a file and return its content as bytes, truncated to char_limit characters.
-
-        Reads only as much of the file as needed to stay within the character limit, keeping the
-        first and last halves and discarding the middle.
-
-        Args:
-            path: Path to the file to read
-            char_limit: Maximum number of characters to return (0 or negative = no limit)
-
-        Returns:
-            File content as UTF-8 bytes, possibly with a truncation placeholder in the middle
-        """
-        size = os.path.getsize(path)
-        if char_limit <= 0 or size <= char_limit:
-            with open(path, "rb") as f:
-                return f.read()
-
-        half = char_limit // 2
-        placeholder = f"\n... [{size - char_limit} characters omitted] ...\n".encode()
-        with open(path, "rb") as f:
-            head = f.read(half)
-            f.seek(-half, 2)
-            tail = f.read(half)
-        return head + placeholder + tail
-
     def _run_subprocess(
-        self, command: list[str], cwd: str, env: dict, result_queue: multiprocessing.Queue,
-        stdout_file: str | None = None,
-        output_char_limit: int = 0,
+        self,
+        command: list[str],
+        cwd: str,
+        env: dict,
+        result_dir: str
     ) -> None:
-        """Target function for a worker process that executes subprocess.run and puts the result
-        (returncode, stdout, stderr) onto result_queue.  Runs without a timeout so the parent
-        process is responsible for enforcing one.
+        """Target function for a worker process that executes subprocess.run and writes results
+        to result_dir for the parent to read. Runs without a timeout; the parent enforces one.
 
-        Stdout and stderr are always written to files to avoid deadlocking on the pipe buffer in
-        subprocess.run.  When stdout_file is provided, stdout is written to that persistent path
-        and result stdout is None; otherwise a temporary file is used and content is read back and
-        put on the queue.  Stderr always uses a temporary file and is read back.
+        Stdout and stderr are written to files under result_dir so the parent can read them from
+        disk. The worker only runs the subprocess and writes the returncode; it does not read
+        stdout/stderr back.
         """
         faulthandler.register(signal.SIGTERM)
-        stderr_path = None
-        stdout_path = None
+        stderr_path = os.path.join(result_dir, _RESULT_STDERR_FILE)
+        stdout_path = os.path.join(result_dir, _RESULT_STDOUT_FILE)
+        returncode_path = os.path.join(result_dir, _RESULT_RETURNCODE_FILE)
         try:
-            with tempfile.NamedTemporaryFile(delete=False) as stderr_tmp:
-                stderr_path = stderr_tmp.name
-
-            if stdout_file:
-                with open(stdout_file, "w", encoding="utf-8") as out_f, \
-                     open(stderr_path, "wb") as err_f:
-                    proc = subprocess.run(command, cwd=cwd, env=env, check=False,
-                                          stdout=out_f, stderr=err_f)
-                stderr_bytes = self._read_file_truncated(stderr_path, output_char_limit)
-                result_queue.put((proc.returncode, None, stderr_bytes))
-            else:
-                with tempfile.NamedTemporaryFile(delete=False) as stdout_tmp:
-                    stdout_path = stdout_tmp.name
-                with open(stdout_path, "wb") as out_f, open(stderr_path, "wb") as err_f:
-                    proc = subprocess.run(command, cwd=cwd, env=env, check=False,
-                                          stdout=out_f, stderr=err_f)
-                stdout_bytes = self._read_file_truncated(stdout_path, output_char_limit)
-                stderr_bytes = self._read_file_truncated(stderr_path, output_char_limit)
-                result_queue.put((proc.returncode, stdout_bytes, stderr_bytes))
+            with open(stderr_path, "wb") as err_f, open(stdout_path, "wb") as out_f:
+                proc = subprocess.run(
+                    command, cwd=cwd, env=env, check=False, stdout=out_f, stderr=err_f
+                )
+            returncode = proc.returncode
+            with open(returncode_path, "w", encoding="utf-8") as f:
+                f.write(str(returncode))
         except Exception as exc:  # pylint: disable=broad-except
-            result_queue.put((-1, None, str(exc).encode()))
-        finally:
-            if stdout_path and os.path.exists(stdout_path):
-                os.unlink(stdout_path)
-            if stderr_path and os.path.exists(stderr_path):
-                os.unlink(stderr_path)
+            with open(returncode_path, "w", encoding="utf-8") as f:
+                f.write("-1")
+            with open(stderr_path, "wb") as f:
+                f.write(str(exc).encode())
 
     def decode_and_limit(self, raw: bytes | None) -> str:
         """Decode a bytes object to a string and truncate it if it exceeds the output character
