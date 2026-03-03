@@ -97,8 +97,11 @@ class SubprocessRunner:
             worker.join(timeout=timeout)
 
             if worker.is_alive():
-                worker.kill()
-                worker.join()
+                worker.terminate()
+                worker.join(timeout=30)
+                if worker.is_alive():
+                    worker.kill()
+                    worker.join()
                 logger.error("Command %s timed out after %d seconds", ' '.join(command), timeout)
                 timeout_msg = f"TIMEOUT ({timeout} seconds)".encode()
                 return subprocess.CompletedProcess(
@@ -177,7 +180,6 @@ class SubprocessRunner:
         """
         faulthandler.enable()
         faulthandler.register(signal.SIGTERM)
-        faulthandler.register(signal.SIGKILL)
         stderr_path = os.path.join(result_dir, _RESULT_STDERR_FILE)
         stdout_path = os.path.join(result_dir, _RESULT_STDOUT_FILE)
         returncode_path = os.path.join(result_dir, _RESULT_RETURNCODE_FILE)
