@@ -175,7 +175,9 @@ class SubprocessRunner:
         disk. The worker only runs the subprocess and writes the returncode; it does not read
         stdout/stderr back.
         """
+        faulthandler.enable()
         faulthandler.register(signal.SIGTERM)
+        faulthandler.register(signal.SIGKILL)
         stderr_path = os.path.join(result_dir, _RESULT_STDERR_FILE)
         stdout_path = os.path.join(result_dir, _RESULT_STDOUT_FILE)
         returncode_path = os.path.join(result_dir, _RESULT_RETURNCODE_FILE)
