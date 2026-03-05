@@ -273,6 +273,7 @@ def run_driver_pass(
                 if not result.sanitize:
                     # Update progress for skipped operations due to sanitize failure
                     update_progress_for_skipped_operations(config, pbar, "sanitize")
+                    result.run = False
                     return result
 
             # Run
