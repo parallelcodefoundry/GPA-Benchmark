@@ -4,6 +4,7 @@ Data Models for GPA-Benchmark Driver
 This module defines the data classes, enums, and result structures used throughout
 the driver system.
 """
+
 import logging
 from enum import Enum
 from dataclasses import dataclass
@@ -15,8 +16,10 @@ from numpy import mean
 
 from gpa_bench_driver.driver_src.driver_utils import detect_sm_version
 
+from gpa_bench_driver.driver_src.driver_operations import SanitizeTool
 
 logger = logging.getLogger("GPA-Benchmark")
+
 
 @dataclass
 class DriverConfig:
@@ -49,7 +52,9 @@ class DriverConfig:
             disable truncation. (default: 25000)
         suppress_command_stdout: When True, never log stdout/stderr from command runs regardless of
             log level or failure. Driver stdout/logging is unchanged. (default: False)
+        no_sanitize: Do not run compute sanitizer checks before running the app (default: False)
     """
+
     sm_version: int
     app: str = "all"
     cuda_home: str | None = None
@@ -67,30 +72,35 @@ class DriverConfig:
     log_level: str = "WARNING"
     no_progress: bool = False
     swaps_override: dict[str, str] | None = None
-    timeout: int | None = 300 # 5 minutes
+    timeout: int | None = 300  # 5 minutes
     subprocess_output_char_limit: int = 25000
     suppress_command_stdout: bool = False
+    no_sanitize: bool = False
 
-    def __init__(self, app: str,
-                 sm_version: int | None,
-                 cuda_home: str | None,
-                 no_clean: bool,
-                 build_only: bool,
-                 nsys: bool,
-                 ncu: bool,
-                 config: str,
-                 swaps: str | None,
-                 detect_regions: bool,
-                 postprocess_nsys: bool,
-                 num_samples: int,
-                 output_file: str | None,
-                 temp_dir: str | None,
-                 log_level: str,
-                 no_progress: bool,
-                 swaps_override: dict[str, str] | None = None,
-                 timeout: int | None = 300, # 5 minutes
-                 subprocess_output_char_limit: int = 25000,
-                 suppress_command_stdout: bool = False):
+    def __init__(
+        self,
+        app: str,
+        sm_version: int | None,
+        cuda_home: str | None,
+        no_clean: bool,
+        build_only: bool,
+        nsys: bool,
+        ncu: bool,
+        config: str,
+        swaps: str | None,
+        detect_regions: bool,
+        postprocess_nsys: bool,
+        num_samples: int,
+        output_file: str | None,
+        temp_dir: str | None,
+        log_level: str,
+        no_progress: bool,
+        swaps_override: dict[str, str] | None = None,
+        timeout: int | None = 300,  # 5 minutes
+        subprocess_output_char_limit: int = 25000,
+        suppress_command_stdout: bool = False,
+        no_sanitize: bool = False,
+    ):
         logger.debug("Entering DriverConfig")
         self.app = app
         self.sm_version = sm_version if sm_version is not None else detect_sm_version()
@@ -112,9 +122,10 @@ class DriverConfig:
         self.timeout = timeout
         self.subprocess_output_char_limit = subprocess_output_char_limit
         self.suppress_command_stdout = suppress_command_stdout
+        self.no_sanitize = no_sanitize
 
     @classmethod
-    def from_args(cls, args: argparse.Namespace) -> 'DriverConfig':
+    def from_args(cls, args: argparse.Namespace) -> "DriverConfig":
         """Create a DriverConfig from an argparse.Namespace.
 
         Args:
@@ -142,7 +153,8 @@ class DriverConfig:
             no_progress=args.no_progress,
             timeout=args.timeout if args.timeout is not None and args.timeout > 0 else None,
             subprocess_output_char_limit=args.subprocess_output_char_limit,
-            suppress_command_stdout=args.suppress_command_stdout
+            suppress_command_stdout=args.suppress_command_stdout,
+            no_sanitize=args.no_sanitize,
         )
 
 
@@ -151,25 +163,30 @@ class Operation(Enum):
 
     Attributes:
         BUILD: Build the application
+        SANITIZE: Sanitize the application with the specified tool
         RUN: Run the application
         VALIDATE: Validate the application output
         NSYS_PROFILE: Profile with Nsight Systems
         NCU_PROFILE: Profile with Nsight Compute
         NSYS_POST: Postprocess Nsight Systems profile
         SWAP_BUILDS: Build operations for swapped code
+        SWAP_SANITIZES: Sanitize operations for swapped code
         SWAP_RUNS: Run operations for swapped code
         SWAP_VALID: Validation operations for swapped code
         SWAP_NSYS: Nsight Systems profiling for swapped code
         SWAP_NCU: Nsight Compute profiling for swapped code
         SWAP_NSYS_POST: Nsight Systems postprocessing for swapped code
     """
+
     BUILD = "Build"
+    SANITIZE = "Sanitize"
     RUN = "Run"
     VALIDATE = "Validate"
     NSYS_PROFILE = "NSYS Profile"
     NCU_PROFILE = "NCU Profile"
     NSYS_POST = "NSYS Post"
     SWAP_BUILDS = "Swap Builds"
+    SWAP_SANITIZES = "Swap Sanitizes"
     SWAP_RUNS = "Swap Runs"
     SWAP_VALID = "Swap Valid"
     SWAP_NSYS = "Swap NSYS"
@@ -186,6 +203,7 @@ class FileSwap:
         swap_file_dest_name: Destination filename for the swap
         code: The code content to swap in
     """
+
     swap_file_src_path: str
     swap_file_dest_name: str
     code: str
@@ -202,11 +220,13 @@ class SwapConfig:
         optimized_code_num: Optimized code number identifier
         metadata: Metadata string identifier (if any)
     """
+
     app_name: str
     file_swaps: list[FileSwap]
     run_num: str
     optimized_code_num: str
     metadata: str | None
+
 
 @dataclass
 class DriverPassResult:
@@ -230,12 +250,15 @@ class DriverPassResult:
         run_stderr: Standard error from run process
         validation_output: Diagnostic output from validation when it fails (e.g. diff, found float)
     """
+
     app_name: str | None = None
     run_num: str | None = None
     metadata: str | None = None
     swap_num: str | None = None
     swap_file_src_path: str | None = None
     build: bool | None = None
+    sanitize: bool | None = None
+    sanitize_details: dict[SanitizeTool, bool] | None = None
     run: bool | None = None
     validate: bool | None = None
     validation_output: str | None = None
@@ -245,10 +268,24 @@ class DriverPassResult:
     nsys_data: list[dict[Hashable, Any]] | None = None
     build_stdout: str | None = None
     build_stderr: str | None = None
+    sanitize_stdouts: dict[SanitizeTool, str] | None = None
+    sanitize_stderrs: dict[SanitizeTool, str] | None = None
     run_stdout: str | None = None
     run_stderr: str | None = None
 
-    def to_dict(self) -> dict[str, str | bool | float | int | list[dict[Hashable, Any]] | None]:
+    def to_dict(
+        self,
+    ) -> dict[
+        str,
+        str
+        | bool
+        | float
+        | int
+        | list[dict[Hashable, Any]]
+        | dict[str, bool]
+        | dict[str, str]
+        | None,
+    ]:
         """Convert the results to a dictionary.
 
         Returns:
@@ -264,6 +301,10 @@ class DriverPassResult:
             "swap_num": self.swap_num,
             "swap_file_src_path": self.swap_file_src_path,
             "build": self.build,
+            "sanitize": self.sanitize,
+            "sanitize_details": {str(t): r for t, r in self.sanitize_details.items()}
+            if self.sanitize_details is not None
+            else None,
             "run": self.run,
             "validate": self.validate,
             "validation_output": self.validation_output,
@@ -276,6 +317,12 @@ class DriverPassResult:
             "exec_time.max": max(exec_times) if exec_times else None,
             "build_stdout": self.build_stdout,
             "build_stderr": self.build_stderr,
+            "sanitize_stdouts": {str(t): s for t, s in self.sanitize_stdouts.items()}
+            if self.sanitize_stdouts is not None
+            else None,
+            "sanitize_stderrs": {str(t): s for t, s in self.sanitize_stderrs.items()}
+            if self.sanitize_stderrs is not None
+            else None,
             "run_stdout": self.run_stdout,
             "run_stderr": self.run_stderr,
         }
@@ -288,10 +335,13 @@ class AppResults:
     Tracks both baseline (non-swap) results and aggregated swap results
     as fractions (numerator/denominator).
     """
+
     def __init__(self) -> None:
         """Initialize AppResults with all fields set to None or zero."""
         # Results for single non-swap pass
         self.build: bool | None = None
+        self.sanitize: bool | None = None
+        self.sanitize_details: dict[SanitizeTool, bool] | None = None
         self.run: bool | None = None
         self.validate: bool | None = None
         self.nsys_profile: bool | None = None
@@ -301,6 +351,8 @@ class AppResults:
         # Results for all swap passes (tracked as fractions)
         self.swap_builds_numerator: int = 0
         self.swap_builds_denominator: int = 0
+        self.swap_sanitizes_numerator: int = 0
+        self.swap_sanitizes_denominator: int = 0
         self.swap_runs_numerator: int = 0
         self.swap_runs_denominator: int = 0
         self.swap_valid_numerator: int = 0
@@ -326,6 +378,14 @@ class AppResults:
                 self.swap_builds_denominator += 1
                 if pass_result.build:
                     self.swap_builds_numerator += 1
+
+        if pass_result.sanitize is not None:
+            if not is_swap:
+                self.sanitize = pass_result.sanitize
+            else:
+                self.swap_sanitizes_denominator += 1
+                if pass_result.sanitize:
+                    self.swap_sanitizes_numerator += 1
 
         if pass_result.run is not None:
             if not is_swap:
@@ -378,6 +438,8 @@ class AppResults:
         """
         if key == Operation.BUILD:
             return self.build
+        elif key == Operation.SANITIZE:
+            return self.sanitize
         elif key == Operation.RUN:
             return self.run
         elif key == Operation.VALIDATE:
@@ -391,6 +453,10 @@ class AppResults:
         elif key == Operation.SWAP_BUILDS:
             if self.swap_builds_denominator > 0:
                 return f"{self.swap_builds_numerator}/{self.swap_builds_denominator}"
+            return None
+        elif key == Operation.SWAP_SANITIZES:
+            if self.swap_sanitizes_denominator > 0:
+                return f"{self.swap_sanitizes_numerator}/{self.swap_sanitizes_denominator}"
             return None
         elif key == Operation.SWAP_RUNS:
             if self.swap_runs_denominator > 0:

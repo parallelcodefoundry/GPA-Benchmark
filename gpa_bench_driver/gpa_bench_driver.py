@@ -25,6 +25,7 @@ API Usage:
         num_samples=5
     )
 """
+
 import argparse
 import logging
 import os
@@ -33,23 +34,45 @@ import shutil
 from typing import Any
 from alive_progress import alive_bar
 
-from gpa_bench_driver.driver_src.driver_models import Operation, SwapConfig, DriverPassResult, \
-    AppResults, DriverConfig
+from gpa_bench_driver.driver_src.driver_models import (
+    Operation,
+    SwapConfig,
+    DriverPassResult,
+    AppResults,
+    DriverConfig,
+)
 from gpa_bench_driver.driver_src.driver_utils import SubprocessRunner, get_bin_path
 from gpa_bench_driver.driver_src.driver_file_swapping import swap_file_in_app, swap_file_out_app
 from gpa_bench_driver.driver_src.driver_validation import validate_app
-from gpa_bench_driver.driver_src.driver_operations import build_app, run_app
-from gpa_bench_driver.driver_src.driver_profiling import nsys_profile_app, ncu_profile_app, \
-    postprocess_nsys_app
+from gpa_bench_driver.driver_src.driver_operations import (
+    build_app,
+    run_app,
+    sanitize_app,
+    SanitizeTool,
+)
+from gpa_bench_driver.driver_src.driver_profiling import (
+    nsys_profile_app,
+    ncu_profile_app,
+    postprocess_nsys_app,
+)
 from gpa_bench_driver.driver_src.driver_config import setup_app_config, determine_operations
 from gpa_bench_driver.driver_src.driver_reporting import print_report_table, save_results
 
 logger = logging.getLogger("GPA-Benchmark")
-#TODO: Rename logger to gpa_bench_driver
-#TODO: Update project to src/ layout
+# TODO: Rename logger to gpa_bench_driver
+# TODO: Update project to src/ layout
 
-APP_DIRS = ["Castro", "darknet", "ExaTENSOR", "LULESH", "PeleC", "Quicksilver", "rodinia",
-            "XSBench"]
+APP_DIRS = [
+    "Castro",
+    "darknet",
+    "ExaTENSOR",
+    "LULESH",
+    "PeleC",
+    "Quicksilver",
+    "rodinia",
+    "XSBench",
+]
+
 
 class BaselineError(Exception):
     """Exception raised for errors in the baseline pass.
@@ -57,6 +80,7 @@ class BaselineError(Exception):
     Attributes:
         message: explanation of the error
     """
+
     def __init__(self, message: str):
         self.message = message
         super().__init__(self.message)
@@ -74,9 +98,11 @@ def count_operations_per_pass(config: DriverConfig) -> int:
     count = 0
 
     if not config.postprocess_nsys:
-        count += 1 # BUILD always runs (unless only postprocessing)
+        count += 1  # BUILD always runs (unless only postprocessing)
         if not config.build_only:
-            count += 2 # RUN and VALIDATE run if not build-only
+            count += 2  # RUN and VALIDATE run if not build-only
+            if not config.no_sanitize:
+                count += 4  # SANITIZE with all 4 tools
             if config.nsys:
                 count += config.num_samples
             if config.ncu:
@@ -88,8 +114,9 @@ def count_operations_per_pass(config: DriverConfig) -> int:
     return count
 
 
-def update_progress_for_skipped_operations(config: DriverConfig, pbar: Any,
-                                           failure_stage: str) -> None:
+def update_progress_for_skipped_operations(
+    config: DriverConfig, pbar: Any, failure_stage: str
+) -> None:
     """Update progress bar for operations that will be skipped due to a failure.
 
     Args:
@@ -104,26 +131,34 @@ def update_progress_for_skipped_operations(config: DriverConfig, pbar: Any,
 
     if config.build_only:
         return
-    if failure_stage == 'build':
-        skipped_ops += 1 # RUN
-    if failure_stage in ['run', 'build']:
-        skipped_ops += 1 # VALIDATE
-    if failure_stage in ['build', 'run', 'validate']:
+    if failure_stage == "build":
+        if not config.no_sanitize:
+            skipped_ops += 4  # SANITIZE with all 4 tools
+    if failure_stage in ["build", "sanitize"]:
+        skipped_ops += 1  # RUN
+    if failure_stage in ["build", "sanitize", "run"]:
+        skipped_ops += 1  # VALIDATE
+    if failure_stage in ["build", "sanitize", "run", "validate"]:
         if config.nsys:
-            skipped_ops += config.num_samples # NSYS_PROFILE
+            skipped_ops += config.num_samples  # NSYS_PROFILE
         if config.ncu:
-            skipped_ops += config.num_samples # NCU_PROFILE
-    if failure_stage in ['build', 'run', 'validate', 'nsys_profile']:
+            skipped_ops += config.num_samples  # NCU_PROFILE
+    if failure_stage in ["build", "sanitize", "run", "validate", "nsys_profile", "ncu_profile"]:
         if config.postprocess_nsys or config.nsys:
-            skipped_ops += config.num_samples # NSYS_POST
+            skipped_ops += config.num_samples  # NSYS_POST
 
     for _ in range(skipped_ops):
         pbar()
 
 
-def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
-                    swap_config: SwapConfig | None = None,
-                    pbar: Any = None) -> DriverPassResult:
+def run_driver_pass(
+    app: dict,
+    env: dict,
+    config: DriverConfig,
+    temp_dir: str,
+    swap_config: SwapConfig | None = None,
+    pbar: Any = None,
+) -> DriverPassResult:
     """Run a single driver pass for an application.
 
     A driver pass consists of building, running, validating, and optionally
@@ -150,8 +185,9 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
     result.metadata = swap_config.metadata if swap_config else None
     result.swap_num = swap_config.optimized_code_num if swap_config else None
     if swap_config and swap_config.file_swaps:
-        result.swap_file_src_path = ",".join([fs.swap_file_src_path
-                                              for fs in swap_config.file_swaps])
+        result.swap_file_src_path = ",".join(
+            [fs.swap_file_src_path for fs in swap_config.file_swaps]
+        )
     else:
         result.swap_file_src_path = None
 
@@ -174,15 +210,17 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
             build_success, build_result = build_app(
                 app, config.sm_version, config.no_clean, runner, temp_dir
             )
-            result.build_stdout = build_result.stdout.decode("utf-8") \
-                if build_result.stdout is not None else ""
-            result.build_stderr = build_result.stderr.decode("utf-8") \
-                if build_result.stderr is not None else ""
+            result.build_stdout = (
+                build_result.stdout.decode("utf-8") if build_result.stdout is not None else ""
+            )
+            result.build_stderr = (
+                build_result.stderr.decode("utf-8") if build_result.stderr is not None else ""
+            )
 
             bin_path = get_bin_path(app, temp_dir)
-            result.build = (build_success and
-                          os.path.exists(bin_path) and
-                          os.access(bin_path, os.X_OK))
+            result.build = (
+                build_success and os.path.exists(bin_path) and os.access(bin_path, os.X_OK)
+            )
 
             if pbar is not None:
                 pbar()  # Update progress for BUILD operation
@@ -196,15 +234,55 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
                     raise BaselineError(msg)
                 # Update progress for skipped operations due to build failure
                 if not config.build_only:
-                    update_progress_for_skipped_operations(config, pbar, 'build')
+                    update_progress_for_skipped_operations(config, pbar, "build")
                 return result
+
+            # Sanitize
+            if not config.no_sanitize:
+                result.sanitize_stdouts = {}
+                result.sanitize_stderrs = {}
+                result.sanitize_details = {}
+
+                for tool in SanitizeTool.__members__.values():
+                    sanitize_success, sanitize_result = sanitize_app(app, runner, temp_dir, tool)
+                    result.sanitize_stdouts[tool] = (
+                        runner.decode_and_limit(sanitize_result.stdout)
+                        if sanitize_result.stdout is not None
+                        else ""
+                    )
+                    result.sanitize_stderrs[tool] = (
+                        runner.decode_and_limit(sanitize_result.stderr)
+                        if sanitize_result.stderr is not None
+                        else ""
+                    )
+                    result.sanitize_details[tool] = sanitize_success
+                    if pbar is not None:
+                        pbar()  # Update progress for SANITIZE operation
+                    if not sanitize_success:
+                        if swap_config is None:
+                            logger.error(
+                                "Baseline sanitize stdout: %s", result.sanitize_stdouts[tool]
+                            )
+                            logger.error(
+                                "Baseline sanitize stderr: %s", result.sanitize_stderrs[tool]
+                            )
+                            msg = f"Sanitize failed for baseline ({app['name']})"
+                            raise BaselineError(msg)
+
+                result.sanitize = all(result.sanitize_details.values())
+                if not result.sanitize:
+                    # Update progress for skipped operations due to sanitize failure
+                    update_progress_for_skipped_operations(config, pbar, "sanitize")
+                    return result
 
             # Run
             run_success, run_result = run_app(app, runner, temp_dir)
-            result.run_stdout = runner.decode_and_limit(run_result.stdout) \
-                if run_result.stdout is not None else ""
-            result.run_stderr = runner.decode_and_limit(run_result.stderr) \
-                if run_result.stderr is not None else ""
+            result.run_stdout = (
+                runner.decode_and_limit(run_result.stdout) if run_result.stdout is not None else ""
+            )
+            result.run_stderr = (
+                runner.decode_and_limit(run_result.stderr) if run_result.stderr is not None else ""
+            )
             result.run = run_success
 
             if pbar is not None:
@@ -217,7 +295,7 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
                     msg = f"Run failed for baseline ({app['name']})"
                     raise BaselineError(msg)
                 # Update progress for skipped operations due to run failure
-                update_progress_for_skipped_operations(config, pbar, 'run')
+                update_progress_for_skipped_operations(config, pbar, "run")
                 return result
 
             # Validate
@@ -236,19 +314,31 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
                     msg = f"Validation failed for baseline ({app['name']})"
                     raise BaselineError(msg)
                 # Update progress for skipped operations due to validation failure
-                update_progress_for_skipped_operations(config, pbar, 'validate')
+                update_progress_for_skipped_operations(config, pbar, "validate")
                 return result
 
             # NSYS Profile
             if config.nsys:
-                nsys_success = nsys_profile_app(app, runner, temp_dir, config.num_samples,
-                                                swap_config=swap_config or None, pbar=pbar)
+                nsys_success = nsys_profile_app(
+                    app,
+                    runner,
+                    temp_dir,
+                    config.num_samples,
+                    swap_config=swap_config or None,
+                    pbar=pbar,
+                )
                 result.nsys_profile = nsys_success
 
             # NCU Profile
             if config.ncu:
-                ncu_success = ncu_profile_app(app, runner, temp_dir, config.num_samples,
-                                              swap_config=swap_config or None, pbar=pbar)
+                ncu_success = ncu_profile_app(
+                    app,
+                    runner,
+                    temp_dir,
+                    config.num_samples,
+                    swap_config=swap_config or None,
+                    pbar=pbar,
+                )
                 result.ncu_profile = ncu_success
 
         finally:
@@ -258,21 +348,22 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
 
     # Postprocess NSYS (either standalone or after profiling)
     if config.postprocess_nsys or (config.nsys and result.nsys_profile):
-        postprocess_nsys_result = postprocess_nsys_app(app, runner, config.num_samples,
-                                                       swap_config=swap_config or None, pbar=pbar)
+        postprocess_nsys_result = postprocess_nsys_app(
+            app, runner, config.num_samples, swap_config=swap_config or None, pbar=pbar
+        )
         result.nsys_post = postprocess_nsys_result is not None
         result.nsys_data = postprocess_nsys_result
     elif config.nsys:
         # NSYS_POST was expected but didn't run because nsys_profile failed
         # Still update progress bar for this skipped operation
-        update_progress_for_skipped_operations(config, pbar, 'nsys_profile')
+        update_progress_for_skipped_operations(config, pbar, "nsys_profile")
 
     return result
 
 
-def run_all(app_config: dict, swaps_dict: dict[str, SwapConfig] | None, env: dict,
-            config: DriverConfig) -> tuple[dict[str, AppResults], list[Operation],
-                                               dict[str, list[DriverPassResult]]]:
+def run_all(
+    app_config: dict, swaps_dict: dict[str, SwapConfig] | None, env: dict, config: DriverConfig
+) -> tuple[dict[str, AppResults], list[Operation], dict[str, list[DriverPassResult]]]:
     """Run all applications with their configured operations.
 
     Processes each application in the configuration, running baseline passes
@@ -323,8 +414,10 @@ def run_all(app_config: dict, swaps_dict: dict[str, SwapConfig] | None, env: dic
 
             with tempfile.TemporaryDirectory(dir=config.temp_dir) as temp_dir:
                 app_dir = next(app_dir for app_dir in APP_DIRS if app_dir in app["path"])
-                shutil.copytree(os.path.join(os.path.dirname(__file__), "..", app_dir),
-                                os.path.join(temp_dir, app_dir))
+                shutil.copytree(
+                    os.path.join(os.path.dirname(__file__), "..", app_dir),
+                    os.path.join(temp_dir, app_dir),
+                )
 
                 app_name = app["name"]
                 results[app_name] = AppResults()
@@ -333,17 +426,17 @@ def run_all(app_config: dict, swaps_dict: dict[str, SwapConfig] | None, env: dic
                 # Build list of passes: baseline first, then swaps
                 driver_passes: list[SwapConfig | None] = [None]  # None = baseline
                 if swaps_dict:
-                    driver_passes.extend([
-                        swap for swap in swaps_dict.values()
-                        if swap.app_name == app["name"]
-                    ])
+                    driver_passes.extend(
+                        [swap for swap in swaps_dict.values() if swap.app_name == app["name"]]
+                    )
 
                 logger.debug("Driver is running %d passes for %s", len(driver_passes), app_name)
 
                 # Run each pass
                 for pass_num, driver_pass in enumerate(driver_passes):
-                    pass_results = run_driver_pass(app, env, config, temp_dir,
-                                                   swap_config=driver_pass, pbar=pbar)
+                    pass_results = run_driver_pass(
+                        app, env, config, temp_dir, swap_config=driver_pass, pbar=pbar
+                    )
                     is_swap = driver_pass is not None
                     results[app_name].update_from_pass_result(pass_results, is_swap)
                     long_results[app_name].append(pass_results)
@@ -372,14 +465,15 @@ def run_driver(
     detect_regions: bool = False,
     postprocess_nsys: bool = False,
     num_samples: int = 3,
-    output_file: str | None= None,
+    output_file: str | None = None,
     temp_dir: str | None = None,
     log_level: str = "WARNING",
     no_progress: bool = True,
     swaps_override: dict[str, str] | None = None,
     timeout: int | None = 300,
     subprocess_output_char_limit: int = 25000,
-    suppress_command_stdout: bool = False
+    suppress_command_stdout: bool = False,
+    no_sanitize: bool = False,
 ) -> tuple[dict[str, AppResults], list[Operation], dict[str, list[DriverPassResult]]]:
     """Run the driver programmatically with the same interface as the CLI.
 
@@ -413,6 +507,8 @@ def run_driver(
                  disable truncation. (default: 25000)
         suppress_command_stdout: When True, never log stdout/stderr from command runs regardless of
                  log level or failure. Driver stdout/logging is unchanged. (default: False)
+        no_sanitize: Do not run compute sanitizer checks before running the application
+                     (default: False)
     Returns:
         Tuple of:
         - results: Dictionary mapping app names to AppResults
@@ -446,13 +542,15 @@ def run_driver(
         timeout=timeout if timeout is not None and timeout > 0 else None,
         subprocess_output_char_limit=subprocess_output_char_limit,
         suppress_command_stdout=suppress_command_stdout,
+        no_sanitize=no_sanitize,
     )
 
     return run_driver_config(driver_config)
 
 
-def run_driver_config(config: DriverConfig) -> tuple[dict[str, AppResults], list[Operation],
-                                                     dict[str, list[DriverPassResult]]]:
+def run_driver_config(
+    config: DriverConfig,
+) -> tuple[dict[str, AppResults], list[Operation], dict[str, list[DriverPassResult]]]:
     """Run the driver with a DriverConfig object.
 
     Args:
@@ -493,88 +591,115 @@ def parse_args() -> argparse.Namespace:
         description="GPA-Benchmark Driver: Build, run, validate, and profile applications"
     )
     parser.add_argument(
-        "--app", type=str, default="all",
-        help="The application to run (default: all)"
+        "--app", type=str, default="all", help="The application to run (default: all)"
     )
     parser.add_argument(
-        "--sm-version", type=int, default=None,
-        help="The SM version to use (default: None, will auto-detect from nvidia-smi)"
+        "--sm-version",
+        type=int,
+        default=None,
+        help="The SM version to use (default: None, will auto-detect from nvidia-smi)",
     )
     parser.add_argument(
-        "--cuda-home", type=str, default=None,
-        help="Path to the CUDA installation to use"
+        "--cuda-home", type=str, default=None, help="Path to the CUDA installation to use"
     )
     parser.add_argument(
-        "--no-clean", action="store_true",
-        help="Do not clean the application before building"
+        "--no-clean", action="store_true", help="Do not clean the application before building"
     )
     parser.add_argument(
-        "--build-only", action="store_true",
-        help="Only build the application (skip run and validate)"
+        "--build-only",
+        action="store_true",
+        help="Only build the application (skip run and validate)",
     )
     parser.add_argument(
-        "--nsys", action="store_true",
+        "--nsys",
+        action="store_true",
         help="Profile the application with Nsight Systems, then export and "
-             "process the sqlite database (profiles stored under profiles/)"
+        "process the sqlite database (profiles stored under profiles/)",
     )
     parser.add_argument(
-        "--ncu", action="store_true",
-        help="Profile the application with Nsight Compute (profiles stored under profiles/)"
+        "--ncu",
+        action="store_true",
+        help="Profile the application with Nsight Compute (profiles stored under profiles/)",
     )
     parser.add_argument(
-        "--config", type=str, default="driver_apps.yaml",
-        help="The app config file to use (default: driver_apps.yaml)"
+        "--config",
+        type=str,
+        default="driver_apps.yaml",
+        help="The app config file to use (default: driver_apps.yaml)",
     )
     parser.add_argument(
-        "--swaps", type=str, default=None,
+        "--swaps",
+        type=str,
+        default=None,
         help="The path to the directory containing code files to swap in for the "
-             "kernel, with the filename being run_<num>_optimized_code_<num>.cu"
+        "kernel, with the filename being run_<num>_optimized_code_<num>.cu",
     )
     parser.add_argument(
-        "--detect-regions", action="store_true",
+        "--detect-regions",
+        action="store_true",
         help="Detect if the kernel file to swap into contains editable region markers and "
-             "substitute into them rather than replacing the entire file"
+        "substitute into them rather than replacing the entire file",
     )
     parser.add_argument(
-        "--postprocess-nsys", action="store_true",
-        help="Only postprocess nsys-rep file(s) found under profiles/, do not run the application"
+        "--postprocess-nsys",
+        action="store_true",
+        help="Only postprocess nsys-rep file(s) found under profiles/, do not run the application",
     )
     parser.add_argument(
-        "-n", "--num-samples", type=int, default=3,
-        help="The number of times to collect ncu/nsys profiles for each application and swap"
+        "-n",
+        "--num-samples",
+        type=int,
+        default=3,
+        help="The number of times to collect ncu/nsys profiles for each application and swap",
     )
     parser.add_argument(
-        "-o", "--output-file", type=str, default="driver_results.json",
-        help="The file to save the long results to (default: driver_results.json)"
+        "-o",
+        "--output-file",
+        type=str,
+        default="driver_results.json",
+        help="The file to save the long results to (default: driver_results.json)",
     )
     parser.add_argument(
-        "-t", "--temp-dir", type=str, default=None,
-        help="The temporary directory to use for the driver, must exist (default: /tmp)"
+        "-t",
+        "--temp-dir",
+        type=str,
+        default=None,
+        help="The temporary directory to use for the driver, must exist (default: /tmp)",
     )
     parser.add_argument(
-        "-l", "--log-level", type=str, default="WARNING",
+        "-l",
+        "--log-level",
+        type=str,
+        default="WARNING",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-        help="Set logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL (default: WARNING)"
+        help="Set logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL (default: WARNING)",
     )
+    parser.add_argument("--no-progress", action="store_true", help="Do not display a progress bar")
     parser.add_argument(
-        "--no-progress", action="store_true",
-        help="Do not display a progress bar"
-    )
-    parser.add_argument(
-        "--timeout", type=int, default=300,
+        "--timeout",
+        type=int,
+        default=300,
         help="The timeout in seconds for the driver to run, if negative, not timeout enforced"
-             "(default: 300)"
+        "(default: 300)",
     )
     parser.add_argument(
-        "--subprocess-output-char-limit", type=int, default=25000,
+        "--subprocess-output-char-limit",
+        type=int,
+        default=25000,
         help="Maximum characters to log for subprocess stdout/stderr. Characters are removed "
-             "from the middle of the output to stay within the limit. Set to <= 0 to disable "
-             "truncation. (default: 25000)"
+        "from the middle of the output to stay within the limit. Set to <= 0 to disable "
+        "truncation. (default: 25000)",
     )
     parser.add_argument(
-        "--suppress-command-stdout", action="store_true",
+        "--suppress-command-stdout",
+        action="store_true",
         help="Never log stdout/stderr from command runs (build, run, profile, etc.), regardless of "
-             "log level or failure. Driver logging is unchanged."
+        "log level or failure. Driver logging is unchanged.",
+    )
+    parser.add_argument(
+        "--no-sanitize",
+        action="store_true",
+        help="Do not run compute sanitizer checks before running the application",
     )
     return parser.parse_args()
 
@@ -593,10 +718,7 @@ def main() -> None:
 
     # Configure logging
     log_level = getattr(logging, args.log_level.upper(), logging.WARNING)
-    logging.basicConfig(
-        level=log_level,
-        format='%(asctime)s [%(levelname)s] - %(message)s'
-    )
+    logging.basicConfig(level=log_level, format="%(asctime)s [%(levelname)s] - %(message)s")
 
     logger.info("Start gpa_bench_driver.py")
 

@@ -126,6 +126,8 @@ def determine_operations(config: DriverConfig) -> list[Operation]:
     if not config.postprocess_nsys:
         operations.append(Operation.BUILD)
         if not config.build_only:
+            if not config.no_sanitize:
+                operations.append(Operation.SANITIZE)
             operations.append(Operation.RUN)
             operations.append(Operation.VALIDATE)
 
@@ -141,6 +143,8 @@ def determine_operations(config: DriverConfig) -> list[Operation]:
     if config.swaps or config.swaps_override:
         operations.append(Operation.SWAP_BUILDS)
         if not config.build_only:
+            if not config.no_sanitize:
+                operations.append(Operation.SWAP_SANITIZES)
             operations.append(Operation.SWAP_RUNS)
             operations.append(Operation.SWAP_VALID)
             if config.nsys:
