@@ -47,6 +47,8 @@ class DriverConfig:
         subprocess_output_char_limit: Maximum characters to log for subprocess stdout/stderr.
             Characters are removed from the middle to stay within the limit. Set to <= 0 to
             disable truncation. (default: 25000)
+        suppress_command_stdout: When True, never log stdout/stderr from command runs regardless of
+            log level or failure. Driver stdout/logging is unchanged. (default: False)
     """
     sm_version: int
     app: str = "all"
@@ -67,6 +69,7 @@ class DriverConfig:
     swaps_override: dict[str, str] | None = None
     timeout: int | None = 300 # 5 minutes
     subprocess_output_char_limit: int = 25000
+    suppress_command_stdout: bool = False
 
     def __init__(self, app: str,
                  sm_version: int | None,
@@ -86,7 +89,8 @@ class DriverConfig:
                  no_progress: bool,
                  swaps_override: dict[str, str] | None = None,
                  timeout: int | None = 300, # 5 minutes
-                 subprocess_output_char_limit: int = 25000):
+                 subprocess_output_char_limit: int = 25000,
+                 suppress_command_stdout: bool = False):
         logger.debug("Entering DriverConfig")
         self.app = app
         self.sm_version = sm_version if sm_version is not None else detect_sm_version()
@@ -107,6 +111,7 @@ class DriverConfig:
         self.swaps_override = swaps_override
         self.timeout = timeout
         self.subprocess_output_char_limit = subprocess_output_char_limit
+        self.suppress_command_stdout = suppress_command_stdout
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> 'DriverConfig':
@@ -136,7 +141,8 @@ class DriverConfig:
             log_level=args.log_level,
             no_progress=args.no_progress,
             timeout=args.timeout if args.timeout is not None and args.timeout > 0 else None,
-            subprocess_output_char_limit=args.subprocess_output_char_limit
+            subprocess_output_char_limit=args.subprocess_output_char_limit,
+            suppress_command_stdout=args.suppress_command_stdout
         )
 
 

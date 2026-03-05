@@ -40,6 +40,8 @@ class SubprocessRunner:
         timeout: Default timeout in seconds; None means no limit
         output_char_limit: Maximum characters logged for stdout/stderr; characters are removed from
             the middle to stay within the limit.  Set to <= 0 to disable truncation.
+        suppress_command_stdout: When True, never log stdout/stderr from commands (overrides
+            log_level and quiet). Driver logging is unchanged.
     """
 
     def __init__(
@@ -48,13 +50,15 @@ class SubprocessRunner:
         log_level: str = "WARNING",
         quiet: bool = False,
         timeout: int | None = None,
-        output_char_limit: int = MAX_OUTPUT_CHAR_LIMIT
+        output_char_limit: int = MAX_OUTPUT_CHAR_LIMIT,
+        suppress_command_stdout: bool = False
     ) -> None:
         self.env = env
         self.log_level = log_level
         self.quiet = quiet
         self.timeout = timeout
         self.output_char_limit = output_char_limit
+        self.suppress_command_stdout = suppress_command_stdout
 
     def run(self, command: list[str], cwd: str,
             quiet: bool | None = None) -> subprocess.CompletedProcess:
@@ -149,18 +153,19 @@ class SubprocessRunner:
             except OSError:
                 pass
 
-        if log_level == "DEBUG":
-            # DEBUG: Always log stdout and stderr, even with quiet=True
-            logger.debug("Command stdout:\n%s", self.decode_and_limit(result.stdout))
-            logger.debug("Command stderr:\n%s", self.decode_and_limit(result.stderr))
-        elif log_level == "INFO":
-            # INFO: Log stdout and stderr on failure, unless quiet=True
-            if not effective_quiet and result.returncode != 0:
-                if result.stdout:
-                    logger.info("Command stdout:\n%s", self.decode_and_limit(result.stdout))
-                if result.stderr:
-                    logger.info("Command stderr:\n%s", self.decode_and_limit(result.stderr))
-        # else: WARNING/ERROR/CRITICAL — never log stdout or stderr
+        if not self.suppress_command_stdout:
+            if log_level == "DEBUG":
+                # DEBUG: Always log stdout and stderr, even with quiet=True
+                logger.debug("Command stdout:\n%s", self.decode_and_limit(result.stdout))
+                logger.debug("Command stderr:\n%s", self.decode_and_limit(result.stderr))
+            elif log_level == "INFO":
+                # INFO: Log stdout and stderr on failure, unless quiet=True
+                if not effective_quiet and result.returncode != 0:
+                    if result.stdout:
+                        logger.info("Command stdout:\n%s", self.decode_and_limit(result.stdout))
+                    if result.stderr:
+                        logger.info("Command stderr:\n%s", self.decode_and_limit(result.stderr))
+        # else: suppress_command_stdout or WARNING/ERROR/CRITICAL — don't log command stdout/stderr
 
         return result
 

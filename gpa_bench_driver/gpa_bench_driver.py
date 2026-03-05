@@ -160,6 +160,7 @@ def run_driver_pass(app: dict, env: dict, config: DriverConfig, temp_dir: str,
         log_level=config.log_level,
         timeout=config.timeout,
         output_char_limit=config.subprocess_output_char_limit,
+        suppress_command_stdout=config.suppress_command_stdout,
     )
 
     # Skip build/run/validate if only postprocessing
@@ -377,7 +378,8 @@ def run_driver(
     no_progress: bool = True,
     swaps_override: dict[str, str] | None = None,
     timeout: int | None = 300,
-    subprocess_output_char_limit: int = 25000
+    subprocess_output_char_limit: int = 25000,
+    suppress_command_stdout: bool = False
 ) -> tuple[dict[str, AppResults], list[Operation], dict[str, list[DriverPassResult]]]:
     """Run the driver programmatically with the same interface as the CLI.
 
@@ -409,6 +411,8 @@ def run_driver(
         subprocess_output_char_limit: Maximum characters to log for subprocess stdout/stderr.
                  Characters are removed from the middle to stay within the limit. Set to <= 0 to
                  disable truncation. (default: 25000)
+        suppress_command_stdout: When True, never log stdout/stderr from command runs regardless of
+                 log level or failure. Driver stdout/logging is unchanged. (default: False)
     Returns:
         Tuple of:
         - results: Dictionary mapping app names to AppResults
@@ -440,7 +444,8 @@ def run_driver(
         no_progress=no_progress,
         swaps_override=swaps_override,
         timeout=timeout if timeout is not None and timeout > 0 else None,
-        subprocess_output_char_limit=subprocess_output_char_limit
+        subprocess_output_char_limit=subprocess_output_char_limit,
+        suppress_command_stdout=suppress_command_stdout,
     )
 
     return run_driver_config(driver_config)
@@ -565,6 +570,11 @@ def parse_args() -> argparse.Namespace:
         help="Maximum characters to log for subprocess stdout/stderr. Characters are removed "
              "from the middle of the output to stay within the limit. Set to <= 0 to disable "
              "truncation. (default: 25000)"
+    )
+    parser.add_argument(
+        "--suppress-command-stdout", action="store_true",
+        help="Never log stdout/stderr from command runs (build, run, profile, etc.), regardless of "
+             "log level or failure. Driver logging is unchanged."
     )
     return parser.parse_args()
 
