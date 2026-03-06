@@ -54,6 +54,8 @@ class DriverConfig:
         suppress_command_stdout: When True, never log stdout/stderr from command runs regardless of
             log level or failure. Driver stdout/logging is unchanged. (default: False)
         no_sanitize: Do not run compute sanitizer checks before running the app (default: False)
+        srun: When True, prepend Slurm srun to all subprocess commands and use srun --time for
+            timeout instead of multiprocessing-based timeout handling (default: False)
     """
 
     sm_version: int
@@ -78,6 +80,7 @@ class DriverConfig:
     subprocess_output_char_limit: int = 25000
     suppress_command_stdout: bool = False
     no_sanitize: bool = False
+    srun: bool = False
 
     def __init__(
         self,
@@ -103,6 +106,7 @@ class DriverConfig:
         subprocess_output_char_limit: int = 25000,
         suppress_command_stdout: bool = False,
         no_sanitize: bool = False,
+        srun: bool = False,
     ):
         logger.debug("Entering DriverConfig")
         self.app = app
@@ -127,6 +131,7 @@ class DriverConfig:
         self.subprocess_output_char_limit = subprocess_output_char_limit
         self.suppress_command_stdout = suppress_command_stdout
         self.no_sanitize = no_sanitize
+        self.srun = srun
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> "DriverConfig":
@@ -160,6 +165,7 @@ class DriverConfig:
             subprocess_output_char_limit=args.subprocess_output_char_limit,
             suppress_command_stdout=args.suppress_command_stdout,
             no_sanitize=args.no_sanitize,
+            srun=args.srun,
         )
 
 

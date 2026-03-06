@@ -42,6 +42,8 @@ class SubprocessRunner:
             the middle to stay within the limit.  Set to <= 0 to disable truncation.
         suppress_command_stdout: When True, never log stdout/stderr from commands (overrides
             log_level and quiet). Driver logging is unchanged.
+        use_srun: When True, prepend Slurm srun to all commands and enforce timeout via
+            srun --time=00:n, bypassing multiprocessing-based timeout handling.
     """
 
     def __init__(
@@ -51,7 +53,8 @@ class SubprocessRunner:
         quiet: bool = False,
         timeout: int | None = None,
         output_char_limit: int = MAX_OUTPUT_CHAR_LIMIT,
-        suppress_command_stdout: bool = False
+        suppress_command_stdout: bool = False,
+        use_srun: bool = False,
     ) -> None:
         self.env = env
         self.log_level = log_level
@@ -59,6 +62,7 @@ class SubprocessRunner:
         self.timeout = timeout
         self.output_char_limit = output_char_limit
         self.suppress_command_stdout = suppress_command_stdout
+        self.use_srun = use_srun
 
     def run(self, command: list[str], cwd: str,
             quiet: bool | None = None) -> subprocess.CompletedProcess:
@@ -88,70 +92,109 @@ class SubprocessRunner:
         log_level = self.log_level
         timeout = self.timeout
 
-        logger.debug("Running command %s in directory %s", ' '.join(command), cwd)
+        if self.use_srun:
+            # Prepend srun and use --time=00:n for timeout; run directly (no multiprocessing).
+            srun_cmd = ["srun"]
+            if timeout is not None:
+                srun_cmd.append(f"--time=00:{timeout}")
+            full_command = srun_cmd + command
+            logger.debug("Running command %s in directory %s", ' '.join(full_command), cwd)
 
-        result_dir = tempfile.mkdtemp(prefix="gpa_bench_result_")
-        try:
-            worker = multiprocessing.Process(
-                target=self._run_subprocess,
-                args=(command, cwd, self.env, result_dir),
-                daemon=True,
-            )
-            worker.start()
-            worker.join(timeout=timeout)
-
-            if worker.is_alive():
-                worker.terminate()
-                worker.join(timeout=30)
-                if worker.is_alive():
-                    worker.kill()
-                    worker.join()
-                logger.error("Command %s timed out after %d seconds", ' '.join(command), timeout)
-                timeout_msg = f"TIMEOUT ({timeout} seconds)".encode()
-                return subprocess.CompletedProcess(
-                    args=command,
-                    returncode=-1,
-                    stdout=timeout_msg,
-                    stderr=timeout_msg,
-                )
-
-            returncode_path = os.path.join(result_dir, _RESULT_RETURNCODE_FILE)
-            if not os.path.exists(returncode_path):
-                logger.error("Command %s produced no result (worker exited with code %s)",
-                             ' '.join(command), worker.exitcode)
-                return subprocess.CompletedProcess(args=command, returncode=-1,
-                                                   stdout=None, stderr=None)
-
-            with open(returncode_path, "r", encoding="utf-8") as f:
-                returncode = int(f.read().strip())
-
-            stdout_path = os.path.join(result_dir, _RESULT_STDOUT_FILE)
-            stderr_path = os.path.join(result_dir, _RESULT_STDERR_FILE)
-
-            if os.path.exists(stdout_path):
+            result_dir = tempfile.mkdtemp(prefix="gpa_bench_result_")
+            try:
+                stdout_path = os.path.join(result_dir, _RESULT_STDOUT_FILE)
+                stderr_path = os.path.join(result_dir, _RESULT_STDERR_FILE)
+                with open(stdout_path, "wb") as out_f, open(stderr_path, "wb") as err_f:
+                    proc = subprocess.run(
+                        full_command,
+                        cwd=cwd,
+                        env=self.env,
+                        check=False,
+                        stdout=out_f,
+                        stderr=err_f,
+                    )
+                returncode = proc.returncode
                 with open(stdout_path, "rb") as f:
                     stdout_bytes = f.read()
-            else:
-                stdout_bytes = f"Could not find stdout file {stdout_path}".encode()
-
-            if os.path.exists(stderr_path):
                 with open(stderr_path, "rb") as f:
                     stderr_bytes = f.read()
-            else:
-                stderr_bytes = f"Could not find stderr file {stderr_path}".encode()
+                result = subprocess.CompletedProcess(
+                    args=command, returncode=returncode, stdout=stdout_bytes, stderr=stderr_bytes,
+                )
+            finally:
+                try:
+                    for name in os.listdir(result_dir):
+                        path = os.path.join(result_dir, name)
+                        if os.path.isfile(path):
+                            os.unlink(path)
+                    os.rmdir(result_dir)
+                except OSError:
+                    pass
+        else:
+            logger.debug("Running command %s in directory %s", ' '.join(command), cwd)
 
-            result = subprocess.CompletedProcess(
-                args=command, returncode=returncode, stdout=stdout_bytes, stderr=stderr_bytes,
-            )
-        finally:
+            result_dir = tempfile.mkdtemp(prefix="gpa_bench_result_")
             try:
-                for name in os.listdir(result_dir):
-                    path = os.path.join(result_dir, name)
-                    if os.path.isfile(path):
-                        os.unlink(path)
-                os.rmdir(result_dir)
-            except OSError:
-                pass
+                worker = multiprocessing.Process(
+                    target=self._run_subprocess,
+                    args=(command, cwd, self.env, result_dir),
+                    daemon=True,
+                )
+                worker.start()
+                worker.join(timeout=timeout)
+
+                if worker.is_alive():
+                    worker.terminate()
+                    worker.join(timeout=30)
+                    if worker.is_alive():
+                        worker.kill()
+                        worker.join()
+                    logger.error("Command %s timed out after %d seconds", ' '.join(command), timeout)
+                    timeout_msg = f"TIMEOUT ({timeout} seconds)".encode()
+                    return subprocess.CompletedProcess(
+                        args=command,
+                        returncode=-1,
+                        stdout=timeout_msg,
+                        stderr=timeout_msg,
+                    )
+
+                returncode_path = os.path.join(result_dir, _RESULT_RETURNCODE_FILE)
+                if not os.path.exists(returncode_path):
+                    logger.error("Command %s produced no result (worker exited with code %s)",
+                                 ' '.join(command), worker.exitcode)
+                    return subprocess.CompletedProcess(args=command, returncode=-1,
+                                                       stdout=None, stderr=None)
+
+                with open(returncode_path, "r", encoding="utf-8") as f:
+                    returncode = int(f.read().strip())
+
+                stdout_path = os.path.join(result_dir, _RESULT_STDOUT_FILE)
+                stderr_path = os.path.join(result_dir, _RESULT_STDERR_FILE)
+
+                if os.path.exists(stdout_path):
+                    with open(stdout_path, "rb") as f:
+                        stdout_bytes = f.read()
+                else:
+                    stdout_bytes = f"Could not find stdout file {stdout_path}".encode()
+
+                if os.path.exists(stderr_path):
+                    with open(stderr_path, "rb") as f:
+                        stderr_bytes = f.read()
+                else:
+                    stderr_bytes = f"Could not find stderr file {stderr_path}".encode()
+
+                result = subprocess.CompletedProcess(
+                    args=command, returncode=returncode, stdout=stdout_bytes, stderr=stderr_bytes,
+                )
+            finally:
+                try:
+                    for name in os.listdir(result_dir):
+                        path = os.path.join(result_dir, name)
+                        if os.path.isfile(path):
+                            os.unlink(path)
+                    os.rmdir(result_dir)
+                except OSError:
+                    pass
 
         if not self.suppress_command_stdout:
             if log_level == "DEBUG":

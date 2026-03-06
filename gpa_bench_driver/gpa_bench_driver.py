@@ -197,6 +197,7 @@ def run_driver_pass(
         timeout=config.timeout,
         output_char_limit=config.subprocess_output_char_limit,
         suppress_command_stdout=config.suppress_command_stdout,
+        use_srun=config.srun,
     )
 
     # Skip build/run/validate if only postprocessing
@@ -477,6 +478,7 @@ def run_driver(
     subprocess_output_char_limit: int = 25000,
     suppress_command_stdout: bool = False,
     no_sanitize: bool = False,
+    srun: bool = False,
 ) -> tuple[dict[str, AppResults], list[Operation], dict[str, list[DriverPassResult]]]:
     """Run the driver programmatically with the same interface as the CLI.
 
@@ -513,6 +515,8 @@ def run_driver(
                  log level or failure. Driver stdout/logging is unchanged. (default: False)
         no_sanitize: Do not run compute sanitizer checks before running the application
                      (default: False)
+        srun: When True, prepend Slurm srun to all commands and enforce timeout via
+              srun --time=00:n; bypasses multiprocessing-based timeout (default: False)
     Returns:
         Tuple of:
         - results: Dictionary mapping app names to AppResults
@@ -548,6 +552,7 @@ def run_driver(
         subprocess_output_char_limit=subprocess_output_char_limit,
         suppress_command_stdout=suppress_command_stdout,
         no_sanitize=no_sanitize,
+        srun=srun,
     )
 
     return run_driver_config(driver_config)
@@ -710,6 +715,12 @@ def parse_args() -> argparse.Namespace:
         "--no-sanitize",
         action="store_true",
         help="Do not run compute sanitizer checks before running the application",
+    )
+    parser.add_argument(
+        "--srun",
+        action="store_true",
+        help="Prepend Slurm srun to all commands and enforce timeout via srun --time=00:n; "
+        "bypasses multiprocessing-based timeout handling (for use inside sbatch/salloc).",
     )
     return parser.parse_args()
 
