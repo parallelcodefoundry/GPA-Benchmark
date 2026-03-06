@@ -350,7 +350,8 @@ def run_driver_pass(
     # Postprocess NSYS (either standalone or after profiling)
     if config.postprocess_nsys or (config.nsys and result.nsys_profile):
         postprocess_nsys_result = postprocess_nsys_app(
-            app, runner, config.num_samples, swap_config=swap_config or None, pbar=pbar
+            app, runner, config.num_samples, swap_config=swap_config or None, pbar=pbar,
+            retain_nsys_profiles=config.retain_nsys_profiles
         )
         result.nsys_post = postprocess_nsys_result is not None
         result.nsys_data = postprocess_nsys_result
@@ -465,6 +466,7 @@ def run_driver(
     swaps: str | None = None,
     detect_regions: bool = False,
     postprocess_nsys: bool = False,
+    retain_nsys_profiles: bool = False,
     num_samples: int = 3,
     output_file: str | None = None,
     temp_dir: str | None = None,
@@ -494,6 +496,7 @@ def run_driver(
         swaps: Path to the directory containing code files to swap in (default: None)
         detect_regions: Detect editable region markers in swap files (default: False)
         postprocess_nsys: Only postprocess nsys-rep file(s) (default: False)
+        retain_nsys_profiles: Keep .nsys-rep and .sqlite files after postprocessing (default: False)
         num_samples: Number of times to collect ncu/nsys profiles (default: 3)
         output_file: File to save the long results to (default: None, no output file will be saved)
         temp_dir: Temporary directory to use (default: None, uses /tmp)
@@ -534,6 +537,7 @@ def run_driver(
         swaps=swaps,
         detect_regions=detect_regions,
         postprocess_nsys=postprocess_nsys,
+        retain_nsys_profiles=retain_nsys_profiles,
         num_samples=num_samples,
         output_file=output_file,
         temp_dir=temp_dir,
@@ -645,6 +649,11 @@ def parse_args() -> argparse.Namespace:
         "--postprocess-nsys",
         action="store_true",
         help="Only postprocess nsys-rep file(s) found under profiles/, do not run the application",
+    )
+    parser.add_argument(
+        "--retain-nsys-profiles",
+        action="store_true",
+        help="Keep .nsys-rep and .sqlite profile files after postprocessing (default: delete them)",
     )
     parser.add_argument(
         "-n",

@@ -40,6 +40,7 @@ class DriverConfig:
         swaps: Path to the directory containing code files to swap in (default: None)
         detect_regions: Detect editable region markers in swap files (default: False)
         postprocess_nsys: Only postprocess nsys-rep file(s) (default: False)
+        retain_nsys_profiles: Keep .nsys-rep and .sqlite files after postprocessing (default: False)
         num_samples: Number of times to collect ncu/nsys profiles (default: 3)
         output_file: File to save the long results to (default: "driver_results.json")
         temp_dir: Temporary directory to use (default: None, uses /tmp)
@@ -66,6 +67,7 @@ class DriverConfig:
     swaps: str | None = None
     detect_regions: bool = False
     postprocess_nsys: bool = False
+    retain_nsys_profiles: bool = False
     num_samples: int = 3
     output_file: str | None = "driver_results.json"
     temp_dir: str | None = None
@@ -90,6 +92,7 @@ class DriverConfig:
         swaps: str | None,
         detect_regions: bool,
         postprocess_nsys: bool,
+        retain_nsys_profiles: bool,
         num_samples: int,
         output_file: str | None,
         temp_dir: str | None,
@@ -113,6 +116,7 @@ class DriverConfig:
         self.swaps = swaps
         self.detect_regions = detect_regions
         self.postprocess_nsys = postprocess_nsys
+        self.retain_nsys_profiles = retain_nsys_profiles
         self.num_samples = num_samples
         self.output_file = output_file
         self.temp_dir = temp_dir
@@ -146,6 +150,7 @@ class DriverConfig:
             swaps=args.swaps,
             detect_regions=args.detect_regions,
             postprocess_nsys=args.postprocess_nsys,
+            retain_nsys_profiles=args.retain_nsys_profiles,
             num_samples=args.num_samples,
             output_file=args.output_file,
             temp_dir=args.temp_dir,

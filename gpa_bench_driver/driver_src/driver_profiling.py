@@ -171,11 +171,14 @@ def _parse_ncu_args(app: dict) -> tuple[str, int]:
 
 def postprocess_nsys_app(app: dict, runner: SubprocessRunner, num_samples: int,
                          swap_config: SwapConfig | None = None,
-                         pbar: Any | None = None) -> list[dict[Hashable, Any]] | None:
+                         pbar: Any | None = None,
+                         retain_nsys_profiles: bool = False) -> list[dict[Hashable, Any]] | None:
     """Postprocess the Nsight Systems profile.
 
     Converts the nsys-rep file to SQLite format, extracts kernel data, and
-    returns data for the kernel of interest.
+    returns data for the kernel of interest. By default, deletes the .nsys-rep
+    and .sqlite profile files after postprocessing; set retain_nsys_profiles
+    to True to keep them.
 
     Args:
         app: Application configuration dictionary
@@ -183,6 +186,8 @@ def postprocess_nsys_app(app: dict, runner: SubprocessRunner, num_samples: int,
         num_samples: Number of times to collect profiles
         swap_config: Swap configuration containing the code to swap in
         pbar: Progress bar to update
+        retain_nsys_profiles: If True, keep .nsys-rep and .sqlite files after
+            postprocessing; if False (default), delete them after extraction.
 
     Returns:
         List of dictionaries of kernel data if successful, None otherwise
@@ -249,6 +254,17 @@ def postprocess_nsys_app(app: dict, runner: SubprocessRunner, num_samples: int,
         # This returns a dict where keys are column names and values are Series
         # For a single row, each Series contains one value
         kernel_rows.append(kernel_row.to_dict('records')[0])
+
+        # Delete profile files after extraction unless retaining them
+        if not retain_nsys_profiles:
+            try:
+                os.remove(nsys_rep_file)
+            except OSError as e:
+                logger.warning("Could not remove nsys-rep file %s: %s", nsys_rep_file, e)
+            try:
+                os.remove(sqlite_file)
+            except OSError as e:
+                logger.warning("Could not remove sqlite file %s: %s", sqlite_file, e)
 
         num_samples_finished += 1
         if pbar is not None:
