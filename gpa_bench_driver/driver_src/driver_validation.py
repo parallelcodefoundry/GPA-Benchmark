@@ -13,7 +13,7 @@ import subprocess
 logger = logging.getLogger("GPA-Benchmark")
 
 
-def _get_test_output(app: dict, result: subprocess.CompletedProcess, temp_dir: str) -> str:
+def _get_test_output(app: dict, result: subprocess.CompletedProcess, temp_dir: os.PathLike) -> str:
     """Get the test output from file or stdout.
 
     For apps that output to stdout (reference_output present, no test_output), the output is read
@@ -42,7 +42,7 @@ def _get_test_output(app: dict, result: subprocess.CompletedProcess, temp_dir: s
 
 
 def validate_app(app: dict, result: subprocess.CompletedProcess,
-                 temp_dir: str) -> tuple[bool, str | None]:
+                 temp_dir: os.PathLike) -> tuple[bool, str | None]:
     """Validate the application output.
 
     Supports multiple validation types:

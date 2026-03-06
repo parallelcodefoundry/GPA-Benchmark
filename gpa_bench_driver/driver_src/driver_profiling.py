@@ -49,7 +49,7 @@ def _update_pbar(pbar: Any | None, num_samples_finished: int, num_samples: int) 
             pbar()
 
 
-def nsys_profile_app(app: dict, runner: SubprocessRunner, temp_dir: str, num_samples: int,
+def nsys_profile_app(app: dict, runner: SubprocessRunner, temp_dir: os.PathLike, num_samples: int,
                      swap_config: SwapConfig | None = None,
                      pbar: Any | None = None) -> bool:
     """Profile the application with Nsight Systems.
@@ -95,7 +95,7 @@ def nsys_profile_app(app: dict, runner: SubprocessRunner, temp_dir: str, num_sam
     return True
 
 
-def ncu_profile_app(app: dict, runner: SubprocessRunner, temp_dir: str, num_samples: int,
+def ncu_profile_app(app: dict, runner: SubprocessRunner, temp_dir: os.PathLike, num_samples: int,
                     swap_config: SwapConfig | None = None,
                     pbar: Any | None = None) -> bool:
     """Profile the application with Nsight Compute.

@@ -14,7 +14,7 @@ from gpa_bench_driver.driver_src.driver_models import SwapConfig, FileSwap
 logger = logging.getLogger("GPA-Benchmark")
 
 
-def swap_file_in_app(swap_config: SwapConfig, temp_dir: str, detect_regions: bool) -> None:
+def swap_file_in_app(swap_config: SwapConfig, temp_dir: os.PathLike, detect_regions: bool) -> None:
     """Swap files in the application directory on disk.
 
     For each file in the swap configuration, backs up the original file. If the file
@@ -65,7 +65,7 @@ def swap_file_in_app(swap_config: SwapConfig, temp_dir: str, detect_regions: boo
                      file_swap.swap_file_src_path)
 
 
-def swap_file_out_app(app: dict, temp_dir: str, swap_config: SwapConfig | None = None) -> None:
+def swap_file_out_app(app: dict, temp_dir: os.PathLike, swap_config: SwapConfig | None = None) -> None:
     """Swap files out of the application directory on disk.
 
     Restores the original files from backup and removes the backup files.

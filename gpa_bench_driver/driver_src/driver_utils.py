@@ -1,18 +1,19 @@
-"""
-Utility Functions for GPA-Benchmark Driver
+"""Utility Functions for GPA-Benchmark Driver.
 
 This module provides utility functions for subprocess execution, path resolution,
 directory setup, and system detection. Subprocess results are transferred via
 disk (files written by the worker, read by the parent); no multiprocessing
 queues are used.
 """
+
+import faulthandler
 import logging
 import multiprocessing
 import os
+import signal
 import subprocess
 import tempfile
-import signal
-import faulthandler
+from pathlib import Path
 
 logger = logging.getLogger("GPA-Benchmark")
 
@@ -44,10 +45,12 @@ class SubprocessRunner:
             log_level and quiet). Driver logging is unchanged.
         use_srun: When True, prepend Slurm srun to all commands and enforce timeout via
             srun --time=00:n, bypassing multiprocessing-based timeout handling.
+
     """
 
     def __init__(
         self,
+        *,
         env: dict,
         log_level: str = "WARNING",
         quiet: bool = False,
@@ -56,6 +59,21 @@ class SubprocessRunner:
         suppress_command_stdout: bool = False,
         use_srun: bool = False,
     ) -> None:
+        """Initialize the SubprocessRunner.
+
+        Args:
+            env: Environment variables dictionary passed to every subprocess
+            log_level: Logging level controlling when stdout/stderr are emitted
+            quiet: Default quiet flag; suppresses INFO-level output on failure when True
+            timeout: Default timeout in seconds; None means no limit
+            output_char_limit: Maximum characters logged for stdout/stderr; characters are removed
+                from the middle to stay within the limit.  Set to <= 0 to disable truncation.
+            suppress_command_stdout: When True, never log stdout/stderr from commands (overrides
+                log_level and quiet). Driver logging is unchanged.
+            use_srun: When True, prepend Slurm srun to all commands and enforce timeout via
+                srun --time=00:n, bypassing multiprocessing-based timeout handling.
+
+        """
         self.env = env
         self.log_level = log_level
         self.quiet = quiet
@@ -64,8 +82,13 @@ class SubprocessRunner:
         self.suppress_command_stdout = suppress_command_stdout
         self.use_srun = use_srun
 
-    def run(self, command: list[str], cwd: str,
-            quiet: bool | None = None) -> subprocess.CompletedProcess:
+    def run(
+        self,
+        command: list[str],
+        cwd: os.PathLike,
+        *,
+        quiet: bool | None = None,
+    ) -> subprocess.CompletedProcess:
         """Execute a command and return the completed process.
 
         Stdout and stderr are always buffered through temporary files in the worker process to
@@ -86,6 +109,7 @@ class SubprocessRunner:
 
         Returns:
             CompletedProcess object with returncode, stdout, and stderr attributes.
+
         """
         faulthandler.enable()
         effective_quiet = self.quiet if quiet is None else quiet
@@ -98,14 +122,14 @@ class SubprocessRunner:
             if timeout is not None:
                 srun_cmd.append(f"--time=00:{timeout}")
             full_command = srun_cmd + command
-            logger.debug("Running command %s in directory %s", ' '.join(full_command), cwd)
+            logger.debug("Running command %s in directory %s", " ".join(full_command), cwd)
 
-            result_dir = tempfile.mkdtemp(prefix="gpa_bench_result_")
+            result_dir = Path(tempfile.mkdtemp(prefix="gpa_bench_result_"))
             try:
-                stdout_path = os.path.join(result_dir, _RESULT_STDOUT_FILE)
-                stderr_path = os.path.join(result_dir, _RESULT_STDERR_FILE)
-                with open(stdout_path, "wb") as out_f, open(stderr_path, "wb") as err_f:
-                    proc = subprocess.run(
+                stdout_path = result_dir / _RESULT_STDOUT_FILE
+                stderr_path = result_dir / _RESULT_STDERR_FILE
+                with stdout_path.open("wb") as out_f, stderr_path.open("wb") as err_f:
+                    proc = subprocess.run(  # noqa: S603
                         full_command,
                         cwd=cwd,
                         env=self.env,
@@ -114,26 +138,28 @@ class SubprocessRunner:
                         stderr=err_f,
                     )
                 returncode = proc.returncode
-                with open(stdout_path, "rb") as f:
+                with stdout_path.open("rb") as f:
                     stdout_bytes = f.read()
-                with open(stderr_path, "rb") as f:
+                with stderr_path.open("rb") as f:
                     stderr_bytes = f.read()
                 result = subprocess.CompletedProcess(
-                    args=command, returncode=returncode, stdout=stdout_bytes, stderr=stderr_bytes,
+                    args=command,
+                    returncode=returncode,
+                    stdout=stdout_bytes,
+                    stderr=stderr_bytes,
                 )
             finally:
                 try:
-                    for name in os.listdir(result_dir):
-                        path = os.path.join(result_dir, name)
-                        if os.path.isfile(path):
-                            os.unlink(path)
-                    os.rmdir(result_dir)
+                    for name in result_dir.iterdir():
+                        if name.is_file():
+                            name.unlink()
+                    result_dir.rmdir()
                 except OSError:
                     pass
         else:
-            logger.debug("Running command %s in directory %s", ' '.join(command), cwd)
+            logger.debug("Running command %s in directory %s", " ".join(command), cwd)
 
-            result_dir = tempfile.mkdtemp(prefix="gpa_bench_result_")
+            result_dir = Path(tempfile.mkdtemp(prefix="gpa_bench_result_"))
             try:
                 worker = multiprocessing.Process(
                     target=self._run_subprocess,
@@ -149,7 +175,11 @@ class SubprocessRunner:
                     if worker.is_alive():
                         worker.kill()
                         worker.join()
-                    logger.error("Command %s timed out after %d seconds", ' '.join(command), timeout)
+                    logger.error(
+                        "Command %s timed out after %d seconds",
+                        " ".join(command),
+                        timeout,
+                    )
                     timeout_msg = f"TIMEOUT ({timeout} seconds)".encode()
                     return subprocess.CompletedProcess(
                         args=command,
@@ -158,41 +188,50 @@ class SubprocessRunner:
                         stderr=timeout_msg,
                     )
 
-                returncode_path = os.path.join(result_dir, _RESULT_RETURNCODE_FILE)
-                if not os.path.exists(returncode_path):
-                    logger.error("Command %s produced no result (worker exited with code %s)",
-                                 ' '.join(command), worker.exitcode)
-                    return subprocess.CompletedProcess(args=command, returncode=-1,
-                                                       stdout=None, stderr=None)
+                returncode_path = result_dir / _RESULT_RETURNCODE_FILE
+                if not returncode_path.exists():
+                    logger.error(
+                        "Command %s produced no result (worker exited with code %s)",
+                        " ".join(command),
+                        worker.exitcode,
+                    )
+                    return subprocess.CompletedProcess(
+                        args=command,
+                        returncode=-1,
+                        stdout=None,
+                        stderr=None,
+                    )
 
-                with open(returncode_path, "r", encoding="utf-8") as f:
+                with returncode_path.open("r", encoding="utf-8") as f:
                     returncode = int(f.read().strip())
 
-                stdout_path = os.path.join(result_dir, _RESULT_STDOUT_FILE)
-                stderr_path = os.path.join(result_dir, _RESULT_STDERR_FILE)
+                stdout_path = result_dir / _RESULT_STDOUT_FILE
+                stderr_path = result_dir / _RESULT_STDERR_FILE
 
-                if os.path.exists(stdout_path):
-                    with open(stdout_path, "rb") as f:
+                if stdout_path.exists():
+                    with stdout_path.open("rb") as f:
                         stdout_bytes = f.read()
                 else:
                     stdout_bytes = f"Could not find stdout file {stdout_path}".encode()
 
-                if os.path.exists(stderr_path):
-                    with open(stderr_path, "rb") as f:
+                if stderr_path.exists():
+                    with stderr_path.open("rb") as f:
                         stderr_bytes = f.read()
                 else:
                     stderr_bytes = f"Could not find stderr file {stderr_path}".encode()
 
                 result = subprocess.CompletedProcess(
-                    args=command, returncode=returncode, stdout=stdout_bytes, stderr=stderr_bytes,
+                    args=command,
+                    returncode=returncode,
+                    stdout=stdout_bytes,
+                    stderr=stderr_bytes,
                 )
             finally:
                 try:
-                    for name in os.listdir(result_dir):
-                        path = os.path.join(result_dir, name)
-                        if os.path.isfile(path):
-                            os.unlink(path)
-                    os.rmdir(result_dir)
+                    for name in result_dir.iterdir():
+                        if name.is_file():
+                            name.unlink()
+                    result_dir.rmdir()
                 except OSError:
                     pass
 
@@ -208,52 +247,65 @@ class SubprocessRunner:
                         logger.info("Command stdout:\n%s", self.decode_and_limit(result.stdout))
                     if result.stderr:
                         logger.info("Command stderr:\n%s", self.decode_and_limit(result.stderr))
-        # else: suppress_command_stdout or WARNING/ERROR/CRITICAL — don't log command stdout/stderr
+        # else suppress_command_stdout or WARNING/ERROR/CRITICAL — don't log command stdout/stderr
 
         return result
 
     def _run_subprocess(
         self,
         command: list[str],
-        cwd: str,
+        cwd: os.PathLike,
         env: dict,
-        result_dir: str
+        result_dir: Path,
     ) -> None:
-        """Target function for a worker process that executes subprocess.run and writes results
-        to result_dir for the parent to read. Runs without a timeout; the parent enforces one.
+        """Run a subprocess and write results to result_dir, wraps subprocess.run().
 
-        Stdout and stderr are written to files under result_dir so the parent can read them from
-        disk. The worker only runs the subprocess and writes the returncode; it does not read
-        stdout/stderr back.
+        Target function for a worker process that executes subprocess.run and writes results to
+        result_dir for the parent to read. Runs without a timeout; the parent enforces one. Stdout
+        and stderr are written to files under result_dir so the parent can read them from disk. The
+        worker only runs the subprocess and writes the returncode; it does not read stdout/stderr
+        back.
+
+        Args:
+            command: Command to run as a list of strings
+            cwd: Working directory for the command
+            env: Environment variables dictionary passed to the subprocess
+            result_dir: Path to the directory where the results will be written
+
+        Returns:
+            None
+
         """
         faulthandler.enable()
         faulthandler.register(signal.SIGTERM)
-        stderr_path = os.path.join(result_dir, _RESULT_STDERR_FILE)
-        stdout_path = os.path.join(result_dir, _RESULT_STDOUT_FILE)
-        returncode_path = os.path.join(result_dir, _RESULT_RETURNCODE_FILE)
+        stderr_path = result_dir / _RESULT_STDERR_FILE
+        stdout_path = result_dir / _RESULT_STDOUT_FILE
+        returncode_path = result_dir / _RESULT_RETURNCODE_FILE
         try:
-            with open(stderr_path, "wb") as err_f, open(stdout_path, "wb") as out_f:
-                proc = subprocess.run(
-                    command, cwd=cwd, env=env, check=False, stdout=out_f, stderr=err_f
+            with stderr_path.open("wb") as err_f, stdout_path.open("wb") as out_f:
+                proc = subprocess.run(  # noqa: S603
+                    command, cwd=cwd, env=env, check=False, stdout=out_f, stderr=err_f,
                 )
             returncode = proc.returncode
-            with open(returncode_path, "w", encoding="utf-8") as f:
+            with returncode_path.open("w", encoding="utf-8") as f:
                 f.write(str(returncode))
-        except Exception as exc:  # pylint: disable=broad-except
-            with open(returncode_path, "w", encoding="utf-8") as f:
+        except Exception as exc:  # pylint: disable=broad-except # noqa: BLE001
+            with returncode_path.open("w", encoding="utf-8") as f:
                 f.write("-1")
-            with open(stderr_path, "wb") as f:
+            with stderr_path.open("wb") as f:
                 f.write(str(exc).encode())
 
     def decode_and_limit(self, raw: bytes | None) -> str:
-        """Decode a bytes object to a string and truncate it if it exceeds the output character
-           limit.
+        """Decode a bytes object to a string and truncate.
+
+        Truncates the string if it exceeds the output character limit.
 
         Args:
             raw: The bytes object to decode and truncate
 
         Returns:
             The decoded and truncated string
+
         """
         text = raw.decode("utf-8") if raw else ""
         return (
@@ -275,13 +327,14 @@ class SubprocessRunner:
 
         Returns:
             Truncated string, or original string if already within limit
+
         """
         if len(text) <= char_limit:
             return text
         half = char_limit // 2
         omitted = len(text) - char_limit
         placeholder = f"\n... [{omitted} characters omitted] ...\n"
-        return text[:half] + placeholder + text[len(text) - half:]
+        return text[:half] + placeholder + text[len(text) - half :]
 
 
 def stdout_uses_file(app: dict) -> bool:
@@ -294,11 +347,12 @@ def stdout_uses_file(app: dict) -> bool:
 
     Returns:
         True if the app's validation output comes from stdout (not a file)
+
     """
     return "reference_output" in app and "test_output" not in app
 
 
-def get_stdout_redirect_path(temp_dir: str) -> str:
+def get_stdout_redirect_path(temp_dir: os.PathLike) -> os.PathLike:
     """Get the path for the stdout redirect file in the temporary directory.
 
     Args:
@@ -306,11 +360,12 @@ def get_stdout_redirect_path(temp_dir: str) -> str:
 
     Returns:
         Absolute path to the stdout redirect file
+
     """
-    return os.path.join(temp_dir, _RESULT_STDOUT_FILE)
+    return Path(temp_dir) / _RESULT_STDOUT_FILE
 
 
-def get_bin_path(app: dict, temp_dir: str) -> str:
+def get_bin_path(app: dict, temp_dir: os.PathLike) -> os.PathLike:
     """Get the binary path for the application.
 
     Args:
@@ -319,13 +374,14 @@ def get_bin_path(app: dict, temp_dir: str) -> str:
 
     Returns:
         Absolute path to the application binary
+
     """
     if "run_path" in app:
-        return os.path.join(temp_dir, app["run_path"], app["run_command"].split()[0])
-    return os.path.join(temp_dir, app["path"], app["run_command"].split()[0])
+        return Path(temp_dir) / app["run_path"] / app["run_command"].split()[0]
+    return Path(temp_dir) / app["path"] / app["run_command"].split()[0]
 
 
-def get_build_path(app: dict, temp_dir: str) -> str:
+def get_build_path(app: dict, temp_dir: os.PathLike) -> os.PathLike:
     """Get the build path for the application.
 
     Args:
@@ -334,14 +390,14 @@ def get_build_path(app: dict, temp_dir: str) -> str:
 
     Returns:
         Path where the application should be built
+
     """
     if "build_path" in app:
-        return os.path.join(temp_dir, app["build_path"])
-    else:
-        return os.path.join(temp_dir, app["path"])
+        return Path(temp_dir) / app["build_path"]
+    return Path(temp_dir) / app["path"]
 
 
-def get_run_path(app: dict, temp_dir: str) -> str:
+def get_run_path(app: dict, temp_dir: os.PathLike) -> os.PathLike:
     """Get the run path for the application.
 
     Args:
@@ -350,31 +406,32 @@ def get_run_path(app: dict, temp_dir: str) -> str:
 
     Returns:
         Path where the application should be run from
+
     """
     if "run_path" in app:
-        return os.path.join(temp_dir, app["run_path"])
-    elif "build_path" in app:
-        return os.path.join(temp_dir, app["build_path"])
-    else:
-        return os.path.join(temp_dir, app["path"])
+        return Path(temp_dir) / app["run_path"]
+    if "build_path" in app:
+        return Path(temp_dir) / app["build_path"]
+    return Path(temp_dir) / app["path"]
 
 
-def setup_profile_dir() -> str:
-    """Setup the profile directory for storing profiling output files in the current working
-       directory.
+def setup_profile_dir() -> os.PathLike:
+    """Set up the profile directory.
 
-    Creates the directory if it doesn't exist.
+    Set up the profile directory for storing profiling output files in the current working
+    directory ("profiles" subdirectory). Creates the directory if it doesn't exist.
 
     Returns:
         Path to the profile directory
+
     """
-    profile_dir: str = os.path.join(os.getcwd(), "profiles")
-    if not os.path.exists(profile_dir):
-        os.makedirs(profile_dir)
+    profile_dir: Path = Path(Path.cwd()) / "profiles"
+    if not profile_dir.exists():
+        profile_dir.mkdir(parents=True, exist_ok=True)
     return profile_dir
 
 
-def detect_sm_version() -> int:
+def detect_sm_version(cuda_home: os.PathLike) -> int:
     """Detect SM version from nvidia-smi.
 
     Returns the SM version as a two-digit integer (e.g., 9.0 -> 90).
@@ -382,22 +439,23 @@ def detect_sm_version() -> int:
     Returns:
         The SM version as a two-digit integer
 
-    Raises:
-        No exceptions raised. If detection fails, prints a warning and returns 90 as default.
     """
     try:
-        result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"],
+        result = subprocess.run(  # noqa: S603
+            [
+                f"{cuda_home}/bin/nvidia-smi",
+                "--query-gpu=compute_cap",
+                "--format=csv,noheader",
+            ],
             capture_output=True,
             text=True,
-            check=True
+            check=True,
         )
         # Get the first line and remove whitespace
-        compute_cap = result.stdout.strip().split('\n')[0].strip()
+        compute_cap = result.stdout.strip().split("\n")[0].strip()
         # Remove decimal point (e.g., "9.0" -> "90")
-        sm_version_str = compute_cap.replace('.', '')
-        sm_version = int(sm_version_str)
-        return sm_version
+        sm_version_str = compute_cap.replace(".", "")
+        return int(sm_version_str)
     except (subprocess.CalledProcessError, ValueError, IndexError, FileNotFoundError) as e:
         logger.warning("Could not detect SM version from nvidia-smi (%s). Defaulting to 90.", e)
         return 90

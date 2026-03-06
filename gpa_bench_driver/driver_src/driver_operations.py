@@ -1,23 +1,22 @@
-"""
-Core Operations for GPA-Benchmark Driver
+"""Core Operations for GPA-Benchmark Driver.
 
 This module provides functions for building and running applications.
 """
 
-from enum import Enum
 import os
 import subprocess
+from enum import Enum
 
 from gpa_bench_driver.driver_src.driver_utils import (
     SubprocessRunner,
     get_bin_path,
-    get_run_path,
     get_build_path,
+    get_run_path,
 )
 
 
 def build_app(
-    app: dict, sm_version: int, no_clean: bool, runner: SubprocessRunner, temp_dir: str
+    app: dict, sm_version: int, no_clean: bool, runner: SubprocessRunner, temp_dir: os.PathLike,
 ) -> tuple[bool, subprocess.CompletedProcess]:
     """Build the application.
 
@@ -60,7 +59,7 @@ def build_app(
 
 
 def run_app(
-    app: dict, runner: SubprocessRunner, temp_dir: str
+    app: dict, runner: SubprocessRunner, temp_dir: os.PathLike,
 ) -> tuple[bool, subprocess.CompletedProcess]:
     """Run the application.
 
@@ -105,7 +104,7 @@ class SanitizeTool(Enum):
 def sanitize_app(
     app: dict,
     runner: SubprocessRunner,
-    temp_dir: str,
+    temp_dir: os.PathLike,
     tool: SanitizeTool,
 ) -> tuple[bool, subprocess.CompletedProcess]:
     """Sanitize the application with the specified tool.

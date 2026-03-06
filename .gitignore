@@ -70,3 +70,6 @@ profiles/
 __pycache__/
 
 *.json
+
+rodinia/backprop/reproducer.cu
+rodinia/backprop/reproducer

@@ -1,22 +1,22 @@
-"""
-Data Models for GPA-Benchmark Driver
+"""Data Models for GPA-Benchmark Driver.
 
 This module defines the data classes, enums, and result structures used throughout
 the driver system.
 """
 
-import logging
-from enum import Enum
-from dataclasses import dataclass
-from typing import Any
-from collections.abc import Hashable
 import argparse
+import logging
+import os
+from collections.abc import Hashable
+from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
+from typing import Any
 
 from numpy import mean
 
-from gpa_bench_driver.driver_src.driver_utils import detect_sm_version
-
 from gpa_bench_driver.driver_src.driver_operations import SanitizeTool
+from gpa_bench_driver.driver_src.driver_utils import detect_sm_version
 
 logger = logging.getLogger("GPA-Benchmark")
 
@@ -56,16 +56,17 @@ class DriverConfig:
         no_sanitize: Do not run compute sanitizer checks before running the app (default: False)
         srun: When True, prepend Slurm srun to all subprocess commands and use srun --time for
             timeout instead of multiprocessing-based timeout handling (default: False)
+
     """
 
     sm_version: int
     app: str = "all"
-    cuda_home: str | None = None
+    cuda_home: os.PathLike | None = None
     no_clean: bool = False
     build_only: bool = False
     nsys: bool = False
     ncu: bool = False
-    config: str = "driver_apps.yaml"
+    config: str | os.PathLike = "driver_apps.yaml"
     swaps: str | None = None
     detect_regions: bool = False
     postprocess_nsys: bool = False
@@ -86,12 +87,12 @@ class DriverConfig:
         self,
         app: str,
         sm_version: int | None,
-        cuda_home: str | None,
+        cuda_home: os.PathLike | None,
         no_clean: bool,
         build_only: bool,
         nsys: bool,
         ncu: bool,
-        config: str,
+        config: str | os.PathLike,
         swaps: str | None,
         detect_regions: bool,
         postprocess_nsys: bool,
@@ -110,8 +111,10 @@ class DriverConfig:
     ):
         logger.debug("Entering DriverConfig")
         self.app = app
-        self.sm_version = sm_version if sm_version is not None else detect_sm_version()
-        self.cuda_home = cuda_home
+        self.cuda_home = Path(cuda_home or "/usr/local/cuda")
+        self.sm_version = (
+            sm_version if sm_version is not None else detect_sm_version(self.cuda_home),
+        )[0]
         self.no_clean = no_clean
         self.build_only = build_only
         self.nsys = nsys

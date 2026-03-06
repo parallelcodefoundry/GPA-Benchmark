@@ -1,12 +1,13 @@
-"""
-Reporting Functions for GPA-Benchmark Driver
+"""Reporting Functions for GPA-Benchmark Driver.
 
 This module provides functions for displaying results and saving output to files.
 """
 import json
 import logging
+import os
+from pathlib import Path
 
-from gpa_bench_driver.driver_src.driver_models import AppResults, Operation, DriverPassResult
+from gpa_bench_driver.driver_src.driver_models import AppResults, DriverPassResult, Operation
 
 logger = logging.getLogger("GPA-Benchmark")
 
@@ -17,12 +18,13 @@ def print_report_table(results: dict[str, AppResults], operations: list[Operatio
     Args:
         results: Dictionary mapping application names to AppResults objects
         operations: List of operations to display in the table
+
     """
     if not results:
         return
 
     # Determine column widths
-    app_name_width = max(len(app_name) for app_name in results.keys())
+    app_name_width = max(len(app_name) for app_name in results)
     app_name_width = max(app_name_width, len("Application"))
     col_width = max(len(op.value) for op in operations) if operations else 10
     col_width = max(col_width, 8)
@@ -55,21 +57,20 @@ def print_report_table(results: dict[str, AppResults], operations: list[Operatio
     logger.info("")
 
 
-def save_results(long_results: dict[str, list[DriverPassResult]], output_file: str) -> None:
+def save_results(
+    long_results: dict[str, list[DriverPassResult]], output_file: os.PathLike,
+) -> None:
     """Save the long results to a JSON file.
 
     Args:
         long_results: Dictionary mapping application names to lists of DriverPassResult objects
         output_file: Path to the output JSON file
 
-    Raises:
-        IOError: If the file cannot be written
     """
     # Flatten the results into a single list
     all_results = []
     for results in long_results.values():
-        for result in results:
-            all_results.append(result.to_dict())
+        all_results.extend([r.to_dict() for r in results])
 
-    with open(output_file, "w", encoding="utf-8") as f:
+    with Path(output_file).open("w", encoding="utf-8") as f:
         json.dump(all_results, f, indent=4)
