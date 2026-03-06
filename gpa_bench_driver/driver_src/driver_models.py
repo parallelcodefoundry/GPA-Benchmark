@@ -66,14 +66,14 @@ class DriverConfig:
     build_only: bool = False
     nsys: bool = False
     ncu: bool = False
-    config: str | os.PathLike = "driver_apps.yaml"
-    swaps: str | None = None
+    config: os.PathLike = Path("driver_apps.yaml")
+    swaps: os.PathLike | None = None
     detect_regions: bool = False
     postprocess_nsys: bool = False
     retain_nsys_profiles: bool = False
     num_samples: int = 3
-    output_file: str | None = "driver_results.json"
-    temp_dir: str | None = None
+    output_file: os.PathLike | None = Path("driver_results.json")
+    temp_dir: os.PathLike | None = None
     log_level: str = "WARNING"
     no_progress: bool = False
     swaps_override: dict[str, str] | None = None
@@ -92,14 +92,14 @@ class DriverConfig:
         build_only: bool,
         nsys: bool,
         ncu: bool,
-        config: str | os.PathLike,
-        swaps: str | None,
+        config: os.PathLike,
+        swaps: os.PathLike | None,
         detect_regions: bool,
         postprocess_nsys: bool,
         retain_nsys_profiles: bool,
         num_samples: int,
-        output_file: str | None,
-        temp_dir: str | None,
+        output_file: os.PathLike | None,
+        temp_dir: os.PathLike | None,
         log_level: str,
         no_progress: bool,
         swaps_override: dict[str, str] | None = None,
@@ -119,14 +119,14 @@ class DriverConfig:
         self.build_only = build_only
         self.nsys = nsys
         self.ncu = ncu
-        self.config = config
-        self.swaps = swaps
+        self.config = Path(config)
+        self.swaps = Path(swaps) if swaps is not None else None
         self.detect_regions = detect_regions
         self.postprocess_nsys = postprocess_nsys
         self.retain_nsys_profiles = retain_nsys_profiles
         self.num_samples = num_samples
-        self.output_file = output_file
-        self.temp_dir = temp_dir
+        self.output_file = Path(output_file) if output_file is not None else None
+        self.temp_dir = Path(temp_dir) if temp_dir is not None else None
         self.log_level = log_level
         self.no_progress = no_progress
         self.swaps_override = swaps_override

@@ -56,7 +56,11 @@ from gpa_bench_driver.driver_src.driver_profiling import (
     postprocess_nsys_app,
 )
 from gpa_bench_driver.driver_src.driver_reporting import print_report_table, save_results
-from gpa_bench_driver.driver_src.driver_utils import SubprocessRunner, get_bin_path
+from gpa_bench_driver.driver_src.driver_utils import (
+    SubprocessRunner,
+    SubprocessRunnerConfig,
+    get_bin_path,
+)
 from gpa_bench_driver.driver_src.driver_validation import validate_app
 
 logger = logging.getLogger("GPA-Benchmark")
@@ -226,14 +230,14 @@ def run_driver_pass(
     else:
         result.swap_file_src_path = None
 
-    runner = SubprocessRunner(
-        env=env,
+    runner_config = SubprocessRunnerConfig(
         log_level=config.log_level,
         timeout=config.timeout,
         output_char_limit=config.subprocess_output_char_limit,
         suppress_command_stdout=config.suppress_command_stdout,
         use_srun=config.srun,
     )
+    runner = SubprocessRunner(env=env, config=runner_config)
 
     # Skip build/run/validate if only postprocessing
     if not config.postprocess_nsys:
@@ -527,7 +531,7 @@ def run_driver(
     postprocess_nsys: bool = False,
     retain_nsys_profiles: bool = False,
     num_samples: int = 3,
-    output_file: str | None = None,
+    output_file: os.PathLike | None = None,
     temp_dir: str | None = None,
     log_level: str = "WARNING",
     no_progress: bool = True,
@@ -677,7 +681,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--cuda-home",
-        type=str,
+        type=Path,
         default=None,
         help="Path to the CUDA installation to use",
     )
@@ -704,13 +708,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--config",
-        type=str,
+        type=Path,
         default="driver_apps.yaml",
         help="The app config file to use (default: driver_apps.yaml)",
     )
     parser.add_argument(
         "--swaps",
-        type=str,
+        type=Path,
         default=None,
         help="The path to the directory containing code files to swap in for the "
         "kernel, with the filename being run_<num>_optimized_code_<num>.cu",
@@ -742,14 +746,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "-o",
         "--output-file",
-        type=str,
+        type=Path,
         default="driver_results.json",
         help="The file to save the long results to (default: driver_results.json)",
     )
     parser.add_argument(
         "-t",
         "--temp-dir",
-        type=str,
+        type=Path,
         default=None,
         help="The temporary directory to use for the driver, must exist (default: /tmp)",
     )
