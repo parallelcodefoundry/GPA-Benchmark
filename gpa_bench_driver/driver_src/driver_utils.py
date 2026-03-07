@@ -10,6 +10,7 @@ import faulthandler
 import logging
 import multiprocessing
 import os
+import shutil
 import signal
 import subprocess
 import tempfile
@@ -442,7 +443,25 @@ def setup_profile_dir() -> Path:
     return profile_dir
 
 
-def detect_sm_version() -> int:
+def detect_cuda_home() -> Path | None:
+    """Detect CUDA install directory from the location of nvcc.
+
+    Uses the path two parents up from the executable returned by 'which nvcc'
+    (e.g. /usr/local/cuda/bin/nvcc -> /usr/local/cuda).
+
+    Returns:
+        The CUDA install directory path, or None if nvcc is not found or path
+        cannot be derived.
+
+    """
+    nvcc_path = shutil.which("nvcc")
+    if not nvcc_path:
+        return None
+    path = Path(nvcc_path).resolve()
+    return path.parent.parent
+
+
+def detect_sm_version() -> int | None:
     """Detect SM version from nvidia-smi.
 
     Returns the SM version as a two-digit integer (e.g., 9.0 -> 90).
@@ -451,22 +470,21 @@ def detect_sm_version() -> int:
         The SM version as a two-digit integer
 
     """
-    try:
-        result = subprocess.run(
-            [  # noqa: S607
-                "nvidia-smi",
-                "--query-gpu=compute_cap",
-                "--format=csv,noheader",
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        # Get the first line and remove whitespace
-        compute_cap = result.stdout.strip().split("\n")[0].strip()
-        # Remove decimal point (e.g., "9.0" -> "90")
-        sm_version_str = compute_cap.replace(".", "")
-        return int(sm_version_str)
-    except (subprocess.CalledProcessError, ValueError, IndexError, FileNotFoundError) as e:
-        logger.warning("Could not detect SM version from nvidia-smi (%s). Defaulting to 90.", e)
-        return 90
+    nvidia_smi_path = shutil.which("nvidia-smi")
+    if not nvidia_smi_path:
+        return None
+    result = subprocess.run(
+        [  # noqa: S607
+            "nvidia-smi",
+            "--query-gpu=compute_cap",
+            "--format=csv,noheader",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    # Get the first line and remove whitespace
+    compute_cap = result.stdout.strip().split("\n")[0].strip()
+    # Remove decimal point (e.g., "9.0" -> "90")
+    sm_version_str = compute_cap.replace(".", "")
+    return int(sm_version_str)

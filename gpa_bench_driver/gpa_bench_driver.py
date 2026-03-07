@@ -565,38 +565,6 @@ def run_all(
 
 
 def run_driver(
-    config: DriverConfig | None = None,
-    **kwargs: object,
-) -> tuple[dict[str, AppResults], list[Operation], dict[str, list[DriverPassResult]]]:
-    """Run the driver programmatically with the same interface as the CLI.
-
-    Pass either a single DriverConfig or the same keyword arguments as the CLI.
-    When using kwargs, omitted keys use defaults (e.g. app="all", nsys=False).
-
-    Supported kwargs: app, sm_version, cuda_home, no_clean, build_only, nsys, ncu,
-    config, swaps, detect_regions, postprocess_nsys, retain_nsys_profiles, num_samples,
-    output_file, temp_dir, log_level, no_progress, swaps_override, timeout,
-    subprocess_output_char_limit, suppress_command_stdout, no_sanitize, srun.
-
-    Returns:
-        Tuple of (results, operations, long_results).
-
-    Raises:
-        ValueError: If configuration is invalid
-        FileNotFoundError: If required files don't exist
-
-    """
-    logger.debug("Entering run_driver")
-    if config is None:
-        kwargs.setdefault(
-            "config",
-            Path(__file__).parent.parent / "driver_apps.yaml",
-        )
-        config = DriverConfig.from_kwargs(**kwargs)
-    return run_driver_config(config)
-
-
-def run_driver_config(
     config: DriverConfig,
 ) -> tuple[dict[str, AppResults], list[Operation], dict[str, list[DriverPassResult]]]:
     """Run the driver with a DriverConfig object.
@@ -611,7 +579,8 @@ def run_driver_config(
         - long_results: Dictionary mapping app names to lists of DriverPassResult objects
 
     """
-    logger.debug("Entering run_driver_config")
+    logger.debug("Entering run_driver")
+
     # Setup configuration
     app_config, swaps_dict, env = setup_app_config(config)
 
@@ -796,8 +765,8 @@ def main() -> None:
     # Convert argparse.Namespace to DriverConfig
     driver_config = DriverConfig.from_args(args)
 
-    # Call run_driver_config with the driver_config
-    run_driver_config(driver_config)
+    # Run the driver with the created DriverConfig object
+    run_driver(driver_config)
 
 
 if __name__ == "__main__":

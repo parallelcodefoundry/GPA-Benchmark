@@ -16,7 +16,7 @@ from typing import Any
 from numpy import mean
 
 from gpa_bench_driver.driver_src.driver_operations import SanitizeTool
-from gpa_bench_driver.driver_src.driver_utils import detect_sm_version
+from gpa_bench_driver.driver_src.driver_utils import detect_cuda_home, detect_sm_version
 
 logger = logging.getLogger("GPA-Benchmark")
 
@@ -114,11 +114,8 @@ class DriverConfig:
         """Initialize a DriverConfig object."""
         logger.debug("Entering DriverConfig")
         self.app = app
-        self.cuda_home = Path(cuda_home or "/usr/local/cuda")
-        if sm_version is None:
-            self.sm_version = detect_sm_version()
-        else:
-            self.sm_version = sm_version
+        self.cuda_home = Path(cuda_home or detect_cuda_home() or "/usr/local/cuda")
+        self.sm_version = sm_version or detect_sm_version() or 90
         self.no_clean = no_clean
         self.build_only = build_only
         self.nsys = nsys
@@ -174,66 +171,6 @@ class DriverConfig:
             suppress_command_stdout=args.suppress_command_stdout,
             no_sanitize=args.no_sanitize,
             srun=args.srun,
-        )
-
-    @classmethod
-    def from_kwargs(cls, **kwargs: Any) -> "DriverConfig":
-        """Create a DriverConfig from keyword arguments (e.g. for programmatic API).
-
-        Supports the same keys as the CLI. Omitted keys use the same defaults as run_driver.
-        """
-        defaults: dict[str, Any] = {
-            "app": "all",
-            "sm_version": None,
-            "cuda_home": None,
-            "no_clean": False,
-            "build_only": False,
-            "nsys": False,
-            "ncu": False,
-            "config": Path("driver_apps.yaml"),
-            "swaps": None,
-            "detect_regions": False,
-            "postprocess_nsys": False,
-            "retain_nsys_profiles": False,
-            "num_samples": 3,
-            "output_file": None,
-            "temp_dir": None,
-            "log_level": "WARNING",
-            "no_progress": True,
-            "swaps_override": None,
-            "timeout": 300,
-            "subprocess_output_char_limit": 25000,
-            "suppress_command_stdout": False,
-            "no_sanitize": False,
-            "srun": False,
-        }
-        merged = {**defaults, **kwargs}
-        timeout_val = merged["timeout"]
-        config_path = merged["config"] or Path("driver_apps.yaml")
-        return cls(
-            app=merged["app"],
-            sm_version=merged["sm_version"],
-            cuda_home=merged["cuda_home"],
-            no_clean=merged["no_clean"],
-            build_only=merged["build_only"],
-            nsys=merged["nsys"],
-            ncu=merged["ncu"],
-            config=config_path,
-            swaps=merged["swaps"],
-            detect_regions=merged["detect_regions"],
-            postprocess_nsys=merged["postprocess_nsys"],
-            retain_nsys_profiles=merged["retain_nsys_profiles"],
-            num_samples=merged["num_samples"],
-            output_file=merged["output_file"],
-            temp_dir=merged["temp_dir"],
-            log_level=merged["log_level"],
-            no_progress=merged["no_progress"],
-            swaps_override=merged["swaps_override"],
-            timeout=timeout_val if timeout_val is not None and timeout_val > 0 else None,
-            subprocess_output_char_limit=merged["subprocess_output_char_limit"],
-            suppress_command_stdout=merged["suppress_command_stdout"],
-            no_sanitize=merged["no_sanitize"],
-            srun=merged["srun"],
         )
 
 
