@@ -619,13 +619,14 @@ def parse_args() -> argparse.Namespace:
         "--sm-version",
         type=int,
         default=None,
-        help="The SM version to use (default: None, will auto-detect from nvidia-smi)",
+        help="The SM version to use (default: None, will auto-detect from nvidia-smi, then 90)",
     )
     parser.add_argument(
         "--cuda-home",
         type=Path,
         default=None,
-        help="Path to the CUDA installation to use",
+        help="Path to the CUDA installation to use (default: None, will auto-detect from "
+        "environment PATH, then /usr/local/cuda)",
     )
     parser.add_argument(
         "--no-clean",
@@ -651,8 +652,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=Path,
-        default="driver_apps.yaml",
-        help="The app config file to use (default: driver_apps.yaml)",
+        default=None,
+        help="The app config file to use (default: driver_apps.yaml in the same directory as "
+        "this script)",
     )
     parser.add_argument(
         "--swaps",

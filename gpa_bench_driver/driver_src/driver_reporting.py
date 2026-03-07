@@ -4,7 +4,6 @@ This module provides functions for displaying results and saving output to files
 """
 import json
 import logging
-import os
 from pathlib import Path
 
 from gpa_bench_driver.driver_src.driver_models import AppResults, DriverPassResult, Operation
@@ -58,7 +57,7 @@ def print_report_table(results: dict[str, AppResults], operations: list[Operatio
 
 
 def save_results(
-    long_results: dict[str, list[DriverPassResult]], output_file: os.PathLike,
+    long_results: dict[str, list[DriverPassResult]], output_file: Path,
 ) -> None:
     """Save the long results to a JSON file.
 
@@ -72,5 +71,5 @@ def save_results(
     for results in long_results.values():
         all_results.extend([r.to_dict() for r in results])
 
-    with Path(output_file).open("w", encoding="utf-8") as f:
+    with output_file.open("w", encoding="utf-8") as f:
         json.dump(all_results, f, indent=4)

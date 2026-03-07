@@ -6,7 +6,6 @@ the driver system.
 
 import argparse
 import logging
-import os
 from collections.abc import Hashable
 from dataclasses import dataclass
 from enum import Enum
@@ -16,7 +15,11 @@ from typing import Any
 from numpy import mean
 
 from gpa_bench_driver.driver_src.driver_operations import SanitizeTool
-from gpa_bench_driver.driver_src.driver_utils import detect_cuda_home, detect_sm_version
+from gpa_bench_driver.driver_src.driver_utils import (
+    detect_cuda_home,
+    detect_sm_version,
+    get_default_apps_config_path,
+)
 
 logger = logging.getLogger("GPA-Benchmark")
 
@@ -61,20 +64,20 @@ class DriverConfig:
     """
 
     app: str
-    sm_version: int | None
-    cuda_home: os.PathLike | None
+    sm_version: int
+    cuda_home: Path
     no_clean: bool
     build_only: bool
     nsys: bool
     ncu: bool
-    config: os.PathLike
-    swaps: os.PathLike | None
+    config: Path
+    swaps: Path | None
     detect_regions: bool
     postprocess_nsys: bool
     retain_nsys_profiles: bool
     num_samples: int
-    output_file: os.PathLike | None
-    temp_dir: os.PathLike | None
+    output_file: Path | None
+    temp_dir: Path | None
     log_level: str
     no_progress: bool
     swaps_override: dict[Path, str] | None
@@ -89,19 +92,19 @@ class DriverConfig:
         *,
         app: str = "all",
         sm_version: int | None = None,
-        cuda_home: os.PathLike | None = None,
+        cuda_home: Path | None = None,
         no_clean: bool = False,
         build_only: bool = False,
         nsys: bool = False,
         ncu: bool = False,
-        config: os.PathLike = Path("driver_apps.yaml"),
-        swaps: os.PathLike | None = None,
+        config: Path | None = None,
+        swaps: Path | None = None,
         detect_regions: bool = False,
         postprocess_nsys: bool = False,
         retain_nsys_profiles: bool = False,
         num_samples: int = 3,
-        output_file: os.PathLike | None = None,
-        temp_dir: os.PathLike | None = None,
+        output_file: Path | None = None,
+        temp_dir: Path | None = None,
         log_level: str = "WARNING",
         no_progress: bool = False,
         swaps_override: dict[Path, str] | None = None,
@@ -120,7 +123,7 @@ class DriverConfig:
         self.build_only = build_only
         self.nsys = nsys
         self.ncu = ncu
-        self.config = Path(config)
+        self.config = Path(config) if config is not None else get_default_apps_config_path()
         self.swaps = Path(swaps) if swaps is not None else None
         self.detect_regions = detect_regions
         self.postprocess_nsys = postprocess_nsys
@@ -151,19 +154,21 @@ class DriverConfig:
         return cls(
             app=args.app,
             sm_version=args.sm_version,
-            cuda_home=args.cuda_home,
+            cuda_home=Path(args.cuda_home) if args.cuda_home is not None else None,
             no_clean=args.no_clean,
             build_only=args.build_only,
             nsys=args.nsys,
             ncu=args.ncu,
-            config=args.config,
-            swaps=args.swaps,
+            config=Path(args.config)
+            if args.config is not None
+            else get_default_apps_config_path(),
+            swaps=Path(args.swaps) if args.swaps is not None else None,
             detect_regions=args.detect_regions,
             postprocess_nsys=args.postprocess_nsys,
             retain_nsys_profiles=args.retain_nsys_profiles,
             num_samples=args.num_samples,
-            output_file=args.output_file,
-            temp_dir=args.temp_dir,
+            output_file=Path(args.output_file) if args.output_file is not None else None,
+            temp_dir=Path(args.temp_dir) if args.temp_dir is not None else None,
             log_level=args.log_level,
             no_progress=args.no_progress,
             timeout=args.timeout if args.timeout is not None and args.timeout > 0 else None,

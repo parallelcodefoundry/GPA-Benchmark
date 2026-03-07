@@ -9,7 +9,6 @@ queues are used.
 import faulthandler
 import logging
 import multiprocessing
-import os
 import shutil
 import signal
 import subprocess
@@ -91,7 +90,7 @@ class SubprocessRunner:
     def run(
         self,
         command: list[str],
-        cwd: os.PathLike,
+        cwd: Path,
         *,
         quiet: bool | None = None,
     ) -> subprocess.CompletedProcess:
@@ -131,7 +130,7 @@ class SubprocessRunner:
     def _run_with_srun(
         self,
         command: list[str],
-        cwd: os.PathLike,
+        cwd: Path,
     ) -> subprocess.CompletedProcess:
         """Run command under srun with optional --time; no multiprocessing."""
         srun_cmd = ["srun"]
@@ -169,7 +168,7 @@ class SubprocessRunner:
     def _run_with_multiprocessing(
         self,
         command: list[str],
-        cwd: os.PathLike,
+        cwd: Path,
     ) -> subprocess.CompletedProcess:
         """Run command in a worker process with multiprocessing-based timeout."""
         logger.debug("Running command %s in directory %s", " ".join(command), cwd)
@@ -239,7 +238,7 @@ class SubprocessRunner:
     def _run_subprocess(
         self,
         command: list[str],
-        cwd: os.PathLike,
+        cwd: Path,
         env: dict,
         result_dir: Path,
     ) -> None:
@@ -313,7 +312,6 @@ class SubprocessRunner:
         placeholder = f"\n... [{omitted} characters omitted] ...\n"
         return text[:half] + placeholder + text[len(text) - half :]
 
-
     def _cleanup_result_dir(self, result_dir: Path) -> None:
         """Remove temporary result directory and its contents."""
         try:
@@ -323,7 +321,6 @@ class SubprocessRunner:
             result_dir.rmdir()
         except OSError:
             pass
-
 
     def _read_worker_result(
         self,
@@ -488,3 +485,13 @@ def detect_sm_version() -> int | None:
     # Remove decimal point (e.g., "9.0" -> "90")
     sm_version_str = compute_cap.replace(".", "")
     return int(sm_version_str)
+
+
+def get_default_apps_config_path() -> Path:
+    """Get the default apps config path.
+
+    Returns:
+        The default apps config path
+
+    """
+    return Path(__file__).parent.parent.parent / "driver_apps.yaml"

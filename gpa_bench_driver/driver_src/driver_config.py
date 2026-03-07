@@ -93,7 +93,7 @@ def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] 
         raise OperationCombinationError(msg)
 
     # Load config file
-    with Path(config.config).open("r", encoding="utf-8") as f:
+    with config.config.open("r", encoding="utf-8") as f:
         app_config: dict = yaml.safe_load(f)
 
     logger.debug("App config loaded")
@@ -129,7 +129,7 @@ def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] 
         return app_config, swaps_dict, env
 
     if config.swaps:
-        swaps_dict = build_swaps_dict(Path(config.swaps), config.app, app_config)
+        swaps_dict = build_swaps_dict(config.swaps, config.app, app_config)
         return app_config, swaps_dict, env
 
     return app_config, None, env

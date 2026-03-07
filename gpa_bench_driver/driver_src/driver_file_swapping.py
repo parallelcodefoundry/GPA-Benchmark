@@ -4,7 +4,6 @@ This module handles swapping code files in and out of applications for testing o
 """
 
 import logging
-import os
 import re
 import shutil
 from pathlib import Path
@@ -289,7 +288,7 @@ def build_swaps_dict(
 
     """
     logger.debug("Entering build_swaps_dict")
-    grouped_files = _find_grouped_files(swaps) if isinstance(swaps, os.PathLike) else swaps
+    grouped_files = _find_grouped_files(swaps) if isinstance(swaps, Path) else swaps
     return _build_swaps_dict_from_grouped_files(grouped_files, app_config, app)
 
 
