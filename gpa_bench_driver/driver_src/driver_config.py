@@ -12,6 +12,7 @@ import yaml
 
 from gpa_bench_driver.driver_src.driver_file_swapping import build_swaps_dict
 from gpa_bench_driver.driver_src.driver_models import DriverConfig, Operation, SwapConfig
+from gpa_bench_driver.driver_src.driver_utils import get_default_apps_config_path
 
 logger = logging.getLogger("GPA-Benchmark")
 
@@ -150,7 +151,7 @@ def get_canonical_app_name(
 
     """
     if config is None:
-        config = Path(__file__).parent.parent / "driver_apps.yaml"
+        config = get_default_apps_config_path()
     if isinstance(config, Path):
         with config.open("r", encoding="utf-8") as f:
             app_config = yaml.safe_load(f)
