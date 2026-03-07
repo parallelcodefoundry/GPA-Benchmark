@@ -40,7 +40,8 @@ class DriverConfig:
         swaps: Path to the directory containing code files to swap in (default: None)
         detect_regions: Detect editable region markers in swap files (default: False)
         postprocess_nsys: Only postprocess nsys-rep file(s) (default: False)
-        retain_nsys_profiles: Keep .nsys-rep and .sqlite files after postprocessing (default: False)
+        retain_nsys_profiles: Keep .nsys-rep and .sqlite files after postprocessing (default:
+                              False)
         num_samples: Number of times to collect ncu/nsys profiles (default: 3)
         output_file: File to save the long results to (default: "driver_results.json")
         temp_dir: Temporary directory to use (default: None, uses /tmp)
@@ -76,7 +77,7 @@ class DriverConfig:
     temp_dir: os.PathLike | None = None
     log_level: str = "WARNING"
     no_progress: bool = False
-    swaps_override: dict[str, str] | None = None
+    swaps_override: dict[Path, str] | None = None
     timeout: int | None = 300  # 5 minutes
     subprocess_output_char_limit: int = 25000
     suppress_command_stdout: bool = False
@@ -85,8 +86,9 @@ class DriverConfig:
 
     def __init__(
         self,
+        *,
         app: str,
-        sm_version: int | None,
+        sm_version: int | None = None,
         cuda_home: os.PathLike | None,
         no_clean: bool,
         build_only: bool,
@@ -102,19 +104,21 @@ class DriverConfig:
         temp_dir: os.PathLike | None,
         log_level: str,
         no_progress: bool,
-        swaps_override: dict[str, str] | None = None,
+        swaps_override: dict[Path, str] | None = None,
         timeout: int | None = 300,  # 5 minutes
         subprocess_output_char_limit: int = 25000,
         suppress_command_stdout: bool = False,
         no_sanitize: bool = False,
         srun: bool = False,
-    ):
+    ) -> None:
+        """Initialize a DriverConfig object."""
         logger.debug("Entering DriverConfig")
         self.app = app
         self.cuda_home = Path(cuda_home or "/usr/local/cuda")
-        self.sm_version = (
-            sm_version if sm_version is not None else detect_sm_version(self.cuda_home),
-        )[0]
+        if sm_version is None:
+            self.sm_version = detect_sm_version()
+        else:
+            self.sm_version = sm_version
         self.no_clean = no_clean
         self.build_only = build_only
         self.nsys = nsys
@@ -145,6 +149,7 @@ class DriverConfig:
 
         Returns:
             DriverConfig object
+
         """
         return cls(
             app=args.app,
@@ -171,6 +176,66 @@ class DriverConfig:
             srun=args.srun,
         )
 
+    @classmethod
+    def from_kwargs(cls, **kwargs: Any) -> "DriverConfig":
+        """Create a DriverConfig from keyword arguments (e.g. for programmatic API).
+
+        Supports the same keys as the CLI. Omitted keys use the same defaults as run_driver.
+        """
+        defaults: dict[str, Any] = {
+            "app": "all",
+            "sm_version": None,
+            "cuda_home": None,
+            "no_clean": False,
+            "build_only": False,
+            "nsys": False,
+            "ncu": False,
+            "config": Path("driver_apps.yaml"),
+            "swaps": None,
+            "detect_regions": False,
+            "postprocess_nsys": False,
+            "retain_nsys_profiles": False,
+            "num_samples": 3,
+            "output_file": None,
+            "temp_dir": None,
+            "log_level": "WARNING",
+            "no_progress": True,
+            "swaps_override": None,
+            "timeout": 300,
+            "subprocess_output_char_limit": 25000,
+            "suppress_command_stdout": False,
+            "no_sanitize": False,
+            "srun": False,
+        }
+        merged = {**defaults, **kwargs}
+        timeout_val = merged["timeout"]
+        config_path = merged["config"] or Path("driver_apps.yaml")
+        return cls(
+            app=merged["app"],
+            sm_version=merged["sm_version"],
+            cuda_home=merged["cuda_home"],
+            no_clean=merged["no_clean"],
+            build_only=merged["build_only"],
+            nsys=merged["nsys"],
+            ncu=merged["ncu"],
+            config=config_path,
+            swaps=merged["swaps"],
+            detect_regions=merged["detect_regions"],
+            postprocess_nsys=merged["postprocess_nsys"],
+            retain_nsys_profiles=merged["retain_nsys_profiles"],
+            num_samples=merged["num_samples"],
+            output_file=merged["output_file"],
+            temp_dir=merged["temp_dir"],
+            log_level=merged["log_level"],
+            no_progress=merged["no_progress"],
+            swaps_override=merged["swaps_override"],
+            timeout=timeout_val if timeout_val is not None and timeout_val > 0 else None,
+            subprocess_output_char_limit=merged["subprocess_output_char_limit"],
+            suppress_command_stdout=merged["suppress_command_stdout"],
+            no_sanitize=merged["no_sanitize"],
+            srun=merged["srun"],
+        )
+
 
 class Operation(Enum):
     """Represents a type of driver operation that can be performed on an application.
@@ -190,6 +255,7 @@ class Operation(Enum):
         SWAP_NSYS: Nsight Systems profiling for swapped code
         SWAP_NCU: Nsight Compute profiling for swapped code
         SWAP_NSYS_POST: Nsight Systems postprocessing for swapped code
+
     """
 
     BUILD = "Build"
@@ -216,10 +282,11 @@ class FileSwap:
         swap_file_src_path: Path to the source swap file
         swap_file_dest_name: Destination filename for the swap
         code: The code content to swap in
+
     """
 
-    swap_file_src_path: str
-    swap_file_dest_name: str
+    swap_file_src_path: Path
+    swap_file_dest_name: Path
     code: str
 
 
@@ -233,6 +300,7 @@ class SwapConfig:
         run_num: Run number identifier
         optimized_code_num: Optimized code number identifier
         metadata: Metadata string identifier (if any)
+
     """
 
     app_name: str
@@ -263,13 +331,14 @@ class DriverPassResult:
         run_stdout: Standard output from run process
         run_stderr: Standard error from run process
         validation_output: Diagnostic output from validation when it fails (e.g. diff, found float)
+
     """
 
     app_name: str | None = None
     run_num: str | None = None
     metadata: str | None = None
     swap_num: str | None = None
-    swap_file_src_path: str | None = None
+    swap_file_src_path: Path | str | None = None
     build: bool | None = None
     sanitize: bool | None = None
     sanitize_details: dict[SanitizeTool, bool] | None = None
@@ -304,16 +373,17 @@ class DriverPassResult:
 
         Returns:
             Dictionary representation of the driver pass result
+
         """
         exec_times = None
         if self.nsys_data is not None:
             exec_times = [data["exec_time"] for data in self.nsys_data]
-        results = {
+        return {
             "app_name": self.app_name,
             "run_num": self.run_num,
             "metadata": self.metadata,
             "swap_num": self.swap_num,
-            "swap_file_src_path": self.swap_file_src_path,
+            "swap_file_src_path": str(self.swap_file_src_path),
             "build": self.build,
             "sanitize": self.sanitize,
             "sanitize_details": {str(t): r for t, r in self.sanitize_details.items()}
@@ -340,7 +410,6 @@ class DriverPassResult:
             "run_stdout": self.run_stdout,
             "run_stderr": self.run_stderr,
         }
-        return results
 
 
 class AppResults:
@@ -378,12 +447,13 @@ class AppResults:
         self.swap_nsys_post_numerator: int = 0
         self.swap_nsys_post_denominator: int = 0
 
-    def update_from_pass_result(self, pass_result: DriverPassResult, is_swap: bool) -> None:
+    def update_from_pass_result(self, pass_result: DriverPassResult, *, is_swap: bool) -> None:
         """Update results from a driver pass result.
 
         Args:
             pass_result: The driver pass result to incorporate
             is_swap: Whether this result is from a swap pass (True) or baseline (False)
+
         """
         if pass_result.build is not None:
             if not is_swap:
@@ -449,48 +519,48 @@ class AppResults:
 
         Returns:
             The result value (bool for baseline, "n/d" string for swaps, None if not available)
+
         """
         if key == Operation.BUILD:
             return self.build
-        elif key == Operation.SANITIZE:
+        if key == Operation.SANITIZE:
             return self.sanitize
-        elif key == Operation.RUN:
+        if key == Operation.RUN:
             return self.run
-        elif key == Operation.VALIDATE:
+        if key == Operation.VALIDATE:
             return self.validate
-        elif key == Operation.NSYS_PROFILE:
+        if key == Operation.NSYS_PROFILE:
             return self.nsys_profile
-        elif key == Operation.NCU_PROFILE:
+        if key == Operation.NCU_PROFILE:
             return self.ncu_profile
-        elif key == Operation.NSYS_POST:
+        if key == Operation.NSYS_POST:
             return self.nsys_post
-        elif key == Operation.SWAP_BUILDS:
+        if key == Operation.SWAP_BUILDS:
             if self.swap_builds_denominator > 0:
                 return f"{self.swap_builds_numerator}/{self.swap_builds_denominator}"
             return None
-        elif key == Operation.SWAP_SANITIZES:
+        if key == Operation.SWAP_SANITIZES:
             if self.swap_sanitizes_denominator > 0:
                 return f"{self.swap_sanitizes_numerator}/{self.swap_sanitizes_denominator}"
             return None
-        elif key == Operation.SWAP_RUNS:
+        if key == Operation.SWAP_RUNS:
             if self.swap_runs_denominator > 0:
                 return f"{self.swap_runs_numerator}/{self.swap_runs_denominator}"
             return None
-        elif key == Operation.SWAP_VALID:
+        if key == Operation.SWAP_VALID:
             if self.swap_valid_denominator > 0:
                 return f"{self.swap_valid_numerator}/{self.swap_valid_denominator}"
             return None
-        elif key == Operation.SWAP_NSYS:
+        if key == Operation.SWAP_NSYS:
             if self.swap_nsys_denominator > 0:
                 return f"{self.swap_nsys_numerator}/{self.swap_nsys_denominator}"
             return None
-        elif key == Operation.SWAP_NCU:
+        if key == Operation.SWAP_NCU:
             if self.swap_ncu_denominator > 0:
                 return f"{self.swap_ncu_numerator}/{self.swap_ncu_denominator}"
             return None
-        elif key == Operation.SWAP_NSYS_POST:
+        if key == Operation.SWAP_NSYS_POST:
             if self.swap_nsys_post_denominator > 0:
                 return f"{self.swap_nsys_post_numerator}/{self.swap_nsys_post_denominator}"
             return None
-        else:
-            return None
+        return None

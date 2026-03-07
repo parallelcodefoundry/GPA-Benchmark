@@ -1,21 +1,55 @@
-"""
-Configuration Management for GPA-Benchmark Driver
+"""Configuration Management for GPA-Benchmark Driver.
 
 This module handles loading and validating application configuration, determining
 which operations to perform, and setting up the environment.
 """
-import os
-import yaml
-import logging
 
-from gpa_bench_driver.driver_src.driver_models import Operation, SwapConfig, DriverConfig
+import logging
+import os
+from pathlib import Path
+
+import yaml
+
 from gpa_bench_driver.driver_src.driver_file_swapping import build_swaps_dict
+from gpa_bench_driver.driver_src.driver_models import DriverConfig, Operation, SwapConfig
 
 logger = logging.getLogger("GPA-Benchmark")
 
 
+class AppNameNotFoundError(Exception):
+    """Exception raised for errors in the app name.
+
+    Attributes:
+        message: explanation of the error
+
+    """
+
+    def __init__(self, app_name: str) -> None:
+        """Initialize the AppNameNotFoundError.
+
+        Args:
+            app_name: the name of the app that was not found
+
+        """
+        self.message = f"Could not find {app_name} in app_config!"
+        super().__init__(self.message)
+
+
+class OperationCombinationError(ValueError):
+    """Exception raised for invalid operation combinations."""
+
+    def __init__(self, message: str) -> None:
+        """Initialize the OperationCombinationError.
+
+        Args:
+            message: The error message
+
+        """
+        super().__init__(message)
+
+
 def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] | None, dict]:
-    """Setup the application configuration.
+    """Set up the application configuration.
 
     Loads the YAML configuration file, validates arguments, sets up environment
     variables, and optionally loads swap configurations.
@@ -33,23 +67,33 @@ def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] 
         ValueError: If argument combinations are invalid or app not found in config
         FileNotFoundError: If config file doesn't exist
         yaml.YAMLError: If config file is invalid YAML
+
     """
     logger.debug("Entering setup_app_config")
     # Validate argument combinations
-    if config.postprocess_nsys and (config.nsys or config.swaps or config.ncu or config.build_only \
-        or config.swaps_override):
-        raise ValueError("Cannot postprocess Nsight Systems profiles only if other operations " \
-            + "are specified.")
-    if config.build_only and (config.nsys or config.ncu or config.swaps or config.postprocess_nsys \
-        or config.swaps_override):
-        raise ValueError("Cannot build applications only if other operations are specified.")
+    if config.postprocess_nsys and (
+        config.nsys or config.swaps or config.ncu or config.build_only or config.swaps_override
+    ):
+        msg = "Cannot postprocess Nsight Systems profiles only if other operations are specified."
+        raise OperationCombinationError(msg)
+    if config.build_only and (
+        config.nsys
+        or config.ncu
+        or config.swaps
+        or config.postprocess_nsys
+        or config.swaps_override
+    ):
+        msg = "Cannot build applications only if other operations are specified."
+        raise OperationCombinationError(msg)
     if config.swaps_override and config.swaps:
-        raise ValueError("Cannot specify both swaps and swaps_override.")
+        msg = "Cannot specify both swaps and swaps_override."
+        raise OperationCombinationError(msg)
     if config.swaps_override and config.app == "all":
-        raise ValueError("Cannot specify swaps_override for apps = all.")
+        msg = "Cannot specify swaps_override for apps = all."
+        raise OperationCombinationError(msg)
 
     # Load config file
-    with open(config.config, "r", encoding="utf-8") as f:
+    with Path(config.config).open("r", encoding="utf-8") as f:
         app_config: dict = yaml.safe_load(f)
 
     logger.debug("App config loaded")
@@ -59,36 +103,42 @@ def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] 
         config.app = get_canonical_app_name(config.app, app_config)
 
     # Setup CUDA environment
-    cuda_home = (config.cuda_home or
-                 os.getenv("CUDA_HOME") or
-                 os.getenv("CUDA_PATH") or
-                 os.getenv("CUDA_ROOT") or
-                 "/usr/local/cuda")
+    cuda_home = Path(
+        config.cuda_home
+        or os.getenv("CUDA_HOME")
+        or os.getenv("CUDA_PATH")
+        or os.getenv("CUDA_ROOT")
+        or "/usr/local/cuda",
+    )
     env = os.environ.copy()
-    env["CUDA_HOME"] = cuda_home
-    cuda_lib64 = os.path.join(cuda_home, "lib64")
+    env["CUDA_HOME"] = str(cuda_home)
+    cuda_lib64 = cuda_home / "lib64"
     existing_ld_path = env.get("LD_LIBRARY_PATH", "")
-    env["LD_LIBRARY_PATH"] = f"{cuda_lib64}:{existing_ld_path}" if existing_ld_path else cuda_lib64
+    env["LD_LIBRARY_PATH"] = str(
+        f"{cuda_lib64}:{existing_ld_path}" if existing_ld_path else cuda_lib64,
+    )
 
     logger.debug("CUDA environment set")
 
     # Load swaps or override swaps if specified
     if config.swaps_override:
-        formatted_swaps: dict[tuple[str, int, str | None, int], list[tuple[str, str]]] = \
-            {(config.app, 0, None, 0): list(config.swaps_override.items())}
+        formatted_swaps: dict[tuple[str, int, str | None, int], list[tuple[Path, str]]] = {
+            (config.app, 0, None, 0): list(config.swaps_override.items()),
+        }
         swaps_dict = build_swaps_dict(formatted_swaps, config.app, app_config)
         return app_config, swaps_dict, env
 
     if config.swaps:
-        swaps_dict = build_swaps_dict(config.swaps, config.app, app_config)
+        swaps_dict = build_swaps_dict(Path(config.swaps), config.app, app_config)
         return app_config, swaps_dict, env
 
     return app_config, None, env
 
 
-def get_canonical_app_name(app_name: str,
-                           config: str | dict = os.path.join(os.path.dirname(__file__), "..",
-                                                             "..", "driver_apps.yaml")) -> str:
+def get_canonical_app_name(
+    app_name: str,
+    config: Path | dict | None = None,
+) -> str:
     """Get the canonical name for an application, converting aliases to the primary name.
 
     Args:
@@ -97,9 +147,12 @@ def get_canonical_app_name(app_name: str,
 
     Returns:
         The canonical name for the application
+
     """
-    if isinstance(config, str):
-        with open(config, "r", encoding="utf-8") as f:
+    if config is None:
+        config = Path(__file__).parent.parent / "driver_apps.yaml"
+    if isinstance(config, Path):
+        with config.open("r", encoding="utf-8") as f:
             app_config = yaml.safe_load(f)
     else:
         app_config = config
@@ -107,9 +160,9 @@ def get_canonical_app_name(app_name: str,
     if app_name in all_names:
         return app_name
     for app in app_config["apps"]:
-        if "aliases" in app.keys() and app_name in app["aliases"]:
+        if "aliases" in app and app_name in app["aliases"]:
             return app["name"]
-    raise ValueError(f"Application {app_name} not found in config file")
+    raise AppNameNotFoundError(app_name)
 
 
 def determine_operations(config: DriverConfig) -> list[Operation]:
@@ -120,6 +173,7 @@ def determine_operations(config: DriverConfig) -> list[Operation]:
 
     Returns:
         List of Operation enums that will be performed
+
     """
     operations: list[Operation] = []
 

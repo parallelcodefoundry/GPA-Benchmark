@@ -1,11 +1,11 @@
-"""Core Operations for GPA-Benchmark Driver.
+"""Core operations for GPA-Benchmark Driver.
 
 This module provides functions for building and running applications.
 """
 
-import os
 import subprocess
 from enum import Enum
+from pathlib import Path
 
 from gpa_bench_driver.driver_src.driver_utils import (
     SubprocessRunner,
@@ -16,7 +16,7 @@ from gpa_bench_driver.driver_src.driver_utils import (
 
 
 def build_app(
-    app: dict, sm_version: int, no_clean: bool, runner: SubprocessRunner, temp_dir: os.PathLike,
+    app: dict, sm_version: int, runner: SubprocessRunner, temp_dir: Path, *, no_clean: bool,
 ) -> tuple[bool, subprocess.CompletedProcess]:
     """Build the application.
 
@@ -26,12 +26,13 @@ def build_app(
     Args:
         app: Application configuration dictionary
         sm_version: SM version to build for (e.g., 90 for 9.0)
-        no_clean: If True, skip the clean step
         runner: Configured subprocess runner
         temp_dir: Temporary directory where working copy of application directory is located
+        no_clean: If True, skip the clean step
 
     Returns:
         Tuple of (success: bool, result: CompletedProcess)
+
     """
     build_path = get_build_path(app, temp_dir)
 
@@ -45,8 +46,8 @@ def build_app(
         if clean_result.returncode != 0:
             # Directly remove executable if make clean fails
             bin_path = get_bin_path(app, temp_dir)
-            if os.path.exists(bin_path):
-                os.remove(bin_path)
+            if bin_path.exists():
+                bin_path.unlink()
 
     # Build step
     build_command = ["make", "-B", "-j", "8"]
@@ -59,7 +60,7 @@ def build_app(
 
 
 def run_app(
-    app: dict, runner: SubprocessRunner, temp_dir: os.PathLike,
+    app: dict, runner: SubprocessRunner, temp_dir: Path,
 ) -> tuple[bool, subprocess.CompletedProcess]:
     """Run the application.
 
@@ -72,12 +73,13 @@ def run_app(
 
     Returns:
         Tuple of (success: bool, result: CompletedProcess)
+
     """
     # Remove test output file if it exists
     if "test_output" in app:
-        test_output_path = os.path.join(temp_dir, app["test_output"])
-        if os.path.exists(test_output_path):
-            os.remove(test_output_path)
+        test_output_path = temp_dir / app["test_output"]
+        if test_output_path.exists():
+            test_output_path.unlink()
 
     run_path = get_run_path(app, temp_dir)
     run_command = app["run_command"].split()
@@ -89,22 +91,25 @@ def run_app(
 
 class SanitizeTool(Enum):
     """Available sanitizer tools."""
+
     MEMCHECK = "memcheck"
     INITCHECK = "initcheck"
     RACECHECK = "racecheck"
     SYNCCHECK = "synccheck"
 
     def __str__(self) -> str:
+        """Return the string representation of the sanitizer tool."""
         return self.value
 
     def __repr__(self) -> str:
+        """Return the repr representation of the sanitizer tool."""
         return self.value
 
 
 def sanitize_app(
     app: dict,
     runner: SubprocessRunner,
-    temp_dir: os.PathLike,
+    temp_dir: Path,
     tool: SanitizeTool,
 ) -> tuple[bool, subprocess.CompletedProcess]:
     """Sanitize the application with the specified tool.
@@ -119,6 +124,7 @@ def sanitize_app(
 
     Returns:
         Tuple of (success: bool, result: CompletedProcess)
+
     """
     run_path = get_run_path(app, temp_dir)
     run_command = app["run_command"].split()

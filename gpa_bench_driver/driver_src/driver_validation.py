@@ -1,19 +1,19 @@
-"""
-Validation Functions for GPA-Benchmark Driver
+"""Validation functions for GPA-Benchmark Driver.
 
-This module provides functions for validating application output against
-reference outputs using various validation strategies.
+This module provides functions for validating application output against reference outputs using
+various validation strategies.
 """
+
 import difflib
 import logging
-import os
 import re
 import subprocess
+from pathlib import Path
 
 logger = logging.getLogger("GPA-Benchmark")
 
 
-def _get_test_output(app: dict, result: subprocess.CompletedProcess, temp_dir: os.PathLike) -> str:
+def _get_test_output(app: dict, result: subprocess.CompletedProcess, temp_dir: Path) -> str:
     """Get the test output from file or stdout.
 
     For apps that output to stdout (reference_output present, no test_output), the output is read
@@ -28,21 +28,28 @@ def _get_test_output(app: dict, result: subprocess.CompletedProcess, temp_dir: o
 
     Returns:
         The test output as a string
+
     """
-    # TODO: Evaluate if this check should be replaced with calling stdout_uses_file
+    # TODO(jhdavis): Evaluate if this check should be replaced with calling stdout_uses_file
     if "test_output" in app:
-        test_output_path = os.path.join(temp_dir, app["test_output"])
-        if not os.path.exists(test_output_path):
-            logger.warning("Could not find test output file %s for %s, trying stdout instead",
-                           app['test_output'], app['name'])
+        test_output_path = temp_dir / app["test_output"]
+        if not test_output_path.exists():
+            logger.warning(
+                "Could not find test output file %s for %s, trying stdout instead",
+                app["test_output"],
+                app["name"],
+            )
         else:
-            with open(test_output_path, "r", encoding="utf-8") as test_file:
+            with test_output_path.open("r", encoding="utf-8") as test_file:
                 return test_file.read()
     return result.stdout.decode("utf-8") if result.stdout is not None else ""
 
 
-def validate_app(app: dict, result: subprocess.CompletedProcess,
-                 temp_dir: os.PathLike) -> tuple[bool, str | None]:
+def validate_app(
+    app: dict,
+    result: subprocess.CompletedProcess,
+    temp_dir: Path,
+) -> tuple[bool, str | None]:
     """Validate the application output.
 
     Supports multiple validation types:
@@ -64,6 +71,7 @@ def validate_app(app: dict, result: subprocess.CompletedProcess,
 
     Raises:
         ValueError: If no validation type is specified or if validation configuration is invalid
+
     """
     stdout_text = result.stdout.decode("utf-8") if result.stdout is not None else ""
 
@@ -83,8 +91,7 @@ def validate_app(app: dict, result: subprocess.CompletedProcess,
 
     # Compare to reference output
     if "reference_output" in app:
-        with open(os.path.join(temp_dir, app["reference_output"]), "r",
-                  encoding="utf-8") as ref_file:
+        with (temp_dir / app["reference_output"]).open("r", encoding="utf-8") as ref_file:
             ref_output = ref_file.read()
 
         test_output = _get_test_output(app, result, temp_dir)
@@ -107,7 +114,7 @@ def validate_app(app: dict, result: subprocess.CompletedProcess,
             test_output.splitlines(keepends=True),
             fromfile="reference",
             tofile="test",
-            lineterm=""
+            lineterm="",
         )
         diff_text = "".join(diff_lines)
         return False, f"Output did not match reference (exact match). Diff:\n{diff_text}"
@@ -115,7 +122,11 @@ def validate_app(app: dict, result: subprocess.CompletedProcess,
     raise ValueError(f"No validation type specified for {app['name']}")
 
 
-def validate_output_window(test_output: str, app: dict, ref_output: str) -> tuple[bool, str | None]:
+def validate_output_window(
+    test_output: str,
+    app: dict,
+    ref_output: str,
+) -> tuple[bool, str | None]:
     """Validate the output using a window of lines.
 
     Compares a specific range of lines from the test output to the reference output.
@@ -130,9 +141,10 @@ def validate_output_window(test_output: str, app: dict, ref_output: str) -> tupl
 
     Raises:
         ValueError: If output_window is not a list of two integers
+
     """
     window_sizes = app["output_window"]
-    if len(window_sizes) != 2:
+    if len(window_sizes) != 2:  # noqa: PLR2004
         raise ValueError(f"Output window must be a list of two integers ({app['name']})")
 
     test_lines = test_output.splitlines()
@@ -150,7 +162,7 @@ def validate_output_window(test_output: str, app: dict, ref_output: str) -> tupl
         test_window.splitlines(keepends=True),
         fromfile=f"reference (lines {start}:{end})",
         tofile=f"test (lines {start}:{end})",
-        lineterm=""
+        lineterm="",
     )
     diff_text = "".join(diff_lines)
     return False, f"Output window [{start}:{end}] did not match.\n{diff_text}"
@@ -164,7 +176,8 @@ def validate_float(test_output: str, app: dict, ref_output: str) -> tuple[bool, 
 
     Args:
         test_output: The test output string
-        app: Application configuration dictionary containing "float_grep" and "float_tolerance" keys
+        app: Application configuration dictionary containing "float_grep" and "float_tolerance"
+             keys
         ref_output: The reference output string
 
     Returns:
@@ -172,27 +185,36 @@ def validate_float(test_output: str, app: dict, ref_output: str) -> tuple[bool, 
 
     Raises:
         ValueError: If the reference output doesn't contain the expected float pattern
+
     """
     float_grep = app["float_grep"]
     tolerance = app["float_tolerance"]
 
     # Find float in test output
-    test_portion = test_output.split(float_grep)[-1] if float_grep in test_output else ""
+    test_portion = (
+        test_output.rsplit(float_grep, maxsplit=1)[-1] if float_grep in test_output else ""
+    )
     float_match = re.search(r"(\d+\.\d+)", test_portion)
 
     # Find float in reference output
-    ref_portion = ref_output.split(float_grep)[-1] if float_grep in ref_output else ""
+    ref_portion = ref_output.rsplit(float_grep, maxsplit=1)[-1] if float_grep in ref_output else ""
     ref_match = re.search(r"(\d+\.\d+)", ref_portion)
 
     if not ref_match:
-        raise ValueError(f"Reference output {app['reference_output']} does not contain " \
-                        + f"float pattern after '{float_grep}'")
+        msg = (
+            f"Reference output {app['reference_output']} does not contain "
+            f"float pattern after '{float_grep}'"
+        )
+        raise ValueError(msg)
 
     ref_value = float(ref_match.group(1))
 
     if not float_match:
-        logger.warning("No float found in test output for %s, looking for pattern after '%s'",
-                       app['name'], float_grep)
+        logger.warning(
+            "No float found in test output for %s, looking for pattern after '%s'",
+            app["name"],
+            float_grep,
+        )
         return False, (
             f"No float found in test output after '{float_grep}'. "
             f"Reference value (from reference output): {ref_value}."

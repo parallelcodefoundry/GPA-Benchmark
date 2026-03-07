@@ -363,7 +363,7 @@ def stdout_uses_file(app: dict) -> bool:
     return "reference_output" in app and "test_output" not in app
 
 
-def get_stdout_redirect_path(temp_dir: os.PathLike) -> os.PathLike:
+def get_stdout_redirect_path(temp_dir: Path) -> Path:
     """Get the path for the stdout redirect file in the temporary directory.
 
     Args:
@@ -373,10 +373,10 @@ def get_stdout_redirect_path(temp_dir: os.PathLike) -> os.PathLike:
         Absolute path to the stdout redirect file
 
     """
-    return Path(temp_dir) / _RESULT_STDOUT_FILE
+    return temp_dir / _RESULT_STDOUT_FILE
 
 
-def get_bin_path(app: dict, temp_dir: os.PathLike) -> os.PathLike:
+def get_bin_path(app: dict, temp_dir: Path) -> Path:
     """Get the binary path for the application.
 
     Args:
@@ -388,11 +388,11 @@ def get_bin_path(app: dict, temp_dir: os.PathLike) -> os.PathLike:
 
     """
     if "run_path" in app:
-        return Path(temp_dir) / app["run_path"] / app["run_command"].split()[0]
-    return Path(temp_dir) / app["path"] / app["run_command"].split()[0]
+        return temp_dir / app["run_path"] / app["run_command"].split()[0]
+    return temp_dir / app["path"] / app["run_command"].split()[0]
 
 
-def get_build_path(app: dict, temp_dir: os.PathLike) -> os.PathLike:
+def get_build_path(app: dict, temp_dir: Path) -> Path:
     """Get the build path for the application.
 
     Args:
@@ -404,11 +404,11 @@ def get_build_path(app: dict, temp_dir: os.PathLike) -> os.PathLike:
 
     """
     if "build_path" in app:
-        return Path(temp_dir) / app["build_path"]
-    return Path(temp_dir) / app["path"]
+        return temp_dir / app["build_path"]
+    return temp_dir / app["path"]
 
 
-def get_run_path(app: dict, temp_dir: os.PathLike) -> os.PathLike:
+def get_run_path(app: dict, temp_dir: Path) -> Path:
     """Get the run path for the application.
 
     Args:
@@ -420,13 +420,13 @@ def get_run_path(app: dict, temp_dir: os.PathLike) -> os.PathLike:
 
     """
     if "run_path" in app:
-        return Path(temp_dir) / app["run_path"]
+        return temp_dir / app["run_path"]
     if "build_path" in app:
-        return Path(temp_dir) / app["build_path"]
-    return Path(temp_dir) / app["path"]
+        return temp_dir / app["build_path"]
+    return temp_dir / app["path"]
 
 
-def setup_profile_dir() -> os.PathLike:
+def setup_profile_dir() -> Path:
     """Set up the profile directory.
 
     Set up the profile directory for storing profiling output files in the current working
@@ -436,13 +436,13 @@ def setup_profile_dir() -> os.PathLike:
         Path to the profile directory
 
     """
-    profile_dir: Path = Path(Path.cwd()) / "profiles"
+    profile_dir: Path = Path.cwd() / "profiles"
     if not profile_dir.exists():
         profile_dir.mkdir(parents=True, exist_ok=True)
     return profile_dir
 
 
-def detect_sm_version(cuda_home: os.PathLike) -> int:
+def detect_sm_version() -> int:
     """Detect SM version from nvidia-smi.
 
     Returns the SM version as a two-digit integer (e.g., 9.0 -> 90).
@@ -452,9 +452,9 @@ def detect_sm_version(cuda_home: os.PathLike) -> int:
 
     """
     try:
-        result = subprocess.run(  # noqa: S603
-            [
-                f"{cuda_home}/bin/nvidia-smi",
+        result = subprocess.run(
+            [  # noqa: S607
+                "nvidia-smi",
                 "--query-gpu=compute_cap",
                 "--format=csv,noheader",
             ],

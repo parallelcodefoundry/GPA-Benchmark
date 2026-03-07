@@ -31,11 +31,17 @@ import os
 import shutil
 import tempfile
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
+from subprocess import CompletedProcess
 
 from alive_progress import alive_bar
 
-from gpa_bench_driver.driver_src.driver_config import determine_operations, setup_app_config
+from gpa_bench_driver.driver_src.driver_config import (
+    AppNameNotFoundError,
+    determine_operations,
+    setup_app_config,
+)
 from gpa_bench_driver.driver_src.driver_file_swapping import swap_file_in_app, swap_file_out_app
 from gpa_bench_driver.driver_src.driver_models import (
     AppResults,
@@ -62,6 +68,29 @@ from gpa_bench_driver.driver_src.driver_utils import (
     get_bin_path,
 )
 from gpa_bench_driver.driver_src.driver_validation import validate_app
+
+
+@dataclass
+class DriverPassContext:
+    """Context for a single driver pass (one app, optional swap).
+
+    Attributes:
+        app: Application configuration dictionary
+        env: Environment variables dictionary
+        config: Driver configuration object
+        temp_dir: Temporary directory for the working copy
+        swap_config: Optional swap configuration for this pass
+        pbar: Optional progress bar callback
+
+    """
+
+    app: dict
+    env: dict
+    config: DriverConfig
+    temp_dir: Path
+    swap_config: SwapConfig | None
+    pbar: Callable[[], None] | None
+
 
 logger = logging.getLogger("GPA-Benchmark")
 # TODO(jhdavis): Rename logger to gpa_bench_driver
@@ -95,25 +124,6 @@ class BaselineError(Exception):
 
         """
         self.message = message
-        super().__init__(self.message)
-
-
-class AppNameNotFoundError(Exception):
-    """Exception raised for errors in the app name.
-
-    Attributes:
-        message: explanation of the error
-
-    """
-
-    def __init__(self, app_name: str) -> None:
-        """Initialize the AppNameNotFoundError.
-
-        Args:
-            app_name: the name of the app that was not found
-
-        """
-        self.message = f"Could not find {app_name} in app_config!"
         super().__init__(self.message)
 
 
@@ -189,229 +199,263 @@ def update_progress_for_skipped_operations(
         pbar()
 
 
-def run_driver_pass(
-    app: dict,
-    env: dict,
-    config: DriverConfig,
-    temp_dir: os.PathLike,
-    swap_config: SwapConfig | None = None,
-    pbar: Callable | None = None,
+def _init_pass_result(ctx: DriverPassContext) -> DriverPassResult:
+    """Initialize a DriverPassResult from pass context."""
+    result = DriverPassResult()
+    result.app_name = ctx.app["name"]
+    result.run_num = ctx.swap_config.run_num if ctx.swap_config else None
+    result.metadata = ctx.swap_config.metadata if ctx.swap_config else None
+    result.swap_num = ctx.swap_config.optimized_code_num if ctx.swap_config else None
+    if ctx.swap_config and ctx.swap_config.file_swaps:
+        result.swap_file_src_path = ",".join(
+            [str(fs.swap_file_src_path) for fs in ctx.swap_config.file_swaps],
+        )
+    else:
+        result.swap_file_src_path = None
+    return result
+
+
+def _run_build_phase(
+    ctx: DriverPassContext,
+    result: DriverPassResult,
+    runner: SubprocessRunner,
+) -> bool:
+    """Run build phase; return True if build succeeded and binary exists."""
+    build_success, build_result = build_app(
+        ctx.app,
+        ctx.config.sm_version,
+        runner,
+        ctx.temp_dir,
+        no_clean=ctx.config.no_clean,
+    )
+    result.build_stdout = (
+        build_result.stdout.decode("utf-8") if build_result.stdout is not None else ""
+    )
+    result.build_stderr = (
+        build_result.stderr.decode("utf-8") if build_result.stderr is not None else ""
+    )
+    bin_path = Path(get_bin_path(ctx.app, ctx.temp_dir))
+    result.build = (
+        build_success and bin_path.exists() and bin_path.is_file() and os.access(bin_path, os.X_OK)
+    )
+    if ctx.pbar is not None:
+        ctx.pbar()
+    return result.build
+
+
+def _run_sanitize_phase(
+    ctx: DriverPassContext,
+    result: DriverPassResult,
+    runner: SubprocessRunner,
+) -> bool:
+    """Run sanitize phase; return True if all sanitizers passed."""
+    result.sanitize_stdouts = {}
+    result.sanitize_stderrs = {}
+    result.sanitize_details = {}
+    for tool in SanitizeTool.__members__.values():
+        sanitize_success, sanitize_result = sanitize_app(
+            ctx.app,
+            runner,
+            ctx.temp_dir,
+            tool,
+        )
+        result.sanitize_stdouts[tool] = (
+            runner.decode_and_limit(sanitize_result.stdout)
+            if sanitize_result.stdout is not None
+            else ""
+        )
+        result.sanitize_stderrs[tool] = (
+            runner.decode_and_limit(sanitize_result.stderr)
+            if sanitize_result.stderr is not None
+            else ""
+        )
+        result.sanitize_details[tool] = sanitize_success
+        if ctx.pbar is not None:
+            ctx.pbar()
+        if not sanitize_success and ctx.swap_config is None:
+            logger.error(
+                "Baseline sanitize stdout: %s",
+                result.sanitize_stdouts[tool],
+            )
+            logger.error(
+                "Baseline sanitize stderr: %s",
+                result.sanitize_stderrs[tool],
+            )
+            msg = f"Sanitize failed for baseline ({ctx.app['name']})"
+            raise BaselineError(msg)
+    result.sanitize = all(result.sanitize_details.values())
+    return result.sanitize
+
+
+def _run_run_phase(
+    ctx: DriverPassContext,
+    result: DriverPassResult,
+    runner: SubprocessRunner,
+) -> tuple[bool, CompletedProcess]:
+    """Run app; return (success, run_result for validation)."""
+    run_success, run_result = run_app(ctx.app, runner, ctx.temp_dir)
+    result.run_stdout = (
+        runner.decode_and_limit(run_result.stdout) if run_result.stdout is not None else ""
+    )
+    result.run_stderr = (
+        runner.decode_and_limit(run_result.stderr) if run_result.stderr is not None else ""
+    )
+    result.run = run_success
+    if ctx.pbar is not None:
+        ctx.pbar()
+    return run_success, run_result
+
+
+def _run_validate_phase(
+    ctx: DriverPassContext,
+    result: DriverPassResult,
+    run_result: CompletedProcess,
+) -> bool:
+    """Run validation; return True if validation passed."""
+    validate_success, validation_output = validate_app(
+        ctx.app,
+        run_result,
+        ctx.temp_dir,
+    )
+    logger.debug("Validate success: %s", validate_success)
+    result.validate = validate_success
+    if not validate_success and validation_output is not None:
+        result.validation_output = validation_output
+    if ctx.pbar is not None:
+        ctx.pbar()
+    return result.validate
+
+
+def _handle_early_exit(
+    ctx: DriverPassContext,
+    result: DriverPassResult,
+    stage: str,
 ) -> DriverPassResult:
+    """Either raise BaselineError (baseline pass) or update progress and return result."""
+    if ctx.swap_config is None:
+        if stage == "build":
+            logger.error("Baseline build stdout: %s", result.build_stdout)
+            logger.error("Baseline build stderr: %s", result.build_stderr)
+        elif stage == "run":
+            logger.error("Baseline run output: %s", result.run_stdout)
+            logger.error("Baseline run stderr: %s", result.run_stderr)
+        elif stage == "validate":
+            logger.error("Baseline validation output: %s", result.validation_output)
+        msg = f"{stage.capitalize()} failed for baseline ({ctx.app['name']})"
+        raise BaselineError(msg)
+    update_progress_for_skipped_operations(ctx.config, ctx.pbar, stage)
+    return result
+
+
+def _run_profiling_phase(
+    ctx: DriverPassContext,
+    result: DriverPassResult,
+    runner: SubprocessRunner,
+) -> None:
+    """Run NSYS and NCU profiling if enabled."""
+    if ctx.config.nsys:
+        result.nsys_profile = nsys_profile_app(
+            ctx.app,
+            runner,
+            ctx.temp_dir,
+            ctx.config.num_samples,
+            swap_config=ctx.swap_config,
+            pbar=ctx.pbar,
+        )
+    if ctx.config.ncu:
+        result.ncu_profile = ncu_profile_app(
+            ctx.app,
+            runner,
+            ctx.temp_dir,
+            ctx.config.num_samples,
+            swap_config=ctx.swap_config,
+            pbar=ctx.pbar,
+        )
+
+
+def _run_nsys_post_phase(
+    ctx: DriverPassContext,
+    result: DriverPassResult,
+    runner: SubprocessRunner,
+) -> None:
+    """Postprocess NSYS (standalone or after profiling)."""
+    if ctx.config.postprocess_nsys or (ctx.config.nsys and result.nsys_profile):
+        postprocess_nsys_result = postprocess_nsys_app(
+            ctx.app,
+            runner,
+            ctx.config.num_samples,
+            ctx.swap_config,
+            ctx.pbar,
+            retain_nsys_profiles=ctx.config.retain_nsys_profiles,
+        )
+        result.nsys_post = postprocess_nsys_result is not None
+        result.nsys_data = postprocess_nsys_result
+    elif ctx.config.nsys:
+        update_progress_for_skipped_operations(
+            ctx.config,
+            ctx.pbar,
+            "nsys_profile",
+        )
+
+
+def run_driver_pass(ctx: DriverPassContext) -> DriverPassResult:
     """Run a single driver pass for an application.
 
     A driver pass consists of building, running, validating, and optionally
-    profiling an application. If swap_config is provided, the application's code
+    profiling an application. If ctx.swap_config is provided, the application's code
     is swapped before building and restored after completion.
 
     Args:
-        app: Application configuration dictionary
-        env: Environment variables dictionary
-        config: Driver configuration object
-        temp_dir: Temporary directory where working copy of application directory is located
-        swap_config: Optional swap configuration for testing optimized code
-        pbar: Optional progress bar to update after each operation
+        ctx: Driver pass context (app, env, config, temp_dir, swap_config, pbar)
 
     Returns:
         DriverPassResult object containing all results from this pass
 
     Raises:
-        ValueError: If baseline (non-swap) build, run, or validation fails
+        BaselineError: If baseline (non-swap) build, run, or validation fails
 
     """
-    result = DriverPassResult()
-    result.app_name = app["name"]
-    result.run_num = swap_config.run_num if swap_config else None
-    result.metadata = swap_config.metadata if swap_config else None
-    result.swap_num = swap_config.optimized_code_num if swap_config else None
-    if swap_config and swap_config.file_swaps:
-        result.swap_file_src_path = ",".join(
-            [fs.swap_file_src_path for fs in swap_config.file_swaps],
-        )
-    else:
-        result.swap_file_src_path = None
-
+    result = _init_pass_result(ctx)
     runner_config = SubprocessRunnerConfig(
-        log_level=config.log_level,
-        timeout=config.timeout,
-        output_char_limit=config.subprocess_output_char_limit,
-        suppress_command_stdout=config.suppress_command_stdout,
-        use_srun=config.srun,
+        log_level=ctx.config.log_level,
+        timeout=ctx.config.timeout,
+        output_char_limit=ctx.config.subprocess_output_char_limit,
+        suppress_command_stdout=ctx.config.suppress_command_stdout,
+        use_srun=ctx.config.srun,
     )
-    runner = SubprocessRunner(env=env, config=runner_config)
+    runner = SubprocessRunner(env=ctx.env, config=runner_config)
 
-    # Skip build/run/validate if only postprocessing
-    if not config.postprocess_nsys:
-        # Swap file in if this is a swap pass
-        if swap_config:
-            swap_file_in_app(swap_config, temp_dir, config.detect_regions)
-
+    if not ctx.config.postprocess_nsys:
+        if ctx.swap_config:
+            swap_file_in_app(
+                swap_config=ctx.swap_config,
+                temp_dir=ctx.temp_dir,
+                detect_regions=ctx.config.detect_regions,
+            )
         try:
-            # Build
-            build_success, build_result = build_app(
-                app,
-                config.sm_version,
-                config.no_clean,
-                runner,
-                temp_dir,
-            )
-            result.build_stdout = (
-                build_result.stdout.decode("utf-8") if build_result.stdout is not None else ""
-            )
-            result.build_stderr = (
-                build_result.stderr.decode("utf-8") if build_result.stderr is not None else ""
-            )
-
-            bin_path = Path(get_bin_path(app, temp_dir))
-            result.build = (
-                build_success
-                and bin_path.exists()
-                and bin_path.is_file()
-                and os.access(bin_path, os.X_OK)
-            )
-
-            if pbar is not None:
-                pbar()  # Update progress for BUILD operation
-
-            # Early return if build-only mode or build failed
-            if config.build_only or result.build is False:
-                if swap_config is None:
-                    logger.error("Baseline build stdout: %s", result.build_stdout)
-                    logger.error("Baseline build stderr: %s", result.build_stderr)
-                    msg = f"Build failed for baseline ({app['name']})"
-                    raise BaselineError(msg)
-                # Update progress for skipped operations due to build failure
-                if not config.build_only:
-                    update_progress_for_skipped_operations(config, pbar, "build")
+            if not _run_build_phase(ctx, result, runner):
+                return _handle_early_exit(ctx, result, "build")
+            if ctx.config.build_only:
                 return result
-
-            # Sanitize
-            if not config.no_sanitize:
-                result.sanitize_stdouts = {}
-                result.sanitize_stderrs = {}
-                result.sanitize_details = {}
-
-                for tool in SanitizeTool.__members__.values():
-                    sanitize_success, sanitize_result = sanitize_app(app, runner, temp_dir, tool)
-                    result.sanitize_stdouts[tool] = (
-                        runner.decode_and_limit(sanitize_result.stdout)
-                        if sanitize_result.stdout is not None
-                        else ""
-                    )
-                    result.sanitize_stderrs[tool] = (
-                        runner.decode_and_limit(sanitize_result.stderr)
-                        if sanitize_result.stderr is not None
-                        else ""
-                    )
-                    result.sanitize_details[tool] = sanitize_success
-                    if pbar is not None:
-                        pbar()  # Update progress for SANITIZE operation
-                    if not sanitize_success and swap_config is None:
-                        logger.error(
-                            "Baseline sanitize stdout: %s",
-                            result.sanitize_stdouts[tool],
-                        )
-                        logger.error(
-                            "Baseline sanitize stderr: %s",
-                            result.sanitize_stderrs[tool],
-                        )
-                        msg = f"Sanitize failed for baseline ({app['name']})"
-                        raise BaselineError(msg)
-
-                result.sanitize = all(result.sanitize_details.values())
-                if not result.sanitize:
-                    # Update progress for skipped operations due to sanitize failure
-                    update_progress_for_skipped_operations(config, pbar, "sanitize")
-                    result.run = False
-                    return result
-
-            # Run
-            run_success, run_result = run_app(app, runner, temp_dir)
-            result.run_stdout = (
-                runner.decode_and_limit(run_result.stdout) if run_result.stdout is not None else ""
-            )
-            result.run_stderr = (
-                runner.decode_and_limit(run_result.stderr) if run_result.stderr is not None else ""
-            )
-            result.run = run_success
-
-            if pbar is not None:
-                pbar()  # Update progress for RUN operation
-
-            if result.run is False:
-                if swap_config is None:
-                    logger.error("Baseline run output: %s", result.run_stdout)
-                    logger.error("Baseline run stderr: %s", result.run_stderr)
-                    msg = f"Run failed for baseline ({app['name']})"
-                    raise BaselineError(msg)
-                # Update progress for skipped operations due to run failure
-                update_progress_for_skipped_operations(config, pbar, "run")
-                return result
-
-            # Validate
-            validate_success, validation_output = validate_app(app, run_result, temp_dir)
-            logger.debug("Validate success: %s", validate_success)
-            result.validate = validate_success
-            if not validate_success and validation_output is not None:
-                result.validation_output = validation_output
-
-            if pbar is not None:
-                pbar()  # Update progress for VALIDATE operation
-
-            if result.validate is False:
-                if swap_config is None:
-                    logger.error("Baseline validation output: %s", validation_output)
-                    msg = f"Validation failed for baseline ({app['name']})"
-                    raise BaselineError(msg)
-                # Update progress for skipped operations due to validation failure
-                update_progress_for_skipped_operations(config, pbar, "validate")
-                return result
-
-            # NSYS Profile
-            if config.nsys:
-                nsys_success = nsys_profile_app(
-                    app,
-                    runner,
-                    temp_dir,
-                    config.num_samples,
-                    swap_config=swap_config or None,
-                    pbar=pbar,
+            if not ctx.config.no_sanitize and not _run_sanitize_phase(ctx, result, runner):
+                update_progress_for_skipped_operations(
+                    ctx.config,
+                    ctx.pbar,
+                    "sanitize",
                 )
-                result.nsys_profile = nsys_success
-
-            # NCU Profile
-            if config.ncu:
-                ncu_success = ncu_profile_app(
-                    app,
-                    runner,
-                    temp_dir,
-                    config.num_samples,
-                    swap_config=swap_config or None,
-                    pbar=pbar,
-                )
-                result.ncu_profile = ncu_success
-
+                result.run = False
+                return result
+            run_ok, run_result = _run_run_phase(ctx, result, runner)
+            if not run_ok:
+                return _handle_early_exit(ctx, result, "run")
+            if not _run_validate_phase(ctx, result, run_result):
+                return _handle_early_exit(ctx, result, "validate")
+            _run_profiling_phase(ctx, result, runner)
         finally:
-            # Always restore original files if we swapped
-            if swap_config:
-                swap_file_out_app(app, temp_dir, swap_config)
+            if ctx.swap_config:
+                swap_file_out_app(ctx.app, ctx.temp_dir, ctx.swap_config)
 
-    # Postprocess NSYS (either standalone or after profiling)
-    if config.postprocess_nsys or (config.nsys and result.nsys_profile):
-        postprocess_nsys_result = postprocess_nsys_app(
-            app,
-            runner,
-            config.num_samples,
-            swap_config=swap_config or None,
-            pbar=pbar,
-            retain_nsys_profiles=config.retain_nsys_profiles,
-        )
-        result.nsys_post = postprocess_nsys_result is not None
-        result.nsys_data = postprocess_nsys_result
-    elif config.nsys:
-        # NSYS_POST was expected but didn't run because nsys_profile failed
-        # Still update progress bar for this skipped operation
-        update_progress_for_skipped_operations(config, pbar, "nsys_profile")
-
+    _run_nsys_post_phase(ctx, result, runner)
     return result
 
 
@@ -435,7 +479,7 @@ def run_all(
     Returns:
         Tuple of:
         - results: Dictionary mapping app names to AppResults
-        - operations: List of operations that were performed} in app_config!"
+        - operations: List of operations that were performed
         - long_results: Dictionary mapping app names to lists of DriverPassResult objects
 
     """
@@ -493,16 +537,20 @@ def run_all(
 
                 # Run each pass
                 for pass_num, driver_pass in enumerate(driver_passes):
-                    pass_results = run_driver_pass(
-                        app,
-                        env,
-                        config,
-                        temp_dir,
+                    pass_ctx = DriverPassContext(
+                        app=app,
+                        env=env,
+                        config=config,
+                        temp_dir=temp_dir,
                         swap_config=driver_pass,
                         pbar=pbar,
                     )
+                    pass_results = run_driver_pass(pass_ctx)
                     is_swap = driver_pass is not None
-                    results[app_name].update_from_pass_result(pass_results, is_swap)
+                    results[app_name].update_from_pass_result(
+                        pass_result=pass_results,
+                        is_swap=is_swap,
+                    )
                     long_results[app_name].append(pass_results)
                     logger.debug("Driver pass %d results:", pass_num)
                     logger.debug("  Build: %s", pass_results.build)
@@ -517,75 +565,21 @@ def run_all(
 
 
 def run_driver(
-    app: str = "all",
-    *,
-    sm_version: int | None = None,
-    cuda_home: os.PathLike | None = None,
-    no_clean: bool = False,
-    build_only: bool = False,
-    nsys: bool = False,
-    ncu: bool = False,
-    config: str | None = None,
-    swaps: str | None = None,
-    detect_regions: bool = False,
-    postprocess_nsys: bool = False,
-    retain_nsys_profiles: bool = False,
-    num_samples: int = 3,
-    output_file: os.PathLike | None = None,
-    temp_dir: str | None = None,
-    log_level: str = "WARNING",
-    no_progress: bool = True,
-    swaps_override: dict[str, str] | None = None,
-    timeout: int | None = 300,
-    subprocess_output_char_limit: int = 25000,
-    suppress_command_stdout: bool = False,
-    no_sanitize: bool = False,
-    srun: bool = False,
+    config: DriverConfig | None = None,
+    **kwargs: object,
 ) -> tuple[dict[str, AppResults], list[Operation], dict[str, list[DriverPassResult]]]:
     """Run the driver programmatically with the same interface as the CLI.
 
-    This function provides a programmatic API that accepts the same parameters
-    as the command-line interface. It can be called from other Python packages
-    to run the driver functionality.
+    Pass either a single DriverConfig or the same keyword arguments as the CLI.
+    When using kwargs, omitted keys use defaults (e.g. app="all", nsys=False).
 
-    Args:
-        app: The application to run (default: "all")
-        sm_version: The SM version to use (default: None, will auto-detect from nvidia-smi)
-        cuda_home: Path to the CUDA installation to use (default: None)
-        no_clean: Do not clean the application before building (default: False)
-        build_only: Only build the application (skip run and validate) (default: False)
-        nsys: Profile the application with Nsight Systems (default: False)
-        ncu: Profile the application with Nsight Compute (default: False)
-        config: The app config file to use (default: None, will use "driver_apps.yaml")
-        swaps: Path to the directory containing code files to swap in (default: None)
-        detect_regions: Detect editable region markers in swap files (default: False)
-        postprocess_nsys: Only postprocess nsys-rep file(s) (default: False)
-        retain_nsys_profiles: Keep .nsys-rep and .sqlite files after postprocessing (default:
-                              False)
-        num_samples: Number of times to collect ncu/nsys profiles (default: 3)
-        output_file: File to save the long results to (default: None, no output file will be saved)
-        temp_dir: Temporary directory to use (default: None, uses /tmp)
-        log_level: Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL (default: WARNING)
-        no_progress: Do not display a progress bar (default: True)
-        swaps_override: Override the swaps dictionary with a custom one for a single app, where
-                        keys are filenames and values are code contents (default: None)
-        timeout: The timeout in seconds for the driver to run, if negative, no timeout enforced
-                 (default: 300)
-        subprocess_output_char_limit: Maximum characters to log for subprocess stdout/stderr.
-                 Characters are removed from the middle to stay within the limit. Set to <= 0 to
-                 disable truncation. (default: 25000)
-        suppress_command_stdout: When True, never log stdout/stderr from command runs regardless of
-                 log level or failure. Driver stdout/logging is unchanged. (default: False)
-        no_sanitize: Do not run compute sanitizer checks before running the application
-                     (default: False)
-        srun: When True, prepend Slurm srun to all commands and enforce timeout via
-              srun --time=00:n; bypasses multiprocessing-based timeout (default: False)
+    Supported kwargs: app, sm_version, cuda_home, no_clean, build_only, nsys, ncu,
+    config, swaps, detect_regions, postprocess_nsys, retain_nsys_profiles, num_samples,
+    output_file, temp_dir, log_level, no_progress, swaps_override, timeout,
+    subprocess_output_char_limit, suppress_command_stdout, no_sanitize, srun.
 
     Returns:
-        Tuple of:
-        - results: Dictionary mapping app names to AppResults
-        - operations: List of operations that were performed
-        - long_results: Dictionary mapping app names to lists of DriverPassResult objects
+        Tuple of (results, operations, long_results).
 
     Raises:
         ValueError: If configuration is invalid
@@ -593,34 +587,13 @@ def run_driver(
 
     """
     logger.debug("Entering run_driver")
-    # Create DriverConfig from parameters
-    driver_config = DriverConfig(
-        app=app,
-        sm_version=sm_version,
-        cuda_home=cuda_home,
-        no_clean=no_clean,
-        build_only=build_only,
-        nsys=nsys,
-        ncu=ncu,
-        config=config or Path(__file__).parent.parent / "driver_apps.yaml",
-        swaps=swaps,
-        detect_regions=detect_regions,
-        postprocess_nsys=postprocess_nsys,
-        retain_nsys_profiles=retain_nsys_profiles,
-        num_samples=num_samples,
-        output_file=output_file,
-        temp_dir=temp_dir,
-        log_level=log_level,
-        no_progress=no_progress,
-        swaps_override=swaps_override,
-        timeout=timeout if timeout is not None and timeout > 0 else None,
-        subprocess_output_char_limit=subprocess_output_char_limit,
-        suppress_command_stdout=suppress_command_stdout,
-        no_sanitize=no_sanitize,
-        srun=srun,
-    )
-
-    return run_driver_config(driver_config)
+    if config is None:
+        kwargs.setdefault(
+            "config",
+            Path(__file__).parent.parent / "driver_apps.yaml",
+        )
+        config = DriverConfig.from_kwargs(**kwargs)
+    return run_driver_config(config)
 
 
 def run_driver_config(
