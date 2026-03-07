@@ -106,7 +106,7 @@ class DriverConfig:
         output_file: Path | None = None,
         temp_dir: Path | None = None,
         log_level: str = "WARNING",
-        no_progress: bool = False,
+        no_progress: bool = True,
         swaps_override: dict[Path, str] | None = None,
         timeout: int | None = 300,  # 5 minutes
         subprocess_output_char_limit: int = 25000,
