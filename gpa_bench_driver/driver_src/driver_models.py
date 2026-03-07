@@ -60,50 +60,50 @@ class DriverConfig:
 
     """
 
-    sm_version: int
-    app: str = "all"
-    cuda_home: os.PathLike | None = None
-    no_clean: bool = False
-    build_only: bool = False
-    nsys: bool = False
-    ncu: bool = False
-    config: os.PathLike = Path("driver_apps.yaml")
-    swaps: os.PathLike | None = None
-    detect_regions: bool = False
-    postprocess_nsys: bool = False
-    retain_nsys_profiles: bool = False
-    num_samples: int = 3
-    output_file: os.PathLike | None = Path("driver_results.json")
-    temp_dir: os.PathLike | None = None
-    log_level: str = "WARNING"
-    no_progress: bool = False
-    swaps_override: dict[Path, str] | None = None
-    timeout: int | None = 300  # 5 minutes
-    subprocess_output_char_limit: int = 25000
-    suppress_command_stdout: bool = False
-    no_sanitize: bool = False
-    srun: bool = False
+    app: str
+    sm_version: int | None
+    cuda_home: os.PathLike | None
+    no_clean: bool
+    build_only: bool
+    nsys: bool
+    ncu: bool
+    config: os.PathLike
+    swaps: os.PathLike | None
+    detect_regions: bool
+    postprocess_nsys: bool
+    retain_nsys_profiles: bool
+    num_samples: int
+    output_file: os.PathLike | None
+    temp_dir: os.PathLike | None
+    log_level: str
+    no_progress: bool
+    swaps_override: dict[Path, str] | None
+    timeout: int | None
+    subprocess_output_char_limit: int
+    suppress_command_stdout: bool
+    no_sanitize: bool
+    srun: bool
 
     def __init__(
         self,
         *,
-        app: str,
+        app: str = "all",
         sm_version: int | None = None,
-        cuda_home: os.PathLike | None,
-        no_clean: bool,
-        build_only: bool,
-        nsys: bool,
-        ncu: bool,
-        config: os.PathLike,
-        swaps: os.PathLike | None,
-        detect_regions: bool,
-        postprocess_nsys: bool,
-        retain_nsys_profiles: bool,
-        num_samples: int,
-        output_file: os.PathLike | None,
-        temp_dir: os.PathLike | None,
-        log_level: str,
-        no_progress: bool,
+        cuda_home: os.PathLike | None = None,
+        no_clean: bool = False,
+        build_only: bool = False,
+        nsys: bool = False,
+        ncu: bool = False,
+        config: os.PathLike = Path("driver_apps.yaml"),
+        swaps: os.PathLike | None = None,
+        detect_regions: bool = False,
+        postprocess_nsys: bool = False,
+        retain_nsys_profiles: bool = False,
+        num_samples: int = 3,
+        output_file: os.PathLike | None = None,
+        temp_dir: os.PathLike | None = None,
+        log_level: str = "WARNING",
+        no_progress: bool = False,
         swaps_override: dict[Path, str] | None = None,
         timeout: int | None = 300,  # 5 minutes
         subprocess_output_char_limit: int = 25000,
