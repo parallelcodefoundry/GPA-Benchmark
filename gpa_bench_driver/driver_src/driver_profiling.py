@@ -72,6 +72,26 @@ def _update_pbar(
             pbar()
 
 
+def _get_profile_filename(app: dict, swap_config: SwapConfig | None, i: int) -> str:
+    """Get the profile filename.
+
+    Args:
+        app: Application configuration dictionary
+        swap_config: Swap configuration containing the code to swap in
+        i: Index of the sample
+
+    Returns:
+        Profile filename
+
+    """
+    profile_filename = app["name"]
+    if swap_config:
+        swap_filename = swap_config.file_swaps[0].swap_file_src_path.with_suffix("").name
+        profile_filename += f"_{swap_filename}"
+    profile_filename += f"_sample_{i}"
+    return profile_filename
+
+
 def nsys_profile_app(
     app: dict,
     runner: SubprocessRunner,
@@ -97,14 +117,11 @@ def nsys_profile_app(
     profile_dir = setup_profile_dir()
 
     for i in range(num_samples):
-        profile_filename = app["name"]
-        if swap_config:
-            swap_filename = swap_config.file_swaps[0].swap_file_src_path.with_suffix("").name
-            profile_filename += f"_{swap_filename}"
-        profile_filename += f"_sample_{i}"
-        profile_output = Path(profile_dir / profile_filename)
+        profile_name = _get_profile_filename(app, swap_config, i)
 
-        nsys_command = ["nsys", "profile", "-o", str(profile_output), "-f", "true"]
+        profile_path = Path(profile_dir / profile_name)
+
+        nsys_command = ["nsys", "profile", "-o", str(profile_path), "-f", "true"]
         nsys_command.extend(app["run_command"].split())
 
         run_path = get_run_path(app, temp_dir)
@@ -114,7 +131,7 @@ def nsys_profile_app(
             msg = f"Nsight Systems profile failed with return code {result.returncode}"
             raise ProfilingError(msg)
 
-        profile_file = Path(f"{profile_output!s}.nsys-rep")
+        profile_file = Path(f"{profile_path!s}.nsys-rep")
         if not profile_file.exists():
             msg = f"Could not find Nsight Systems profile file {profile_file}"
             raise ProfilingError(msg)
@@ -150,13 +167,10 @@ def ncu_profile_app(
     profile_dir = setup_profile_dir()
 
     for i in range(num_samples):
-        profile_output = profile_dir / app["name"]
-        if swap_config:
-            swap_filename = swap_config.file_swaps[0].swap_file_src_path.with_suffix(".cu").name
-            profile_output += f"_{swap_filename}"
-        profile_output += f"_sample_{i}"
+        profile_name = _get_profile_filename(app, swap_config, i)
+        profile_path = Path(profile_dir / profile_name)
 
-        ncu_command = ["ncu", "-o", profile_output, "-f"]
+        ncu_command = ["ncu", "-o", str(profile_path), "-f"]
         if "ncu_args" in app:
             ncu_command.extend(app["ncu_args"].split())
         ncu_command.extend(NCU_ARGS)
@@ -165,11 +179,14 @@ def ncu_profile_app(
         run_path = get_run_path(app, temp_dir)
         result = runner.run(ncu_command, run_path)
 
-        profile_file = profile_output + ".ncu-rep"
-        if not (result.returncode == 0 and profile_file.exists()):
-            logger.warning("Could not find Nsight Compute profile file %s", profile_file)
-            _update_pbar(pbar, i, num_samples)
-            return False
+        if result.returncode != 0:
+            msg = f"Nsight Compute profile failed with return code {result.returncode}"
+            raise ProfilingError(msg)
+
+        profile_file = Path(f"{profile_path!s}.ncu-rep")
+        if not profile_file.exists():
+            msg = f"Could not find Nsight Compute profile file {profile_file}"
+            raise ProfilingError(msg)
 
         if pbar is not None:
             pbar()
@@ -235,17 +252,12 @@ def postprocess_nsys_app(
     kernel_rows = []
 
     for i in range(num_samples):
-        nsys_filename = app["name"]
-        if swap_config:
-            swap_filename = swap_config.file_swaps[0].swap_file_src_path.with_suffix(".cu").name
-            nsys_filename += f"_{swap_filename}"
-        nsys_filename += f"_sample_{i}"
-        nsys_rep_file = Path(profile_dir / nsys_filename).with_suffix(".nsys-rep")
+        nsys_name = _get_profile_filename(app, swap_config, i)
+        nsys_rep_file = Path(profile_dir / f"{nsys_name!s}.nsys-rep")
 
         if not nsys_rep_file.exists():
-            logger.warning("Could not find Nsight Systems profile file %s", nsys_rep_file)
-            _update_pbar(pbar, i, num_samples)
-            return None
+            msg = f"Could not find Nsight Systems profile file {nsys_rep_file}"
+            raise ProfilingError(msg)
 
         # Convert nsys-rep to sqlite
         postprocess_command = ["nsys", "export", "-f", "true", "-t", "sqlite", str(nsys_rep_file)]
@@ -254,11 +266,10 @@ def postprocess_nsys_app(
             _update_pbar(pbar, i, num_samples)
             return None
 
-        sqlite_file = Path(profile_dir / nsys_filename).with_suffix(".sqlite")
+        sqlite_file = Path(profile_dir / f"{nsys_name!s}.sqlite")
         if not sqlite_file.exists():
-            logger.warning("Could not find sqlite file %s", sqlite_file)
-            _update_pbar(pbar, i, num_samples)
-            return None
+            msg = f"Could not find sqlite file {sqlite_file}"
+            raise ProfilingError(msg)
 
         # Read sqlite file into pandas dataframes
         conn = sqlite3.connect(sqlite_file)
