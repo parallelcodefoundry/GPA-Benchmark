@@ -259,6 +259,7 @@ def _run_sanitize_phase(
             logger.debug("Skipping racecheck for LULESH")
             if ctx.pbar is not None:
                 ctx.pbar()
+            result.sanitize_details[tool] = True
             continue
         sanitize_success, sanitize_result = sanitize_app(
             ctx.app,
@@ -293,17 +294,6 @@ def _run_sanitize_phase(
                     for _ in range(len(tools) - i - 1):
                         ctx.pbar()
                 return False
-        if not sanitize_success and ctx.swap_config is None:
-            logger.error(
-                "Baseline sanitize stdout: %s",
-                result.sanitize_stdouts[tool],
-            )
-            logger.error(
-                "Baseline sanitize stderr: %s",
-                result.sanitize_stderrs[tool],
-            )
-            msg = f"Sanitize failed for baseline ({ctx.app['name']})"
-            raise BaselineError(msg)
     result.sanitize = all(result.sanitize_details.values())
     return result.sanitize
 
@@ -351,7 +341,6 @@ def _handle_early_exit(
     ctx: DriverPassContext,
     result: DriverPassResult,
     stage: str,
-    failed_tool: SanitizeTool | None = None,
 ) -> DriverPassResult:
     """Either raise BaselineError (baseline pass) or update progress and return result."""
     if ctx.swap_config is None:
@@ -359,8 +348,16 @@ def _handle_early_exit(
             logger.error("Baseline build stdout: %s", result.build_stdout)
             logger.error("Baseline build stderr: %s", result.build_stderr)
         elif stage == "sanitize":
+            if result.sanitize_details is None:
+                raise ValueError(
+                    "Sanitize phase failure reported but no sanitize details were set"
+                )
+            failed_tool = next(
+                (t for t in SanitizeTool.__members__.values() if not result.sanitize_details[t]),
+                None,
+            )
             if failed_tool is None:
-                raise ValueError("Sanitize phase failure reported but no failed tool provided")
+                raise ValueError("Sanitize phase failure reported but no failed tool was found")
             if result.sanitize_stdouts is None or result.sanitize_stderrs is None:
                 raise ValueError(
                     "Sanitize phase failure reported but no sanitize stdouts or stderrs were set"
@@ -469,21 +466,7 @@ def run_driver_pass(ctx: DriverPassContext) -> DriverPassResult:
             if ctx.config.build_only:
                 return result
             if not ctx.config.no_sanitize and not _run_sanitize_phase(ctx, result, runner):
-                if not result.sanitize_details:
-                    raise ValueError("Ran sanitize phase but no sanitize details were set")
-                return _handle_early_exit(
-                    ctx,
-                    result,
-                    "sanitize",
-                    failed_tool=next(
-                        (
-                            t
-                            for t in SanitizeTool.__members__.values()
-                            if not result.sanitize_details[t]
-                        ),
-                        None,
-                    ),
-                )
+                return _handle_early_exit(ctx, result, "sanitize")
             run_ok, run_result = _run_run_phase(ctx, result, runner)
             if not run_ok:
                 return _handle_early_exit(ctx, result, "run")
