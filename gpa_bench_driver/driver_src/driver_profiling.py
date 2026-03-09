@@ -99,7 +99,7 @@ def nsys_profile_app(
     for i in range(num_samples):
         profile_filename = app["name"]
         if swap_config:
-            swap_filename = swap_config.file_swaps[0].swap_file_src_path.with_suffix(".cu").name
+            swap_filename = swap_config.file_swaps[0].swap_file_src_path.with_suffix("").name
             profile_filename += f"_{swap_filename}"
         profile_filename += f"_sample_{i}"
         profile_output = Path(profile_dir / profile_filename)
@@ -110,10 +110,11 @@ def nsys_profile_app(
         run_path = get_run_path(app, temp_dir)
         result = runner.run(nsys_command, run_path)
 
-        profile_file = profile_output.with_suffix(".nsys-rep")
         if result.returncode != 0:
             msg = f"Nsight Systems profile failed with return code {result.returncode}"
             raise ProfilingError(msg)
+
+        profile_file = Path(f"{profile_output!s}.nsys-rep")
         if not profile_file.exists():
             msg = f"Could not find Nsight Systems profile file {profile_file}"
             raise ProfilingError(msg)
