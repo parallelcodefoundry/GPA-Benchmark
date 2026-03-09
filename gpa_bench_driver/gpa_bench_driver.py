@@ -249,10 +249,11 @@ def _run_sanitize_phase(
     runner: SubprocessRunner,
 ) -> bool:
     """Run sanitize phase; return True if all sanitizers passed."""
-    result.sanitize_stdouts = {}
-    result.sanitize_stderrs = {}
-    result.sanitize_details = {}
-    for tool in SanitizeTool.__members__.values():
+    tools = SanitizeTool.__members__.values()
+    result.sanitize_stdouts = dict.fromkeys(tools, "")
+    result.sanitize_stderrs = dict.fromkeys(tools, "")
+    result.sanitize_details = dict.fromkeys(tools, False)
+    for i, tool in enumerate(tools):
         sanitize_success, sanitize_result = sanitize_app(
             ctx.app,
             runner,
@@ -272,6 +273,20 @@ def _run_sanitize_phase(
         result.sanitize_details[tool] = sanitize_success
         if ctx.pbar is not None:
             ctx.pbar()
+        if not sanitize_success:
+            stderr_raw = sanitize_result.stderr or b""
+            timeout_marker = b"TIME LIMIT" if runner.use_srun else b"TIMEOUT"
+            if timeout_marker in stderr_raw:
+                timeout_label = "TIME LIMIT" if runner.use_srun else "TIMEOUT"
+                logger.error(
+                    "Sanitize failed due to timeout (%s); skipping remaining sanitizers.",
+                    timeout_label,
+                )
+                # Advance progress bar by number of remaining sanitizers
+                if ctx.pbar is not None and i < len(tools) - 1:
+                    for _ in range(len(tools) - i - 1):
+                        ctx.pbar()
+                return False
         if not sanitize_success and ctx.swap_config is None:
             logger.error(
                 "Baseline sanitize stdout: %s",
@@ -330,12 +345,22 @@ def _handle_early_exit(
     ctx: DriverPassContext,
     result: DriverPassResult,
     stage: str,
+    failed_tool: SanitizeTool | None = None,
 ) -> DriverPassResult:
     """Either raise BaselineError (baseline pass) or update progress and return result."""
     if ctx.swap_config is None:
         if stage == "build":
             logger.error("Baseline build stdout: %s", result.build_stdout)
             logger.error("Baseline build stderr: %s", result.build_stderr)
+        elif stage == "sanitize":
+            if failed_tool is None:
+                raise ValueError("Sanitize phase failure reported but no failed tool provided")
+            if result.sanitize_stdouts is None or result.sanitize_stderrs is None:
+                raise ValueError(
+                    "Sanitize phase failure reported but no sanitize stdouts or stderrs were set"
+                )
+            logger.error("Baseline sanitize stdout: %s", result.sanitize_stdouts[failed_tool])
+            logger.error("Baseline sanitize stderr: %s", result.sanitize_stderrs[failed_tool])
         elif stage == "run":
             logger.error("Baseline run output: %s", result.run_stdout)
             logger.error("Baseline run stderr: %s", result.run_stderr)
@@ -438,13 +463,21 @@ def run_driver_pass(ctx: DriverPassContext) -> DriverPassResult:
             if ctx.config.build_only:
                 return result
             if not ctx.config.no_sanitize and not _run_sanitize_phase(ctx, result, runner):
-                update_progress_for_skipped_operations(
-                    ctx.config,
-                    ctx.pbar,
+                if not result.sanitize_details:
+                    raise ValueError("Ran sanitize phase but no sanitize details were set")
+                return _handle_early_exit(
+                    ctx,
+                    result,
                     "sanitize",
+                    failed_tool=next(
+                        (
+                            t
+                            for t in SanitizeTool.__members__.values()
+                            if not result.sanitize_details[t]
+                        ),
+                        None,
+                    ),
                 )
-                result.run = False
-                return result
             run_ok, run_result = _run_run_phase(ctx, result, runner)
             if not run_ok:
                 return _handle_early_exit(ctx, result, "run")
