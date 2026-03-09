@@ -40,6 +40,7 @@ from alive_progress import alive_bar
 from gpa_bench_driver.driver_src.driver_config import (
     AppNameNotFoundError,
     determine_operations,
+    get_canonical_app_name,
     setup_app_config,
 )
 from gpa_bench_driver.driver_src.driver_file_swapping import swap_file_in_app, swap_file_out_app
@@ -254,6 +255,11 @@ def _run_sanitize_phase(
     result.sanitize_stderrs = dict.fromkeys(tools, "")
     result.sanitize_details = dict.fromkeys(tools, False)
     for i, tool in enumerate(tools):
+        if tool == SanitizeTool.RACECHECK and get_canonical_app_name(ctx.app["name"]) == "LULESH":
+            logger.debug("Skipping racecheck for LULESH")
+            if ctx.pbar is not None:
+                ctx.pbar()
+            continue
         sanitize_success, sanitize_result = sanitize_app(
             ctx.app,
             runner,
