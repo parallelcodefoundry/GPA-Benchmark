@@ -285,15 +285,18 @@ def _run_sanitize_phase(
             timeout_marker = b"TIME LIMIT" if runner.use_srun else b"TIMEOUT"
             if timeout_marker in stderr_raw:
                 timeout_label = "TIME LIMIT" if runner.use_srun else "TIMEOUT"
-                logger.error(
-                    "Sanitize failed due to timeout (%s); skipping remaining sanitizers.",
+                logger.warning(
+                    "Sanitize (%s) failed due to timeout (%s); skipping remaining sanitizers.",
+                    tool,
                     timeout_label,
                 )
-                # Advance progress bar by number of remaining sanitizers
-                if ctx.pbar is not None and i < len(tools) - 1:
-                    for _ in range(len(tools) - i - 1):
-                        ctx.pbar()
-                return False
+            else:
+                logger.debug("Sanitize (%s) failed,, skipping remaining sanitizers.", tool)
+            # Advance progress bar by number of remaining sanitizers
+            if ctx.pbar is not None and i < len(tools) - 1:
+                for _ in range(len(tools) - i - 1):
+                    ctx.pbar()
+            return False
     result.sanitize = all(result.sanitize_details.values())
     return result.sanitize
 

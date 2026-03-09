@@ -45,6 +45,15 @@ NCU_ARGS = [
 ]
 
 
+class ProfilingError(Exception):
+    """Exception raised when profiling fails."""
+
+    def __init__(self, message: str) -> None:
+        """Initialize a ProfilingError."""
+        self.message = message
+        super().__init__(self.message)
+
+
 def _update_pbar(
     pbar: Callable[[], None] | None,
     num_samples_finished: int,
@@ -102,10 +111,12 @@ def nsys_profile_app(
         result = runner.run(nsys_command, run_path)
 
         profile_file = profile_output.with_suffix(".nsys-rep")
-        if not (result.returncode == 0 and profile_file.exists()):
-            logger.warning("Could not find Nsight Systems profile file %s", profile_file)
-            _update_pbar(pbar, i, num_samples)
-            return False
+        if result.returncode != 0:
+            msg = f"Nsight Systems profile failed with return code {result.returncode}"
+            raise ProfilingError(msg)
+        if not profile_file.exists():
+            msg = f"Could not find Nsight Systems profile file {profile_file}"
+            raise ProfilingError(msg)
 
         if pbar is not None:
             pbar()
