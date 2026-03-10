@@ -255,12 +255,6 @@ def _run_sanitize_phase(
     result.sanitize_stderrs = dict.fromkeys(tools, "")
     result.sanitize_details = dict.fromkeys(tools, False)
     for i, tool in enumerate(tools):
-        if tool == SanitizeTool.RACECHECK and get_canonical_app_name(ctx.app["name"]) == "lulesh":
-            logger.debug("Skipping racecheck for LULESH")
-            if ctx.pbar is not None:
-                ctx.pbar()
-            result.sanitize_details[tool] = True
-            continue
         sanitize_success, sanitize_result = sanitize_app(
             ctx.app,
             runner,

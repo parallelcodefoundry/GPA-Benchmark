@@ -94,7 +94,6 @@ class SanitizeTool(Enum):
 
     MEMCHECK = "memcheck"
     INITCHECK = "initcheck"
-    RACECHECK = "racecheck"
     SYNCCHECK = "synccheck"
 
     def __str__(self) -> str:
@@ -120,7 +119,7 @@ def sanitize_app(
         app: Application configuration dictionary
         runner: Configured subprocess runner
         temp_dir: Temporary directory where working copy of application directory is located
-        tool: compute-sanitizer tool to use (MEMCHECK, INITCHECK, RACECHECK, SYNCCHECK)
+        tool: compute-sanitizer tool to use (MEMCHECK, INITCHECK, SYNCCHECK)
 
     Returns:
         Tuple of (success: bool, result: CompletedProcess)
