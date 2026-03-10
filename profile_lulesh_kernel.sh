@@ -5,15 +5,16 @@
 
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR" && pwd)"
-LULESH_SRC="$REPO_ROOT/LULESH/cuda/src"
-PROFILE_DIR="$REPO_ROOT/LULESH/cuda/ncu_profiles"
-PROFILE_SUFFIX="a100"
+SCRIPT_DIR="$(realpath $(dirname ${BASH_SOURCE[0]}))"
+REPO_ROOT="$(realpath ${SCRIPT_DIR})"
+LULESH_SRC="${REPO_ROOT}/LULESH/cuda/src"
+PROFILE_DIR="${SCRIPT_DIR}/profiles/"
+PROFILE_SUFFIX="A100"
+SM_VERSION=80
 
 # From driver_apps.yaml
 CLEAN_CMD="make -f ../build/Makefile clean"
-BUILD_CMD="make -f ../build/Makefile -j 8"
+BUILD_CMD="make -f ../build/Makefile -j 8 SM_VERSION=${SM_VERSION}"
 NCU_ARGS="-k ApplyMaterialPropertiesAndUpdateVolume_kernel --launch-skip 49 --launch-count 1"
 
 BLOCK_SIZES=(64 128 256 512)
