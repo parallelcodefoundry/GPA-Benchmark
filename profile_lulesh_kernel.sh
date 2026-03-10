@@ -15,8 +15,7 @@ SM_VERSION=80
 # From driver_apps.yaml
 CLEAN_CMD="make -f ../build/Makefile clean"
 BUILD_CMD="make -f ../build/Makefile -j 8 SM_VERSION=${SM_VERSION}"
-NCU_ARGS="-k ApplyMaterialPropertiesAndUpdateVolume_kernel --launch-skip 49 --launch-count 1"
-
+NCU_ARGS="-k ApplyMaterialPropertiesAndUpdateVolume_kernel --launch-skip 49 --launch-count 1 --metrics regex:sm__inst_executed_pipe_[^.]*.avg.pct_of_peak_sustained_active$, regex:sm__sass_thread_inst_executed_op.*sum$, regex:l1tex__t_set_.*_pipe_lsu_mem_global_op_ld.sum$, regex:l1tex__t_set_accesses.sum$, regex:l1tex__t_requests.sum$, regex:l1tex__m_xbar2l1tex_read_sectors.sum$, sm__average_thread_inst_executed_pred_on_per_inst_executed_realtime, regex:sm__sass_inst_executed.*sum$, regex:sm__inst_issued.avg.per_cycle_active$, regex:.*throughput.avg.pct_of_peak_sustained_active$, regex:.*throughput.avg.pct_of_peak_sustained_elapsed$ --set full --import-source yes --target-processes all"
 BLOCK_SIZES=(64 128 256 512)
 REG_COUNTS=(32 48 64 96)
 
