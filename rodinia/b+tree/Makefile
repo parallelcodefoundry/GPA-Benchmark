@@ -51,7 +51,7 @@ CUDA_FLAG = -lineinfo -arch=sm_$(SM_VERSION)
 #	GCC
 # ====================================================================================================100
 
-C_C = gcc
+C_C = gcc -Wno-implicit-int -Wno-implicit-function-declaration -Wno-incompatible-pointer-types
 # OMP_LIB = -lgomp
 # OMP_FLAG = -fopenmp
 # OCL_LIB = -lOpenCL

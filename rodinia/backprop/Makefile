@@ -2,7 +2,7 @@ include ../common/make.config
 
 # C compiler
 CC = gcc
-CC_FLAGS = -g -O3
+CC_FLAGS = -g -O3 -Wno-implicit-int -Wno-implicit-function-declaration -Wno-incompatible-pointer-types
 
 # CUDA compiler
 NVCC = $(CUDA_DIR)/bin/nvcc
