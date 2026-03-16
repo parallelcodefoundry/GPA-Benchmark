@@ -70,6 +70,7 @@ profiles/
 __pycache__/
 
 *.json
+*.tgz
 
 rodinia/backprop/reproducer.cu
 rodinia/backprop/reproducer

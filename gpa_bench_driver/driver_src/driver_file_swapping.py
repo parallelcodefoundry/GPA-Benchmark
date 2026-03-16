@@ -167,7 +167,10 @@ def _extract_path_metadata(root: Path, app_name: str) -> str | None:
     try:
         agentic_idx = parts.index("AgenticAnalyzer")
     except ValueError:
-        agentic_idx = len(parts)
+        try:
+            agentic_idx = parts.index("BulkAgenticAnalyzer")
+        except ValueError:
+            agentic_idx = len(parts)
     path_meta_parts = parts[:agentic_idx]
     for i, part in enumerate(path_meta_parts):
         if app_name in part:
