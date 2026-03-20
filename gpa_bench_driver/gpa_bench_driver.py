@@ -761,6 +761,12 @@ def parse_args() -> argparse.Namespace:
         help="Prepend Slurm srun to all commands and enforce timeout via srun --time=00:n; "
         "bypasses multiprocessing-based timeout handling (for use inside sbatch/salloc).",
     )
+    parser.add_argument(
+        "--small-problem",
+        action="store_true",
+        help="Use the app's small_run_command (if present in driver_apps.yaml) instead of "
+        "run_command.",
+    )
     return parser.parse_args()
 
 

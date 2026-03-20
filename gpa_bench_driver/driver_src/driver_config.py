@@ -103,6 +103,15 @@ def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] 
     if config.app != "all":
         config.app = get_canonical_app_name(config.app, app_config)
 
+    # Optionally run smaller problem sizes (when the app provides small_run_command).
+    # This is applied to the selected app(s) only.
+    if config.small_problem:
+        for app in app_config.get("apps", []):
+            if (
+                config.app == "all" or app.get("name") == config.app
+            ) and "small_run_command" in app:
+                app["run_command"] = app["small_run_command"]
+
     # Setup CUDA environment
     cuda_home = Path(
         config.cuda_home

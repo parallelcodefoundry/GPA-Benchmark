@@ -60,6 +60,8 @@ class DriverConfig:
         no_sanitize: Do not run compute sanitizer checks before running the app (default: False)
         srun: When True, prepend Slurm srun to all subprocess commands and use srun --time for
             timeout instead of multiprocessing-based timeout handling (default: False)
+        small_problem: Use app["small_run_command"] (if provided) instead of app["run_command"]
+            (default: False)
 
     """
 
@@ -86,6 +88,7 @@ class DriverConfig:
     suppress_command_stdout: bool
     no_sanitize: bool
     srun: bool
+    small_problem: bool
 
     def __init__(
         self,
@@ -113,6 +116,7 @@ class DriverConfig:
         suppress_command_stdout: bool = False,
         no_sanitize: bool = False,
         srun: bool = False,
+        small_problem: bool = False,
     ) -> None:
         """Initialize a DriverConfig object."""
         logger.debug("Entering DriverConfig")
@@ -139,6 +143,7 @@ class DriverConfig:
         self.suppress_command_stdout = suppress_command_stdout
         self.no_sanitize = no_sanitize
         self.srun = srun
+        self.small_problem = small_problem
 
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> "DriverConfig":
@@ -176,6 +181,7 @@ class DriverConfig:
             suppress_command_stdout=args.suppress_command_stdout,
             no_sanitize=args.no_sanitize,
             srun=args.srun,
+            small_problem=args.small_problem,
         )
 
 

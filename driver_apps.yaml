@@ -42,6 +42,7 @@ apps:
   clean_command: make clean
   build_command: make -j 8
   run_command: ./XSBench -m event -s large
+  small_run_command: ./XSBench -m event -s small
   ncu_args: -k xs_lookup_kernel
   kernel_file: XSBench/cuda/Simulation.cu
   pass_check_text: (Valid)
