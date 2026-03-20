@@ -206,6 +206,7 @@ def _init_pass_result(ctx: DriverPassContext) -> DriverPassResult:
     result.app_name = ctx.app["name"]
     result.run_num = ctx.swap_config.run_num if ctx.swap_config else None
     result.metadata = ctx.swap_config.metadata if ctx.swap_config else None
+    result.generating_llm = ctx.swap_config.generating_llm if ctx.swap_config else None
     result.swap_num = ctx.swap_config.optimized_code_num if ctx.swap_config else None
     if ctx.swap_config and ctx.swap_config.file_swaps:
         result.swap_file_src_path = ",".join(

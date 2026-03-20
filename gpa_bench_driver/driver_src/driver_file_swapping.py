@@ -12,6 +12,12 @@ from gpa_bench_driver.driver_src.driver_models import FileSwap, SwapConfig
 
 logger = logging.getLogger("GPA-Benchmark")
 
+# Known context configuration strings that may appear in swap filenames between
+# 'optimized_code_' and the generating LLM slug. Order matters for matching (longest first).
+VALID_CONTEXT_CONFIGS = ["llm_processed", "drgpu_only", "code_only", "codedata_only"]
+
+_SWAP_FILE_PATTERN = re.compile(r"run_(\d+)_optimized_code_(.*)_file_(\d+)\.cu$")
+
 
 def swap_file_in_app(swap_config: SwapConfig, temp_dir: Path, *, detect_regions: bool) -> None:
     """Swap files in the application directory on disk.
@@ -120,32 +126,79 @@ def swap_file_out_app(
             raise FileNotFoundError(msg)
 
 
-def _try_match_filename(
-    target_filename: str,
-    curr_filename: str,
-    root: Path,
-) -> tuple[str | None, int | None, str | None, int | None]:
-    """Try to match the filename to the target filename.
+def _parse_swap_middle(middle: str) -> tuple[str, str | None, int] | None:
+    """Parse the context config, generating LLM, and optimized code number from a swap filename.
+
+    The middle portion is everything between 'optimized_code_' and '_file_<N>.cu'.
+
+    Filename structure: run_<R>_optimized_code_[<context>_][<llm_slug>_]<opt_num>_file_<F>.cu
 
     Args:
-        target_filename: The target filename to match
+        middle: The middle portion (e.g. "llm_processed_openai_gpt-oss-120b_3",
+                "llm_processed_3", or "3")
+
+    Returns:
+        (context_config, generating_llm, optimized_code_num) or None if unparseable
+
+    """
+    last_underscore = middle.rfind("_")
+    if last_underscore == -1:
+        # No underscore: middle is just the optimized_code_num (empty context, no LLM)
+        if middle.isdigit():
+            return "", None, int(middle)
+        return None
+
+    opt_num_str = middle[last_underscore + 1:]
+    if not opt_num_str.isdigit():
+        return None
+
+    opt_num = int(opt_num_str)
+    prefix = middle[:last_underscore]
+
+    for ctx in sorted(VALID_CONTEXT_CONFIGS, key=len, reverse=True):
+        if prefix == ctx:
+            return ctx, None, opt_num
+        if prefix.startswith(ctx + "_"):
+            remaining = prefix[len(ctx) + 1:]
+            return ctx, remaining or None, opt_num
+
+    # No known context config found; treat entire prefix as generating LLM slug
+    return "", prefix or None, opt_num
+
+
+def _try_match_filename(
+    curr_filename: str,
+    root: Path,
+) -> tuple[str | None, int | None, str | None, str | None, int | None]:
+    """Try to match the filename to the swap file pattern.
+
+    Args:
         curr_filename: The current filename to match
         root: The root directory of the current filename
 
     Returns:
-        The app name, run number, metadata, and optimized code number if the filename matches the
-        target, otherwise None, None, None, None
+        (app_name, run_num, context_config, generating_llm, optimized_code_num) if matched,
+        otherwise (None, None, None, None, None)
 
     """
-    if match := re.match(target_filename, curr_filename):
-        path_parts = root.parts
-        if len(path_parts) >= 3:  # noqa: PLR2004
-            app_name = "_".join(path_parts[-3].split("_")[:-1])
-        else:
-            return None, None, None, None
+    match = _SWAP_FILE_PATTERN.match(curr_filename)
+    if not match:
+        return None, None, None, None, None
 
-        return app_name, int(match.group(1)), match.group(2), int(match.group(3))
-    return None, None, None, None
+    path_parts = root.parts
+    if len(path_parts) < 3:  # noqa: PLR2004
+        return None, None, None, None, None
+
+    app_name = "_".join(path_parts[-3].split("_")[:-1])
+    run_num = int(match.group(1))
+    middle = match.group(2)
+
+    parsed = _parse_swap_middle(middle)
+    if parsed is None:
+        return None, None, None, None, None
+
+    context_config, generating_llm, optimized_code_num = parsed
+    return app_name, run_num, context_config, generating_llm, optimized_code_num
 
 
 def _extract_path_metadata(root: Path, app_name: str) -> str | None:
@@ -182,7 +235,7 @@ def _extract_path_metadata(root: Path, app_name: str) -> str | None:
 
 def _find_grouped_files(
     swaps: Path,
-) -> dict[tuple[str, int, str | None, int], list[tuple[Path, str]]]:
+) -> dict[tuple[str, int, str | None, str | None, int], list[tuple[Path, str]]]:
     """Find the grouped files in the swaps directory.
 
     Args:
@@ -194,19 +247,12 @@ def _find_grouped_files(
 
     """
     logger.debug("Entering _find_grouped_files")
-    grouped_files: dict[tuple[str, int, str | None, int], list[tuple[Path, str]]] = {}
+    grouped_files: dict[tuple[str, int, str | None, str | None, int], list[tuple[Path, str]]] = {}
 
     for root, _, files in swaps.walk():
         for file in files:
-            run_num = None
-            optimized_code_num = None
-            app_name = None
-
-            # Try pattern: run_<num>_optimized_code_<metadata><num>_file_<n>.cu (new format)
-            app_name, run_num, metadata, optimized_code_num = _try_match_filename(
-                r"run_(\d+)_optimized_code_([a-z|_]*)(\d+)_file_(\d+)\.cu$",
-                file,
-                root,
+            app_name, run_num, context_config, generating_llm, optimized_code_num = (
+                _try_match_filename(file, root)
             )
 
             if app_name is None or run_num is None or optimized_code_num is None:
@@ -215,16 +261,17 @@ def _find_grouped_files(
             full_path = root / file
             # Path-based metadata: folder names from swaps root up to AgenticAnalyzer (exclusive)
             path_metadata = _extract_path_metadata(root, app_name)
-            if metadata == "":
-                metadata = "keet"  # TODO(jhdavis): Update KEET code to put this in for us
-            elif metadata is not None:
-                metadata = metadata.strip().lower()
-            # Combine path metadata with filename-derived metadata for keying
+            if context_config == "":
+                context_config = "keet"  # TODO(jhdavis): Update KEET code to put this in for us
+            elif context_config is not None:
+                context_config = context_config.strip().lower()
+            # Combine path metadata with filename-derived context config for the metadata key
+            metadata = context_config
             if path_metadata is not None:
                 metadata = f"{path_metadata}_{metadata}".strip() if metadata else path_metadata
             if metadata == "":
                 metadata = None
-            key = (app_name, run_num, metadata, optimized_code_num)
+            key = (app_name, run_num, metadata, generating_llm, optimized_code_num)
 
             with full_path.open("r", encoding="utf-8") as f:
                 code = f.read()
@@ -265,7 +312,7 @@ def _get_swappable_files(app_config: dict, app_name: str) -> list[Path]:
 
 
 def build_swaps_dict(
-    swaps: Path | dict[tuple[str, int, str | None, int], list[tuple[Path, str]]],
+    swaps: Path | dict[tuple[str, int, str | None, str | None, int], list[tuple[Path, str]]],
     app: str,
     app_config: dict,
 ) -> dict[str, SwapConfig]:
@@ -362,7 +409,7 @@ def _find_file_swap(
 
 
 def _build_swaps_dict_from_grouped_files(
-    grouped_files: dict[tuple[str, int, str | None, int], list[tuple[Path, str]]],
+    grouped_files: dict[tuple[str, int, str | None, str | None, int], list[tuple[Path, str]]],
     app_config: dict,
     app: str,
 ) -> dict[str, SwapConfig]:
@@ -380,7 +427,7 @@ def _build_swaps_dict_from_grouped_files(
     swaps_dict: dict[str, SwapConfig] = {}
 
     # Process each group to create SwapConfig objects
-    for (app_name, run_num, metadata, optimized_code_num), file_list in grouped_files.items():
+    for (app_name, run_num, metadata, generating_llm, optimized_code_num), file_list in grouped_files.items():
         # Filter by app name if specified
         if app not in ("all", app_name):
             continue
@@ -409,13 +456,15 @@ def _build_swaps_dict_from_grouped_files(
         if file_swaps:
             # Use a unique key for this swap config
             metadata_str = metadata if metadata is not None else "none"
-            config_key = f"{app_name}_run_{run_num}_opt_{optimized_code_num}_meta_{metadata_str}"
+            llm_str = generating_llm if generating_llm is not None else "none"
+            config_key = f"{app_name}_run_{run_num}_opt_{optimized_code_num}_meta_{metadata_str}_llm_{llm_str}"
             swaps_dict[config_key] = SwapConfig(
                 app_name=app_name,
                 file_swaps=file_swaps,
                 run_num=str(run_num),
                 optimized_code_num=str(optimized_code_num),
                 metadata=metadata,
+                generating_llm=generating_llm,
             )
         else:
             logger.warning(

@@ -256,6 +256,7 @@ class SwapConfig:
     run_num: str
     optimized_code_num: str
     metadata: str | None
+    generating_llm: str | None = None
 
 
 @dataclass
@@ -285,6 +286,7 @@ class DriverPassResult:
     app_name: str | None = None
     run_num: str | None = None
     metadata: str | None = None
+    generating_llm: str | None = None
     swap_num: str | None = None
     swap_file_src_path: Path | str | None = None
     build: bool | None = None
@@ -330,6 +332,7 @@ class DriverPassResult:
             "app_name": self.app_name,
             "run_num": self.run_num,
             "metadata": self.metadata,
+            "generating_llm": self.generating_llm,
             "swap_num": self.swap_num,
             "swap_file_src_path": str(self.swap_file_src_path),
             "build": self.build,
