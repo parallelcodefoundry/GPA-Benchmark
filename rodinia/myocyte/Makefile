@@ -11,12 +11,14 @@
 include ../common/make.config
 
 NVCC=$(CUDA_DIR)/bin/nvcc
+NVCC_FLAGS = -O3 -lineinfo -arch=sm_$(SM_VERSION)
+
 
 myocyte.out:		main.o
 	$(NVCC)	main.o \
 				-I/usr/local/cuda/include \
 				-L/usr/local/cuda/lib \
-				-lm -O3 -lineinfo -lcuda -lcudart \
+				-lm $(NVCC_FLAGS) -lcuda -lcudart \
                                 -o myocyte.out
 
 # compile main function file into object (binary)
@@ -39,9 +41,9 @@ main.o:	define.c \
 				kernel_fin_2.cu \
 				file.c \
 				timer.c
-	$(NVCC)	main.cu -lineinfo \
-				-c -O3 -g
+	$(NVCC)	main.cu $(NVCC_FLAGS) \
+				-c
 
 # delete all object files
 clean:
-	rm *.o *.out output.txt *.sqlite *.qdrep
+	rm *.o *.out result.txt *.sqlite *.qdrep
