@@ -132,8 +132,10 @@ def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] 
 
     # Load swaps or override swaps if specified
     if config.swaps_override:
-        formatted_swaps: dict[tuple[str, int, str | None, int], list[tuple[Path, str]]] = {
-            (config.app, 0, None, 0): list(config.swaps_override.items()),
+        formatted_swaps: dict[
+            tuple[str, int, str | None, str | None, int], list[tuple[Path, str]],
+        ] = {
+            (config.app, 0, None, None, 0): list(config.swaps_override.items()),
         }
         swaps_dict = build_swaps_dict(formatted_swaps, config.app, app_config)
         return app_config, swaps_dict, env
