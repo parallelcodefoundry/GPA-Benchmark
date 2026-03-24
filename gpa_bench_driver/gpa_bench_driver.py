@@ -515,7 +515,7 @@ def run_all(
     num_passes = 0
     for app in app_config["apps"]:
         # Filter by app name if specified
-        if config.app != "all" and app["name"].lower() != config.app:
+        if config.app != "all" and app["name"].lower() != config.app.lower():
             continue
         # Baseline pass
         num_passes += 1
@@ -531,7 +531,7 @@ def run_all(
     with alive_bar(total_operations, disable=config.no_progress) as pbar:
         for app in app_config["apps"]:
             # Filter by app name if specified
-            if config.app != "all" and app["name"].lower() != config.app:
+            if config.app != "all" and app["name"].lower() != config.app.lower():
                 continue
 
             with tempfile.TemporaryDirectory(dir=config.temp_dir) as temp_dir_raw:

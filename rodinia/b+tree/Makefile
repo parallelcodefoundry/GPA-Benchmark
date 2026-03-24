@@ -1,7 +1,12 @@
 include ../common/make.config
 
 CUDA_LIB =	-lcuda -lcudart
-CUDA_FLAG = -lineinfo -arch=sm_$(SM_VERSION)
+CUDA_FLAG = -lineinfo -arch=sm_$(SM_VERSION) -allow-unsupported-compiler
+
+# Use CUDA_HOME from environment if set
+ifdef CUDA_HOME
+	CUDA_DIR = $(CUDA_HOME)
+endif
 
 # ====================================================================================================100
 #	END

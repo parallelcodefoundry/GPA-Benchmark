@@ -37,7 +37,7 @@
 #elif defined(RD_WG_SIZE)
         #define BLOCK_SIZE_XY RD_WG_SIZE
 #else
-        #define BLOCK_SIZE_XY 4
+        #define BLOCK_SIZE_XY 32
 #endif
 
 int Size;
@@ -302,21 +302,41 @@ __global__ void Fan1(float *m_cuda, float *a_cuda, int Size, int t)
  **-------------------------------------------------------
  */
 // >>> START EDITABLE REGION ID=0
-__global__ void Fan2(float *m_cuda, float *a_cuda, float *b_cuda,int Size, int j1, int t)
+__global__ void Fan2(float *m_cuda, float *a_cuda, float *b_cuda, int Size, int j1, int t)
 {
+	// Shared memory for caching column t of m and row t of a
+	// Using 32x32 block size for better occupancy on A100
+	__shared__ float m_col[32];
+	__shared__ float a_row[32];
+
 	if(threadIdx.x + blockIdx.x * blockDim.x >= Size-1-t) return;
 	if(threadIdx.y + blockIdx.y * blockDim.y >= Size-t) return;
 
 	int xidx = blockIdx.x * blockDim.x + threadIdx.x;
 	int yidx = blockIdx.y * blockDim.y + threadIdx.y;
-	//printf("blockIdx.x:%d,threadIdx.x:%d,blockIdx.y:%d,threadIdx.y:%d,blockDim.x:%d,blockDim.y:%d\n",blockIdx.x,threadIdx.x,blockIdx.y,threadIdx.y,blockDim.x,blockDim.y);
 
-	a_cuda[Size*(xidx+1+t)+(yidx+t)] -= m_cuda[Size*(xidx+1+t)+t] * a_cuda[Size*t+(yidx+t)];
-	//a_cuda[xidx+1+t][yidx+t] -= m_cuda[xidx+1+t][t] * a_cuda[t][yidx+t];
-	if(yidx == 0){
-		//printf("blockIdx.x:%d,threadIdx.x:%d,blockIdx.y:%d,threadIdx.y:%d,blockDim.x:%d,blockDim.y:%d\n",blockIdx.x,threadIdx.x,blockIdx.y,threadIdx.y,blockDim.x,blockDim.y);
-		//printf("xidx:%d,yidx:%d\n",xidx,yidx);
-		b_cuda[xidx+1+t] -= m_cuda[Size*(xidx+1+t)+(yidx+t)] * b_cuda[t];
+	// Load column t of m into shared memory (coalesced for threads in x dimension)
+	// Each thread loads one element from column t
+	if (threadIdx.y == 0 && (xidx + 1 + t) < Size) {
+		m_col[threadIdx.x] = m_cuda[Size * (xidx + 1 + t) + t];
+	}
+
+	// Load row t of a into shared memory (coalesced for threads in y dimension)
+	if (threadIdx.x == 0 && (yidx + t) < Size) {
+		a_row[threadIdx.y] = a_cuda[Size * t + (yidx + t)];
+	}
+
+	// Wait for shared memory loads to complete
+	__syncthreads();
+
+	// Perform the update using shared memory
+	if ((xidx + 1 + t) < Size && (yidx + t) < Size) {
+		a_cuda[Size * (xidx + 1 + t) + (yidx + t)] -= m_col[threadIdx.x] * a_row[threadIdx.y];
+	}
+
+	// Update b vector - only thread with yidx == 0 does this
+	if (yidx == 0 && (xidx + 1 + t) < Size) {
+		b_cuda[xidx + 1 + t] -= m_col[threadIdx.x] * b_cuda[t];
 	}
 }
 // <<< END EDITABLE REGION ID=0

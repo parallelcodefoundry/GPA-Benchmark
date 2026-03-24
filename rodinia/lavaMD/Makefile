@@ -12,13 +12,13 @@ ifndef QUIET
 override OUTPUT = -DOUTPUT
 endif
 
-C_C = gcc
+C_C = gcc-13
 OMP_LIB = -lgomp
 OMP_FLAG = -fopenmp
 
-CUD_C = $(CUDA_DIR)/bin/nvcc
+CUD_C = $(CUDA_DIR)/bin/nvcc -allow-unsupported-compiler -ccbin $(C_C)
 # OMP_FLAG = 	-Xcompiler paste_one_here
-CUDA_FLAG = -lineinfo -arch=sm_$(SM_VERSION)
+CUDA_FLAG = -lineinfo -arch=sm_$(SM_VERSION) -std=c++20
 
 # link objects (binaries) together
 lavaMD:		main.o \

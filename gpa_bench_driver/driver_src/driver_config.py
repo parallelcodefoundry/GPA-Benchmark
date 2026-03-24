@@ -131,6 +131,27 @@ def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] 
     env["LD_LIBRARY_PATH"] = str(
         f"{cuda_lib64}:{existing_ld_path}" if existing_ld_path else cuda_lib64,
     )
+    
+    # Add nsys to PATH if it exists in the HPC SDK profilers directory
+    # For HPC SDK, nsys is in the compilers/bin or profilers directory
+    hpc_sdk_root = cuda_home.parent.parent
+    if hpc_sdk_root.exists():
+        # Try compilers/bin first
+        nsys_path = hpc_sdk_root / "compilers" / "bin" / "nsys"
+        if nsys_path.exists():
+            nsys_bin = str(hpc_sdk_root / "compilers" / "bin")
+            env["PATH"] = f"{nsys_bin}:{env['PATH']}"
+        else:
+            # Try profilers directory
+            profilers_dir = hpc_sdk_root / "profilers"
+            if profilers_dir.exists():
+                # Find the latest Nsight_Systems directory
+                for ns_dir in sorted(profilers_dir.glob("*/Nsight_Systems/target-linux-x64"), reverse=True):
+                    nsys_path = ns_dir / "nsys"
+                    if nsys_path.exists():
+                        nsys_bin = str(ns_dir)
+                        env["PATH"] = f"{nsys_bin}:{env['PATH']}"
+                        break
 
     logger.debug("CUDA environment set")
 

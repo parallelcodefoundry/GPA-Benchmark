@@ -11,7 +11,7 @@ EXE = bfs
 release: $(EXE)
 
 $(EXE): $(SRC)
-	$(CC) $(SRC) -O3 -lineinfo -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR)
+	$(CC) $(SRC) -O3 -lineinfo -allow-unsupported-compiler -ccbin gcc-13 -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR) -lstdc++
 
 enum: $(SRC)
 	$(CC) -deviceemu $(SRC) -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR)

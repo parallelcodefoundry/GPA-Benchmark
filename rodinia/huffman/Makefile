@@ -1,11 +1,13 @@
 include ../common/make.config
 
-NVCC=$(CUDA_DIR)/bin/nvcc
+NVCC=$(CUDA_DIR)/bin/nvcc -ccbin /usr/bin/gcc-13
 CC = g++
 
 CUDA_INCLUDEPATH=$(CUDA_DIR)/include
 
-NVCC_OPTS=-O3 -lineinfo -Xcompiler -m64 -g
+NVCC_OPTS=-O3 -lineinfo -Xcompiler -m64 -g -allow-unsupported-compiler -Xcompiler -std=c++11 -Xcompiler -D_GLIBCXX_USE_CXX11_ABI=0
+	# added ABI flag for compatibility
+
 
 GCC_OPTS=-O3 -Wall -Wextra -m64
 

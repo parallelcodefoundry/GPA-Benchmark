@@ -14,7 +14,7 @@ endif
 release: $(EXE)
 
 $(EXE): $(SRC)
-	$(CC) $(SRC) -O3 -lineinfo $(BENCH_PRINT) -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR) -arch=sm_$(SM_VERSION)
+	$(CC) $(SRC) -O3 -lineinfo $(BENCH_PRINT) -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR) -arch=sm_$(SM_VERSION) --allow-unsupported-compiler
 
 enum: $(SRC)
 	$(CC) -deviceemu $(SRC) $(BENCH_PRINT) -o $(EXE) -I$(INCLUDE) -L$$(CUDA_LIB_DIR)

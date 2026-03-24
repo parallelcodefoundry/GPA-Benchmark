@@ -95,6 +95,7 @@ apps:
   - rodinia/bfs/bfs.cu
   reference_output: rodinia/bfs/ref-result.txt
   test_output: rodinia/bfs/result.txt
+  build_command: make -B -j8 SM_VERSION=90
 
 - name: gaussian
   kernel_name: Fan2
@@ -137,7 +138,7 @@ apps:
 - name: lavaMD
   aliases:
   - lavamd
-  kernel_name: cuda_compute_flux
+  kernel_name: kernel_gpu_cuda
   path: rodinia/lavaMD
   run_command: ./lavaMD -boxes1d 10
   kernel_file: rodinia/lavaMD/kernel/kernel_gpu_cuda.cu
@@ -187,6 +188,8 @@ apps:
 - name: pathfinder
   kernel_name: dynproc_kernel
   path: rodinia/pathfinder
+  clean_command: make clean
+  build_command: make -j 8
   run_command: ./pathfinder 100000 100 20
   ncu_args: --launch-skip 2 --launch-count 1
   kernel_file: rodinia/pathfinder/pathfinder.cu
