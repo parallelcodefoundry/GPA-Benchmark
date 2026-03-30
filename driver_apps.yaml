@@ -137,7 +137,7 @@ apps:
 - name: lavaMD
   aliases:
   - lavamd
-  kernel_name: cuda_compute_flux
+  kernel_name: kernel_gpu_cuda
   path: rodinia/lavaMD
   run_command: ./lavaMD -boxes1d 10
   kernel_file: rodinia/lavaMD/kernel/kernel_gpu_cuda.cu
