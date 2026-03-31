@@ -122,10 +122,6 @@ def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] 
     )
     env = os.environ.copy()
     env["CUDA_HOME"] = str(cuda_home)
-    # Prepend cuda_home/bin to PATH so bare `nvcc` resolves to the correct version
-    cuda_bin = str(cuda_home / "bin")
-    existing_path = env.get("PATH", "")
-    env["PATH"] = f"{cuda_bin}:{existing_path}" if existing_path else cuda_bin
     cuda_lib64 = cuda_home / "lib64"
     existing_ld_path = env.get("LD_LIBRARY_PATH", "")
     env["LD_LIBRARY_PATH"] = str(

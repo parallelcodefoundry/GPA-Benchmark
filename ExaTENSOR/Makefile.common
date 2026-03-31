@@ -1,4 +1,5 @@
-CXX ?= nvcc
+CUDA_HOME ?= /usr/local/cuda
+CXX ?= $(CUDA_HOME)/bin/nvcc
 
 CPU_FLAGS += -g -fopenmp
 
