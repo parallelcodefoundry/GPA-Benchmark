@@ -115,7 +115,7 @@ def nsys_profile_app(
         True if profiling succeeded and output file exists, False otherwise
 
     """
-    profile_dir = setup_profile_dir()
+    profile_dir = setup_profile_dir(temp_dir)
 
     for i in range(num_samples):
         profile_name = _get_profile_filename(app, swap_config, i)
@@ -165,7 +165,7 @@ def ncu_profile_app(
         True if profiling succeeded and output file exists, False otherwise
 
     """
-    profile_dir = setup_profile_dir()
+    profile_dir = setup_profile_dir(temp_dir)
 
     for i in range(num_samples):
         profile_name = _get_profile_filename(app, swap_config, i)
@@ -249,7 +249,7 @@ def postprocess_nsys_app(
         List of dictionaries of kernel data if successful, None otherwise
 
     """
-    profile_dir = setup_profile_dir()
+    profile_dir = setup_profile_dir(temp_dir)
     kernel_rows = []
 
     for i in range(num_samples):

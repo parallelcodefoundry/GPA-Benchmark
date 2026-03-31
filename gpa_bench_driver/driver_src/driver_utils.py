@@ -424,17 +424,23 @@ def get_run_path(app: dict, temp_dir: Path) -> Path:
     return temp_dir / app["path"]
 
 
-def setup_profile_dir() -> Path:
+def setup_profile_dir(base_dir: Path | None = None) -> Path:
     """Set up the profile directory.
 
-    Set up the profile directory for storing profiling output files in the current working
-    directory ("profiles" subdirectory). Creates the directory if it doesn't exist.
+    Set up the profile directory for storing profiling output files.
+    Uses the provided base_dir (e.g. temp working directory) so that
+    profiles are created in a writable location rather than the
+    potentially read-only GPA-Benchmark root.
+
+    Args:
+        base_dir: Base directory for profiles.  Falls back to cwd if None.
 
     Returns:
         Path to the profile directory
 
     """
-    profile_dir: Path = Path.cwd() / "profiles"
+    parent = base_dir if base_dir is not None else Path.cwd()
+    profile_dir: Path = parent / "profiles"
     if not profile_dir.exists():
         profile_dir.mkdir(parents=True, exist_ok=True)
     return profile_dir
