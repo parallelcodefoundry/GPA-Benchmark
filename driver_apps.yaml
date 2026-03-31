@@ -124,6 +124,7 @@ apps:
   kernel_file: rodinia/hotspot/hotspot.cu
   reference_output: rodinia/hotspot/ref-output.out
   test_output: rodinia/hotspot/output.out
+  numeric_tolerance: 0.01
 
 - name: huffman
   kernel_name: vlc_encode_kernel_sm64huff

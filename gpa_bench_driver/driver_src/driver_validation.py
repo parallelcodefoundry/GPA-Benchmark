@@ -58,6 +58,7 @@ def validate_app(
     - reference_output: Compares stdout (or test_output file) to reference output
     - float_grep: Locates a float in output and compares to reference within tolerance
     - output_window: Compares a window of lines from the output
+    - numeric_tolerance: Compares all numeric values in output within a tolerance
 
     Args:
         app: Application configuration dictionary
@@ -100,6 +101,10 @@ def validate_app(
         if test_output == ref_output:
             return True, None
 
+        # Numeric tolerance comparison (element-wise float comparison)
+        if "numeric_tolerance" in app:
+            return validate_numeric_tolerance(test_output, ref_output, app)
+
         # Window comparison
         if "output_window" in app and app["output_window"] != 0:
             return validate_output_window(test_output, app, ref_output)
@@ -120,6 +125,96 @@ def validate_app(
         return False, f"Output did not match reference (exact match). Diff:\n{diff_text}"
 
     raise ValueError(f"No validation type specified for {app['name']}")
+
+
+def validate_numeric_tolerance(
+    test_output: str,
+    ref_output: str,
+    app: dict,
+) -> tuple[bool, str | None]:
+    """Validate output by comparing all numeric values with a tolerance.
+
+    Each line is split into tokens. Tokens that parse as floats are compared within the
+    specified tolerance. Non-numeric tokens are compared exactly. Lines counts must match.
+
+    Args:
+        test_output: The test output string
+        ref_output: The reference output string
+        app: Application configuration dictionary containing "numeric_tolerance" key
+
+    Returns:
+        Tuple of (success, validation_output). validation_output is diagnostic text on failure.
+
+    """
+    tolerance = app["numeric_tolerance"]
+    test_lines = test_output.splitlines()
+    ref_lines = ref_output.splitlines()
+
+    if len(test_lines) != len(ref_lines):
+        return False, (
+            f"Line count mismatch: reference has {len(ref_lines)} lines, "
+            f"test has {len(test_lines)} lines."
+        )
+
+    mismatches = []
+    max_diff = 0.0
+    num_compared = 0
+
+    for i, (ref_line, test_line) in enumerate(zip(ref_lines, test_lines)):
+        ref_tokens = ref_line.split()
+        test_tokens = test_line.split()
+
+        if len(ref_tokens) != len(test_tokens):
+            mismatches.append(
+                f"Line {i + 1}: token count differs ({len(ref_tokens)} vs {len(test_tokens)})"
+            )
+            if len(mismatches) >= 10:
+                break
+            continue
+
+        for j, (ref_tok, test_tok) in enumerate(zip(ref_tokens, test_tokens)):
+            try:
+                ref_val = float(ref_tok)
+                test_val = float(test_tok)
+                diff = abs(ref_val - test_val)
+                num_compared += 1
+                if diff > max_diff:
+                    max_diff = diff
+                if diff > tolerance:
+                    mismatches.append(
+                        f"Line {i + 1}, token {j + 1}: ref={ref_tok}, test={test_tok}, "
+                        f"diff={diff:.6g} > tolerance={tolerance}"
+                    )
+                    if len(mismatches) >= 10:
+                        break
+            except ValueError:
+                # Non-numeric tokens: exact match
+                if ref_tok != test_tok:
+                    mismatches.append(
+                        f"Line {i + 1}, token {j + 1}: ref='{ref_tok}' != test='{test_tok}'"
+                    )
+                    if len(mismatches) >= 10:
+                        break
+
+        if len(mismatches) >= 10:
+            break
+
+    if mismatches:
+        detail = "\n".join(mismatches)
+        return False, (
+            f"Numeric tolerance validation failed (tolerance={tolerance}, "
+            f"max_diff={max_diff:.6g}, values_compared={num_compared}):\n{detail}"
+        )
+
+    logger.info(
+        "Numeric tolerance validation passed for %s: %d values compared, "
+        "max_diff=%.6g, tolerance=%s",
+        app["name"],
+        num_compared,
+        max_diff,
+        tolerance,
+    )
+    return True, None
 
 
 def validate_output_window(

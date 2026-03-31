@@ -1,7 +1,8 @@
 include ../common/make.config
 
 NVCC=$(CUDA_DIR)/bin/nvcc -ccbin /usr/bin/gcc-12
-CC = g++
+CC = g++-12
+CXX = g++-12
 
 CUDA_INCLUDEPATH=$(CUDA_DIR)/include
 
@@ -23,7 +24,7 @@ override TESTING = -DCACHECWLUT
 endif
 
 pavle: $(OBJ) 
-	$(NVCC) $(TESTING) $(CACHECWLUT) $(NVCC_OPTS) $(OBJ) -o $(EXE) 
+	$(NVCC) $(TESTING) $(CACHECWLUT) $(NVCC_OPTS) $(OBJ) -o $(EXE) -lstdc++ -lm
 
 vlc_kernel_sm64huff.o: vlc_kernel_sm64huff.cu 
 	$(NVCC) $(TESTING) -c vlc_kernel_sm64huff.cu $(NVCC_OPTS)
@@ -40,8 +41,11 @@ pack_kernels.o: pack_kernels.cu
 main_test_cu.o: main_test_cu.cu cutil.h
 	$(NVCC) $(TESTING) -c main_test_cu.cu $(NVCC_OPTS) -I $(CUDA_INCLUDEPATH) 
 
-.o:.cpp
-	$(CC) ++ $(GCC_OPTS) -c $@ -o $<
+stats_logger.o: stats_logger.cpp
+	$(CXX) $(GCC_OPTS) -c $< -o $@
+
+cpuencode.o: cpuencode.cpp
+	$(CXX) $(GCC_OPTS) -c $< -o $@
 
 clean:
 	rm -f *.o $(EXE) *.qdrep *.sqlite
