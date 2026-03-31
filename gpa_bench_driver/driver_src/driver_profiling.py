@@ -223,6 +223,7 @@ def _parse_ncu_args(app: dict) -> tuple[str, int]:
 def postprocess_nsys_app(
     app: dict,
     runner: SubprocessRunner,
+    temp_dir: Path,
     num_samples: int,
     swap_config: SwapConfig | None = None,
     pbar: Callable[[], None] | None = None,
@@ -239,6 +240,7 @@ def postprocess_nsys_app(
     Args:
         app: Application configuration dictionary
         runner: Configured subprocess runner
+        temp_dir: Temporary directory where working copy of application directory is located
         num_samples: Number of times to collect profiles
         swap_config: Swap configuration containing the code to swap in
         pbar: Progress bar to update

@@ -409,6 +409,7 @@ def _run_nsys_post_phase(
         postprocess_nsys_result = postprocess_nsys_app(
             ctx.app,
             runner,
+            ctx.temp_dir,
             ctx.config.num_samples,
             ctx.swap_config,
             ctx.pbar,

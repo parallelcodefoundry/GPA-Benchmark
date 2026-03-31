@@ -107,10 +107,10 @@ apps:
   output_window: [-6, -4]
 
 - name: heartwall
-  kernel_name: heartwall_kernel
+  kernel_name: kernel
   path: rodinia/heartwall
   run_command: ./heartwall ../data/heartwall/test.avi 10
-  ncu_args: --launch-skip 4 --launch-count 1
+  ncu_args: -k kernel --launch-skip 4 --launch-count 1
   kernel_file: rodinia/heartwall/kernel.cu
   extra_files:
   - rodinia/heartwall/main.cu
