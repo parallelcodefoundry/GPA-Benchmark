@@ -297,7 +297,7 @@ def _get_swappable_files(app_config: dict, app_name: str) -> list[Path]:
     # Find the app config for this app
     app_dict = None
     for app_entry in app_config.get("apps", []):
-        if app_entry["name"].lower() == app_name:
+        if app_entry["name"].lower() == app_name.lower():
             app_dict = app_entry
             break
 
