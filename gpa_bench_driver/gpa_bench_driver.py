@@ -521,7 +521,7 @@ def run_all(
         num_passes += 1
         # Swap passes for this app
         if swaps_dict:
-            num_passes += sum(1 for swap in swaps_dict.values() if swap.app_name == app["name"].lower())
+            num_passes += sum(1 for swap in swaps_dict.values() if swap.app_name.lower() == app["name"].lower())
     if num_passes == 0:
         raise AppNameNotFoundError(config.app)
 
@@ -550,7 +550,7 @@ def run_all(
                 driver_passes: list[SwapConfig | None] = [None]  # None = baseline
                 if swaps_dict:
                     driver_passes.extend(
-                        [swap for swap in swaps_dict.values() if swap.app_name == app["name"].lower()],
+                        [swap for swap in swaps_dict.values() if swap.app_name.lower() == app["name"].lower()],
                     )
 
                 logger.debug("Driver is running %d passes for %s", len(driver_passes), app_name)
