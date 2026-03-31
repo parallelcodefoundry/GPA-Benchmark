@@ -12,11 +12,11 @@ ifndef QUIET
 override OUTPUT = -DOUTPUT
 endif
 
-C_C = gcc-13
+C_C = $(NVCC_CCBIN)
 OMP_LIB = -lgomp
 OMP_FLAG = -fopenmp
 
-CUD_C = $(CUDA_DIR)/bin/nvcc -allow-unsupported-compiler -ccbin $(C_C)
+CUD_C = $(CUDA_DIR)/bin/nvcc -allow-unsupported-compiler -ccbin $(NVCC_CCBIN)
 # OMP_FLAG = 	-Xcompiler paste_one_here
 CUDA_FLAG = -lineinfo -arch=sm_$(SM_VERSION) -std=c++20
 

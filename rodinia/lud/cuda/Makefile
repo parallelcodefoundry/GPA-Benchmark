@@ -1,7 +1,7 @@
 include ../../common/make.config
 
 CC = gcc
-NVCC = $(CUDA_DIR)/bin/nvcc
+NVCC = $(CUDA_DIR)/bin/nvcc -ccbin $(NVCC_CCBIN)
 
 DEFS += \
 		-DGPU_TIMER \

@@ -5,7 +5,7 @@ CC = gcc
 CC_FLAGS = -g -O3 -Wno-implicit-int -Wno-implicit-function-declaration -Wno-incompatible-pointer-types
 
 # CUDA compiler
-NVCC = $(CUDA_DIR)/bin/nvcc
+NVCC = $(CUDA_DIR)/bin/nvcc -ccbin $(NVCC_CCBIN)
 NVCC_FLAGS = -I$(CUDA_DIR)/include -arch=sm_$(SM_VERSION)
 
 # 'make dbg=1' enables NVCC debugging

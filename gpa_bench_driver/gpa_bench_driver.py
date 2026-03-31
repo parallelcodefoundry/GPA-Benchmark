@@ -541,6 +541,14 @@ def run_all(
                     Path(__file__).parent.parent / app_dir,
                     temp_dir / app_dir,
                 )
+                # Ensure all copied files are writable so builds can
+                # overwrite stale binaries and object files.
+                for root, dirs, files in os.walk(temp_dir / app_dir):
+                    for d in dirs:
+                        os.chmod(os.path.join(root, d), 0o755)
+                    for f in files:
+                        fp = os.path.join(root, f)
+                        os.chmod(fp, os.stat(fp).st_mode | 0o644)
 
                 app_name = app["name"]
                 results[app_name] = AppResults()

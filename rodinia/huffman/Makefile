@@ -1,6 +1,6 @@
 include ../common/make.config
 
-NVCC=$(CUDA_DIR)/bin/nvcc -ccbin /usr/bin/gcc-13
+NVCC=$(CUDA_DIR)/bin/nvcc -ccbin $(NVCC_CCBIN)
 CC = g++
 
 CUDA_INCLUDEPATH=$(CUDA_DIR)/include

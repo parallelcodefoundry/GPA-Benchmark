@@ -1,6 +1,6 @@
 include ../common/make.config
 
-CC := $(CUDA_DIR)/bin/nvcc
+CC := $(CUDA_DIR)/bin/nvcc -ccbin $(NVCC_CCBIN)
 
 INCLUDE := $(CUDA_DIR)/include
 
@@ -11,7 +11,7 @@ EXE = bfs
 release: $(EXE)
 
 $(EXE): $(SRC)
-	$(CC) $(SRC) -O3 -lineinfo -allow-unsupported-compiler -ccbin gcc-13 -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR) -lstdc++
+	$(CC) $(SRC) -O3 -lineinfo -allow-unsupported-compiler -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR) -lstdc++
 
 enum: $(SRC)
 	$(CC) -deviceemu $(SRC) -o $(EXE) -I$(INCLUDE) -L$(CUDA_LIB_DIR)

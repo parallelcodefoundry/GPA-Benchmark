@@ -65,7 +65,7 @@ C_C = gcc -Wno-implicit-int -Wno-implicit-function-declaration -Wno-incompatible
 #	NVCC
 # ====================================================================================================100
 
-CUD_C = $(CUDA_DIR)/bin/nvcc
+CUD_C = $(CUDA_DIR)/bin/nvcc -ccbin $(NVCC_CCBIN)
 # OMP_FLAG = 	-Xcompiler paste_one_here
 
 # ====================================================================================================100
