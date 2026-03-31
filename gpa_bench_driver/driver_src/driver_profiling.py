@@ -5,6 +5,7 @@ and Nsight Compute, and for postprocessing profiling data.
 """
 
 import logging
+import os
 import sqlite3
 from collections.abc import Callable, Hashable
 from pathlib import Path
@@ -81,14 +82,14 @@ def _get_profile_filename(app: dict, swap_config: SwapConfig | None, i: int) -> 
         i: Index of the sample
 
     Returns:
-        Profile filename
+        Profile filename (includes ``_pid_<pid>_`` for uniqueness across parallel runs).
 
     """
     profile_filename = app["name"]
     if swap_config:
         swap_filename = swap_config.file_swaps[0].swap_file_src_path.with_suffix("").name
         profile_filename += f"_{swap_filename}"
-    profile_filename += f"_sample_{i}"
+    profile_filename += f"_pid_{os.getpid()}_sample_{i}"
     return profile_filename
 
 
