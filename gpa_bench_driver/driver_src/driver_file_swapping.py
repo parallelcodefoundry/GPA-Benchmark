@@ -189,7 +189,7 @@ def _try_match_filename(
     if len(path_parts) < 3:  # noqa: PLR2004
         return None, None, None, None, None
 
-    app_name = "_".join(path_parts[-3].split("_")[:-1])
+    app_name = path_parts[-3].split("_")[0]
     run_num = int(match.group(1))
     middle = match.group(2)
 
@@ -254,11 +254,11 @@ def _find_grouped_files(
             app_name, run_num, context_config, generating_llm, optimized_code_num = (
                 _try_match_filename(file, root)
             )
+            full_path = root / file
 
             if app_name is None or run_num is None or optimized_code_num is None:
                 continue
 
-            full_path = root / file
             # Path-based metadata: folder names from swaps root up to AgenticAnalyzer (exclusive)
             path_metadata = _extract_path_metadata(root, app_name)
             if context_config == "":
@@ -278,6 +278,9 @@ def _find_grouped_files(
 
             if key not in grouped_files:
                 grouped_files[key] = []
+            #logger.debug("Logging new grouped file:")
+            #logger.debug("  path %s", str(full_path))
+            #logger.debug("  key (%s)", ",".join((str(k) for k in key)))
             grouped_files[key].append((full_path, code))
 
     return grouped_files
