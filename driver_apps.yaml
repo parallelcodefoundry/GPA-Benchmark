@@ -12,7 +12,7 @@ apps:
   clean_command: make clean
   build_command: make
   run_path: ExaTENSOR/exatensor
-  run_command: ./main
+  run_command: ./main 500
   kernel_file: ExaTENSOR/cuda2.cu
   extra_files:
   - ExaTENSOR/cuda_common.cu
@@ -41,7 +41,7 @@ apps:
   path: XSBench/cuda
   clean_command: make clean
   build_command: make -j 8
-  run_command: ./XSBench -m event -s large
+  run_command: ./XSBench -m event -s large -l 100000000
   small_run_command: ./XSBench -m event -s small
   ncu_args: -k xs_lookup_kernel
   kernel_file: XSBench/cuda/Simulation.cu
@@ -76,7 +76,7 @@ apps:
 - name: backprop
   kernel_name: bpnn_layerforward_CUDA
   path: rodinia/backprop
-  run_command: ./backprop 65536
+  run_command: ./backprop 1048560
   ncu_args: -k bpnn_layerforward_CUDA
   kernel_file: rodinia/backprop/backprop_cuda_kernel.cu
   extra_files:
@@ -100,11 +100,11 @@ apps:
 - name: gaussian
   kernel_name: Fan2
   path: rodinia/gaussian
-  run_command: ./gaussian -s 1024 | head -n -2
+  run_command: ./gaussian -s 4096
   ncu_args: -k Fan2 --launch-skip 250 --launch-count 1
   kernel_file: rodinia/gaussian/gaussian.cu
   reference_output: rodinia/gaussian/ref-output.txt
-  output_window: [-6, -4]
+  output_window: [-8, -6]
 
 - name: heartwall
   kernel_name: kernel
@@ -120,7 +120,7 @@ apps:
 - name: hotspot
   kernel_name: calculate_temp
   path: rodinia/hotspot
-  run_command: ./hotspot 512 2 2 ../data/hotspot/temp_512 ../data/hotspot/power_512 output.out
+  run_command: ./hotspot 1024 2 100 ../data/hotspot/temp_1024 ../data/hotspot/power_1024 output.out
   kernel_file: rodinia/hotspot/hotspot.cu
   reference_output: rodinia/hotspot/ref-output.out
   test_output: rodinia/hotspot/output.out
@@ -141,7 +141,7 @@ apps:
   - lavamd
   kernel_name: kernel_gpu_cuda
   path: rodinia/lavaMD
-  run_command: ./lavaMD -boxes1d 10
+  run_command: ./lavaMD -boxes1d 40
   kernel_file: rodinia/lavaMD/kernel/kernel_gpu_cuda.cu
   extra_files:
   - rodinia/lavaMD/kernel/kernel_gpu_cuda_wrapper.cu
@@ -151,7 +151,7 @@ apps:
 - name: lud
   kernel_name: lud_diagonal
   path: rodinia/lud
-  run_command: ./cuda/lud_cuda -s 256 -v
+  run_command: ./cuda/lud_cuda -s 8192
   ncu_args: -k lud_diagonal --launch-skip 7 --launch-count 1
   kernel_file: rodinia/lud/cuda/lud_kernel.cu
   fail_check_text: dismatch at
@@ -167,7 +167,7 @@ apps:
 - name: nw
   kernel_name: needle_cuda_shared_1
   path: rodinia/nw
-  run_command: ./needle 2048 10
+  run_command: ./needle 32768 10
   ncu_args: -k needle_cuda_shared_1 --launch-skip 127 --launch-count 1
   kernel_file: rodinia/nw/needle_kernel.cu
   extra_files:
@@ -178,7 +178,7 @@ apps:
 - name: particlefilter
   kernel_name: likelihood_kernel
   path: rodinia/particlefilter
-  run_command: ./particlefilter_float -x 128 -y 128 -z 10 -np 1000
+  run_command: ./particlefilter_float -x 2048 -y 2048 -z 10 -np 100000
   ncu_args: -k likelihood_kernel --launch-skip 2 --launch-count 1
   kernel_file: rodinia/particlefilter/ex_particle_CUDA_float_seq.cu
   reference_output: rodinia/particlefilter/ref-result.txt
@@ -191,7 +191,7 @@ apps:
   path: rodinia/pathfinder
   clean_command: make clean
   build_command: make -j 8
-  run_command: ./pathfinder 100000 100 20
+  run_command: ./pathfinder 300000 300 20
   ncu_args: --launch-skip 2 --launch-count 1
   kernel_file: rodinia/pathfinder/pathfinder.cu
   reference_output: rodinia/pathfinder/ref-result.txt
@@ -201,7 +201,7 @@ apps:
   - srad_v1
   kernel_name: reduce
   path: rodinia/srad/srad_v1
-  run_command: ./srad 100 0.5 502 458
+  run_command: ./srad 100 0.5 8192 8192
   ncu_args: -k "reduce" --launch-skip 99 --launch-count 1
   kernel_file: rodinia/srad/srad_v1/reduce_kernel.cu
   extra_files:
@@ -212,7 +212,7 @@ apps:
 - name: streamcluster
   kernel_name: kernel_compute_cost
   path: rodinia/streamcluster
-  run_command: ./sc_gpu 10 20 256 1024 1024 1000 none output.txt 1
+  run_command: ./sc_gpu 10 20 256 131072 131072 16000 none output.txt 1
   ncu_args: --launch-skip 300 --launch-count 1
   kernel_file: rodinia/streamcluster/streamcluster_cuda.cu
   reference_output: rodinia/streamcluster/ref-output.txt

@@ -74,3 +74,10 @@ __pycache__/
 
 rodinia/backprop/reproducer.cu
 rodinia/backprop/reproducer
+
+# Large reference outputs (>50MB) — regenerate with:
+#   python -m gpa_bench_driver --sm-version 80 --no-sanitize
+rodinia/gaussian/ref-output.txt
+rodinia/lavaMD/ref-result.txt
+rodinia/pathfinder/ref-result.txt
+rodinia/srad/srad_v1/ref_image_out.pgm
