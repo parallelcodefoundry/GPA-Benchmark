@@ -87,7 +87,7 @@ def _get_profile_filename(app: dict, swap_config: SwapConfig | None, i: int) -> 
     """
     profile_filename = app["name"]
     if swap_config:
-        swap_filename = swap_config.file_swaps[0].swap_file_src_path.with_suffix("").name
+        swap_filename = Path(swap_config.file_swaps[0].swap_file_src_path).with_suffix("").name
         profile_filename += f"_{swap_filename}"
     profile_filename += f"_pid_{os.getpid()}_sample_{i}"
     return profile_filename
