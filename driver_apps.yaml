@@ -202,7 +202,7 @@ apps:
   kernel_name: reduce
   path: rodinia/srad/srad_v1
   run_command: ./srad 100 0.5 8192 8192
-  ncu_args: -k "reduce" --launch-skip 99 --launch-count 1
+  ncu_args: -k "reduce" --launch-skip 297 --launch-count 1
   kernel_file: rodinia/srad/srad_v1/reduce_kernel.cu
   extra_files:
   - rodinia/srad/srad_v1/main.cu

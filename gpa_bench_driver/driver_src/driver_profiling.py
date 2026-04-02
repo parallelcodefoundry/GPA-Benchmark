@@ -129,6 +129,10 @@ def nsys_profile_app(
         result = runner.run(nsys_command, run_path)
 
         if result.returncode != 0:
+            stderr_text = ""
+            if result.stderr:
+                stderr_text = result.stderr.decode("utf-8", errors="ignore")[:500]
+                logger.warning("nsys stderr: %s", stderr_text)
             msg = f"Nsight Systems profile failed with return code {result.returncode}"
             raise ProfilingError(msg)
 
@@ -276,8 +280,18 @@ def postprocess_nsys_app(
 
         # Read sqlite file into pandas dataframes
         conn = sqlite3.connect(sqlite_file)
-        df = pd.read_sql_query("SELECT * FROM CUPTI_ACTIVITY_KIND_KERNEL", conn)
-        string_ids = pd.read_sql_query("SELECT * FROM StringIds", conn)
+        try:
+            df = pd.read_sql_query("SELECT * FROM CUPTI_ACTIVITY_KIND_KERNEL", conn)
+            string_ids = pd.read_sql_query("SELECT * FROM StringIds", conn)
+        except Exception as e:
+            conn.close()
+            logger.warning(
+                "Failed to read kernel data from %s: %s. "
+                "nsys may not have captured GPU kernels (CUPTI_ACTIVITY_KIND_KERNEL table missing).",
+                sqlite_file, e,
+            )
+            _update_pbar(pbar, i, num_samples)
+            return None
         conn.close()
 
         # Stringify demangledName, shortName, and mangledName columns by looking up string_ids
