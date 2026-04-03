@@ -28,10 +28,10 @@ apps:
   path: LULESH/cuda/src
   clean_command: make -f ../build/Makefile clean
   build_command: make -f ../build/Makefile -j 8
-  run_command: ./lulesh -s 45
+  run_command: ./lulesh -s 100
   ncu_args: -k ApplyMaterialPropertiesAndUpdateVolume_kernel --launch-skip 49 --launch-count 1
   kernel_file: LULESH/cuda/src/lulesh.cu
-  reference_output: LULESH/cuda/src/s45-ref-xyz.asc
+  reference_output: LULESH/cuda/src/s100-ref-xyz.asc
   test_output: LULESH/cuda/src/xyz.asc
 
 - name: xsbench
@@ -88,7 +88,7 @@ apps:
 - name: bfs
   kernel_name: Kernel
   path: rodinia/bfs
-  run_command: ./bfs ../data/bfs/graph1MW_6.txt
+  run_command: ./bfs ../data/bfs/graph8M.txt
   ncu_args: -k Kernel --launch-skip 8 --launch-count 1
   kernel_file: rodinia/bfs/kernel.cu
   extra_files:
@@ -120,7 +120,7 @@ apps:
 - name: hotspot
   kernel_name: calculate_temp
   path: rodinia/hotspot
-  run_command: ./hotspot 1024 2 100 ../data/hotspot/temp_1024 ../data/hotspot/power_1024 output.out
+  run_command: ./hotspot 1024 5 100 ../data/hotspot/temp_1024 ../data/hotspot/power_1024 output.out
   kernel_file: rodinia/hotspot/hotspot.cu
   reference_output: rodinia/hotspot/ref-output.out
   test_output: rodinia/hotspot/output.out
