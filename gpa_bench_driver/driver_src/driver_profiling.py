@@ -122,7 +122,15 @@ def nsys_profile_app(
 
         profile_path = Path(profile_dir / profile_name)
 
-        nsys_command = ["nsys", "profile", "-o", str(profile_path), "-f", "true"]
+        # --show-output=false: disables nsys stdout/stderr tee mechanism that
+        # crashes on Perlmutter with nsys 2025.3.x (StdStreamManagerImpl bug in
+        # PostForkHostSetup). GPU profiling data is still fully captured.
+        nsys_command = [
+            "nsys", "profile",
+            "-o", str(profile_path),
+            "-f", "true",
+            "--show-output=false",
+        ]
         nsys_command.extend(app["run_command"].split())
 
         run_path = get_run_path(app, temp_dir)
