@@ -74,3 +74,4 @@ __pycache__/
 
 rodinia/backprop/reproducer.cu
 rodinia/backprop/reproducer
+rodinia/particlefilter/result.txt

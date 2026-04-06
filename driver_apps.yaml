@@ -182,7 +182,7 @@ apps:
   reference_output: rodinia/particlefilter/ref-result.txt
   float_grep: "XE:"
   float_grep_2: "YE:"
-  float_tolerance: 0.5
+  float_tolerance: 0.00001
 
 - name: pathfinder
   kernel_name: dynproc_kernel
