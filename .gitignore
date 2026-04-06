@@ -88,3 +88,9 @@ rodinia/bfs/ref-result.txt
 rodinia/data/bfs/graph4M.txt
 rodinia/data/bfs/graph8M.txt
 rodinia/data/bfs/graph16M.txt
+
+# Large ref-output files (>100MB, regenerate locally)
+rodinia/gaussian/ref-output.txt
+rodinia/lavaMD/ref-result.txt
+rodinia/pathfinder/ref-result.txt
+rodinia/srad/srad_v1/ref_image_out.pgm
