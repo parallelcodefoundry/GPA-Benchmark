@@ -4,7 +4,7 @@
 //====================================================================================================100
 //====================================================================================================100
 
-// #include <stdlib.h>
+#include <stdlib.h>
 // #include <string.h>
 #include <stdio.h>
 // #include <math.h>
@@ -109,8 +109,8 @@ void read_graphics(	char* filename,
 
 	fid = fopen(filename, "r");
 	if( fid == NULL ){
-		printf( "The file was not opened for reading\n" );
-		return;
+		fprintf( stderr, "ERROR: Cannot open input file '%s' for reading\n", filename );
+		exit(1);
 	}
 
 	//================================================================================80

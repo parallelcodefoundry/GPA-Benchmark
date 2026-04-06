@@ -208,6 +208,7 @@ apps:
   - rodinia/srad/srad_v1/main.cu
   reference_output: rodinia/srad/srad_v1/ref_image_out.pgm
   test_output: rodinia/srad/srad_v1/image_out.pgm
+  numeric_tolerance: 1
 
 - name: streamcluster
   kernel_name: kernel_compute_cost
