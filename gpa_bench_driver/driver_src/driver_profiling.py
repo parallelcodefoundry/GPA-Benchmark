@@ -138,6 +138,8 @@ def nsys_profile_app(
                 stderr_text = result.stderr.decode("utf-8", errors="ignore")[:500]
                 logger.warning("nsys stderr: %s", stderr_text)
             msg = f"Nsight Systems profile failed with return code {result.returncode}"
+            if stderr_text:
+                msg += f": {stderr_text}"
             raise ProfilingError(msg)
 
         profile_file = Path(f"{profile_path!s}.nsys-rep")
