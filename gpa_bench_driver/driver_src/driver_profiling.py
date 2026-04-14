@@ -214,6 +214,8 @@ def _parse_ncu_args(app: dict) -> tuple[str, int]:
             if i + 1 < len(ncu_args):
                 if arg in ("-k", "--kernel-name"):
                     kernel_name = ncu_args[i + 1]
+                    # strip quotes from kernel_name
+                    kernel_name = kernel_name.strip('"').strip("'")
                 if arg == "--launch-skip":
                     launch_skip = int(ncu_args[i + 1])
 
