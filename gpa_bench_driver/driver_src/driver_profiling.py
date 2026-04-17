@@ -267,19 +267,27 @@ def postprocess_nsys_app(
     for i in range(num_samples):
         nsys_name = _get_profile_filename(app, swap_config, i)
         nsys_rep_file = Path(profile_dir / f"{nsys_name!s}.nsys-rep")
+        sqlite_file = Path(profile_dir / f"{nsys_name!s}.sqlite")
 
         if not nsys_rep_file.exists():
             msg = f"Could not find Nsight Systems profile file {nsys_rep_file}"
             raise ProfilingError(msg)
 
         # Convert nsys-rep to sqlite
-        postprocess_command = ["nsys", "export", "-f", "true", "-t", "sqlite", str(nsys_rep_file)]
+        # nsys 2025.3+ may write the sqlite output to the caller's cwd unless
+        # -o is provided explicitly. Keep it colocated with the matching
+        # .nsys-rep so postprocessing remains deterministic.
+        postprocess_command = [
+            "nsys", "export",
+            "-f", "true",
+            "-t", "sqlite",
+            "-o", str(sqlite_file),
+            str(nsys_rep_file),
+        ]
         if runner.run(postprocess_command, profile_dir).returncode != 0:
             logger.warning("Could not postprocess Nsight Systems profile file %s", nsys_rep_file)
             _update_pbar(pbar, i, num_samples)
             return None
-
-        sqlite_file = Path(profile_dir / f"{nsys_name!s}.sqlite")
         if not sqlite_file.exists():
             msg = f"Could not find sqlite file {sqlite_file}"
             raise ProfilingError(msg)
