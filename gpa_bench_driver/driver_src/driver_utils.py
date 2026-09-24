@@ -9,6 +9,8 @@ queues are used.
 import faulthandler
 import logging
 import multiprocessing
+import os
+import re
 import shutil
 import signal
 import subprocess
@@ -93,6 +95,7 @@ class SubprocessRunner:
         cwd: Path,
         *,
         quiet: bool | None = None,
+        stdout_cap_bytes: int | None = None,
     ) -> subprocess.CompletedProcess:
         """Execute a command and return the completed process.
 
@@ -111,6 +114,9 @@ class SubprocessRunner:
             quiet: Per-call quiet override.  When provided, takes precedence over the instance
                 -level quiet setting.  Useful for suppressing output on a single call (e.g. the
                 clean step) without changing the runner.
+            stdout_cap_bytes: If set, only the first stdout_cap_bytes bytes of the command's stdout
+                are read back into the CompletedProcess (the rest is discarded).  Used for runs whose
+                stdout is not validated (e.g. rocprofv3 timing runs of pathfinder, ~180 MB each).
 
         Returns:
             CompletedProcess object with returncode, stdout, and stderr attributes.
@@ -120,9 +126,9 @@ class SubprocessRunner:
         effective_quiet = self.quiet if quiet is None else quiet
 
         if self.use_srun:
-            result = self._run_with_srun(command, cwd)
+            result = self._run_with_srun(command, cwd, stdout_cap_bytes=stdout_cap_bytes)
         else:
-            result = self._run_with_multiprocessing(command, cwd)
+            result = self._run_with_multiprocessing(command, cwd, stdout_cap_bytes=stdout_cap_bytes)
 
         self._log_command_result(result, effective_quiet=effective_quiet)
         return result
@@ -131,6 +137,8 @@ class SubprocessRunner:
         self,
         command: list[str],
         cwd: Path,
+        *,
+        stdout_cap_bytes: int | None = None,
     ) -> subprocess.CompletedProcess:
         """Run command under srun with optional --time; no multiprocessing."""
         srun_cmd = ["srun"]
@@ -153,7 +161,7 @@ class SubprocessRunner:
                     stderr=err_f,
                 )
             with stdout_path.open("rb") as f:
-                stdout_bytes = f.read()
+                stdout_bytes = f.read() if stdout_cap_bytes is None else f.read(stdout_cap_bytes)
             with stderr_path.open("rb") as f:
                 stderr_bytes = f.read()
             return subprocess.CompletedProcess(
@@ -169,6 +177,8 @@ class SubprocessRunner:
         self,
         command: list[str],
         cwd: Path,
+        *,
+        stdout_cap_bytes: int | None = None,
     ) -> subprocess.CompletedProcess:
         """Run command in a worker process with multiprocessing-based timeout."""
         logger.debug("Running command %s in directory %s", " ".join(command), cwd)
@@ -200,7 +210,9 @@ class SubprocessRunner:
                     stderr=f"TIMEOUT ({self.timeout} seconds)".encode(),
                 )
 
-            worker_result = self._read_worker_result(result_dir, command)
+            worker_result = self._read_worker_result(
+                result_dir, command, stdout_cap_bytes=stdout_cap_bytes,
+            )
             if worker_result is not None:
                 return worker_result
             logger.error(
@@ -326,6 +338,8 @@ class SubprocessRunner:
         self,
         result_dir: Path,
         command: list[str],
+        *,
+        stdout_cap_bytes: int | None = None,
     ) -> subprocess.CompletedProcess | None:
         """Read returncode and stdout/stderr from worker result_dir. Returns None if missing."""
         returncode_path = result_dir / _RESULT_RETURNCODE_FILE
@@ -336,7 +350,13 @@ class SubprocessRunner:
 
         stdout_path = result_dir / _RESULT_STDOUT_FILE
         stderr_path = result_dir / _RESULT_STDERR_FILE
-        stdout_bytes = stdout_path.read_bytes() if stdout_path.exists() else b""
+        if not stdout_path.exists():
+            stdout_bytes = b""
+        elif stdout_cap_bytes is None:
+            stdout_bytes = stdout_path.read_bytes()
+        else:
+            with stdout_path.open("rb") as f:
+                stdout_bytes = f.read(stdout_cap_bytes)
         stderr_bytes = stderr_path.read_bytes() if stderr_path.exists() else b""
         return subprocess.CompletedProcess(
             args=command,
@@ -493,11 +513,91 @@ def detect_sm_version() -> int | None:
     return int(sm_version_str)
 
 
-def get_default_apps_config_path() -> Path:
+GPU_BACKENDS = ("cuda", "hip")
+
+
+def get_default_apps_config_path(gpu_backend: str = "cuda") -> Path:
     """Get the default apps config path.
+
+    Args:
+        gpu_backend: "cuda" (driver_apps.yaml, the default) or "hip"
+            (driver_apps.frontier.yaml, the AMD/Frontier ports)
 
     Returns:
         The default apps config path
 
     """
+    if gpu_backend == "hip":
+        return Path(__file__).parent.parent.parent / "driver_apps.frontier.yaml"
     return Path(__file__).parent.parent.parent / "driver_apps.yaml"
+
+
+def detect_gpu_backend() -> str:
+    """Detect the GPU backend of this machine.
+
+    Order: APPEB_PLATFORM (frontier -> hip, perlmutter -> cuda), then the presence of an AMD
+    KFD device node (/dev/kfd) or a rocminfo binary on PATH (-> hip), else cuda.
+
+    Returns:
+        "hip" or "cuda"
+
+    """
+    platform = os.environ.get("APPEB_PLATFORM", "").strip().lower()
+    if platform == "frontier":
+        return "hip"
+    if platform == "perlmutter":
+        return "cuda"
+    if Path("/dev/kfd").exists() or shutil.which("rocminfo"):
+        return "hip"
+    return "cuda"
+
+
+def detect_rocm_path() -> Path:
+    """Detect the ROCm install directory (ROCM_PATH, else hipcc on PATH, else /opt/rocm-7.0.2).
+
+    Returns:
+        The ROCm install directory path
+
+    """
+    env_path = os.environ.get("ROCM_PATH")
+    if env_path:
+        return Path(env_path)
+    hipcc = shutil.which("hipcc")
+    if hipcc:
+        return Path(hipcc).resolve().parent.parent
+    return Path("/opt/rocm-7.0.2")
+
+
+def detect_offload_arch(rocm_path: Path | None = None) -> str | None:
+    """Detect the GPU ISA (e.g. gfx90a) of the first GPU agent reported by rocminfo.
+
+    Args:
+        rocm_path: ROCm install directory whose bin/rocminfo is preferred
+
+    Returns:
+        The gfx architecture name, or None if rocminfo is unavailable or lists no GPU agent
+
+    """
+    candidates = []
+    if rocm_path is not None:
+        candidates.append(str(Path(rocm_path) / "bin" / "rocminfo"))
+    which = shutil.which("rocminfo")
+    if which:
+        candidates.append(which)
+    for rocminfo in candidates:
+        if not Path(rocminfo).exists():
+            continue
+        try:
+            result = subprocess.run(  # noqa: S603
+                [rocminfo],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=60,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        match = re.search(r"^\s*Name:\s*(gfx[0-9a-z]+)\s*$", result.stdout, re.MULTILINE)
+        if match:
+            return match.group(1)
+    return None

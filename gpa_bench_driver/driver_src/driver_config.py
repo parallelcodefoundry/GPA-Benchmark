@@ -4,8 +4,10 @@ This module handles loading and validating application configuration, determinin
 which operations to perform, and setting up the environment.
 """
 
+import copy
 import logging
 import os
+import resource
 from pathlib import Path
 
 import yaml
@@ -92,6 +94,15 @@ def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] 
     if config.swaps_override and config.app == "all":
         msg = "Cannot specify swaps_override for apps = all."
         raise OperationCombinationError(msg)
+    gpu_backend = getattr(config, "gpu_backend", "cuda")
+    app_overrides = getattr(config, "app_overrides", None)
+    gpu_device = getattr(config, "gpu_device", None)
+    if app_overrides and config.app == "all":
+        msg = "Cannot specify app_overrides for apps = all."
+        raise OperationCombinationError(msg)
+    if gpu_backend == "hip" and config.postprocess_nsys:
+        msg = "postprocess_nsys is not available on the hip backend (rocprofv3 timing is inline)."
+        raise OperationCombinationError(msg)
 
     # Load config file
     with config.config.open("r", encoding="utf-8") as f:
@@ -112,6 +123,70 @@ def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] 
             ) and "small_run_command" in app:
                 app["run_command"] = app["small_run_command"]
 
+    # Merge per-call overrides into the selected app's entry (e.g. a hidden-size run_command
+    # together with its expected_checksum).
+    if app_overrides:
+        for app in app_config.get("apps", []):
+            if app.get("name") == config.app:
+                app.update(copy.deepcopy(app_overrides))
+
+    if gpu_backend == "hip":
+        env = _setup_hip_env(config)
+    else:
+        env = _setup_cuda_env(config)
+
+    if gpu_device is not None:
+        if gpu_backend == "hip":
+            # Pin with ROCR_VISIBLE_DEVICES only; the HIP/CUDA-level filters would re-index it.
+            for var in ("HIP_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES", "GPU_DEVICE_ORDINAL"):
+                env.pop(var, None)
+            env["ROCR_VISIBLE_DEVICES"] = str(gpu_device)
+        else:
+            env["CUDA_VISIBLE_DEVICES"] = str(gpu_device)
+
+    # Load swaps or override swaps if specified
+    if config.swaps_override:
+        formatted_swaps: dict[
+            tuple[str, int, str | None, str | None, int], list[tuple[Path, str]],
+        ] = {
+            (config.app, 0, None, None, 0): list(config.swaps_override.items()),
+        }
+        swaps_dict = build_swaps_dict(formatted_swaps, config.app, app_config)
+        return app_config, swaps_dict, env
+
+    if config.swaps:
+        swaps_dict = build_swaps_dict(config.swaps, config.app, app_config)
+        return app_config, swaps_dict, env
+
+    return app_config, None, env
+
+
+def _setup_hip_env(config: DriverConfig) -> dict:
+    """Environment for the hip backend: ROCm bin/lib first, core dumps off.
+
+    RLIMIT_CORE is set to 0 for this process, so every build/run/rocprofv3 child inherits
+    ``ulimit -c 0`` (a crashing app or GPU fault must not leave a core file on Lustre).
+    """
+    try:
+        _, hard = resource.getrlimit(resource.RLIMIT_CORE)
+        resource.setrlimit(resource.RLIMIT_CORE, (0, hard))
+    except (ValueError, OSError) as exc:  # pragma: no cover - platform specific
+        logger.warning("Could not disable core dumps: %s", exc)
+    env = os.environ.copy()
+    rocm_path = Path(getattr(config, "rocm_path", None) or "/opt/rocm-7.0.2")
+    env["ROCM_PATH"] = str(rocm_path)
+    rocm_bin = str(rocm_path / "bin")
+    existing_path = env.get("PATH", "")
+    env["PATH"] = f"{rocm_bin}:{existing_path}" if existing_path else rocm_bin
+    rocm_lib = str(rocm_path / "lib")
+    existing_ld_path = env.get("LD_LIBRARY_PATH", "")
+    env["LD_LIBRARY_PATH"] = f"{rocm_lib}:{existing_ld_path}" if existing_ld_path else rocm_lib
+    logger.debug("ROCm environment set (%s)", rocm_path)
+    return env
+
+
+def _setup_cuda_env(config: DriverConfig) -> dict:
+    """Environment for the cuda backend (CUDA_HOME, nvcc and nsys on PATH)."""
     # Setup CUDA environment
     cuda_home = Path(
         config.cuda_home
@@ -154,22 +229,7 @@ def setup_app_config(config: DriverConfig) -> tuple[dict, dict[str, SwapConfig] 
                         break
 
     logger.debug("CUDA environment set")
-
-    # Load swaps or override swaps if specified
-    if config.swaps_override:
-        formatted_swaps: dict[
-            tuple[str, int, str | None, str | None, int], list[tuple[Path, str]],
-        ] = {
-            (config.app, 0, None, None, 0): list(config.swaps_override.items()),
-        }
-        swaps_dict = build_swaps_dict(formatted_swaps, config.app, app_config)
-        return app_config, swaps_dict, env
-
-    if config.swaps:
-        swaps_dict = build_swaps_dict(config.swaps, config.app, app_config)
-        return app_config, swaps_dict, env
-
-    return app_config, None, env
+    return env
 
 
 def get_canonical_app_name(

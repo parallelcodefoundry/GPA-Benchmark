@@ -26,16 +26,24 @@ API Usage:
 """
 
 import argparse
+import contextlib
 import logging
 import os
 import shutil
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from subprocess import CompletedProcess
 
-from alive_progress import alive_bar
+try:
+    from alive_progress import alive_bar
+except ImportError:  # optional: not installed in every venv (e.g. APPEB's Frontier venv)
+
+    @contextlib.contextmanager
+    def alive_bar(*_args: object, **_kwargs: object) -> Iterator[Callable[..., None]]:
+        """No-op stand-in for alive_progress.alive_bar."""
+        yield lambda *_a, **_k: None
 
 from gpa_bench_driver.driver_src.driver_config import (
     AppNameNotFoundError,
@@ -63,6 +71,7 @@ from gpa_bench_driver.driver_src.driver_profiling import (
     postprocess_nsys_app,
 )
 from gpa_bench_driver.driver_src.driver_reporting import print_report_table, save_results
+from gpa_bench_driver.driver_src.driver_rocprof import rocprof_time_app
 from gpa_bench_driver.driver_src.driver_utils import (
     SubprocessRunner,
     SubprocessRunnerConfig,
@@ -105,6 +114,7 @@ APP_DIRS = [
     "PeleC",
     "Quicksilver",
     "rodinia",
+    "XSBench-hip",  # before "XSBench": the lookup below is a substring match
     "XSBench",
 ]
 
@@ -223,13 +233,24 @@ def _run_build_phase(
     runner: SubprocessRunner,
 ) -> bool:
     """Run build phase; return True if build succeeded and binary exists."""
-    build_success, build_result = build_app(
-        ctx.app,
-        ctx.config.sm_version,
-        runner,
-        ctx.temp_dir,
-        no_clean=ctx.config.no_clean,
-    )
+    if _backend(ctx.config) == "hip":
+        build_success, build_result = build_app(
+            ctx.app,
+            ctx.config.sm_version,
+            runner,
+            ctx.temp_dir,
+            no_clean=ctx.config.no_clean,
+            gpu_backend="hip",
+            offload_arch=ctx.config.offload_arch,
+        )
+    else:
+        build_success, build_result = build_app(
+            ctx.app,
+            ctx.config.sm_version,
+            runner,
+            ctx.temp_dir,
+            no_clean=ctx.config.no_clean,
+        )
     result.build_stdout = (
         build_result.stdout.decode("utf-8") if build_result.stdout is not None else ""
     )
@@ -373,12 +394,49 @@ def _handle_early_exit(
     return result
 
 
+def _backend(config: DriverConfig) -> str:
+    """GPU backend of a config ("cuda" for configs that predate the hip backend)."""
+    return getattr(config, "gpu_backend", "cuda")
+
+
+def _run_rocprof_phase(
+    ctx: DriverPassContext,
+    result: DriverPassResult,
+    runner: SubprocessRunner,
+) -> None:
+    """hip backend: kernel timing with rocprofv3 (selected by config.nsys).
+
+    Fills result.nsys_profile/nsys_post/nsys_data (one timing dict per sample, see
+    driver_rocprof) so consumers of the cuda backend's nsys_data keep working.
+    """
+    if ctx.config.ncu:
+        logger.warning("Nsight Compute is not available on the hip backend; skipping it.")
+    if not ctx.config.nsys:
+        return
+    data = rocprof_time_app(
+        ctx.app,
+        runner,
+        ctx.temp_dir,
+        ctx.config.num_samples,
+        swap_config=ctx.swap_config,
+        pbar=ctx.pbar,
+        rocm_path=getattr(ctx.config, "rocm_path", None),
+        retain_profiles=ctx.config.retain_nsys_profiles,
+    )
+    result.nsys_profile = data is not None
+    result.nsys_post = data is not None
+    result.nsys_data = data
+
+
 def _run_profiling_phase(
     ctx: DriverPassContext,
     result: DriverPassResult,
     runner: SubprocessRunner,
 ) -> None:
     """Run NSYS and NCU profiling if enabled."""
+    if _backend(ctx.config) == "hip":
+        _run_rocprof_phase(ctx, result, runner)
+        return
     if ctx.config.nsys:
         result.nsys_profile = nsys_profile_app(
             ctx.app,
@@ -405,6 +463,8 @@ def _run_nsys_post_phase(
     runner: SubprocessRunner,
 ) -> None:
     """Postprocess NSYS (standalone or after profiling)."""
+    if _backend(ctx.config) == "hip":
+        return  # rocprofv3 timing is parsed inline by _run_rocprof_phase
     if ctx.config.postprocess_nsys or (ctx.config.nsys and result.nsys_profile):
         postprocess_nsys_result = postprocess_nsys_app(
             ctx.app,
@@ -537,11 +597,14 @@ def run_all(
 
             with tempfile.TemporaryDirectory(dir=config.temp_dir) as temp_dir_raw:
                 temp_dir = Path(temp_dir_raw)
-                app_dir = next(app_dir for app_dir in APP_DIRS if app_dir in app["path"])
-                shutil.copytree(
-                    Path(__file__).parent.parent / app_dir,
-                    temp_dir / app_dir,
-                )
+                if _backend(config) == "hip":
+                    app_dir = _stage_hip_app(app, Path(__file__).parent.parent, temp_dir)
+                else:
+                    app_dir = next(app_dir for app_dir in APP_DIRS if app_dir in app["path"])
+                    shutil.copytree(
+                        Path(__file__).parent.parent / app_dir,
+                        temp_dir / app_dir,
+                    )
                 # Ensure all copied files are writable so builds can
                 # overwrite stale binaries and object files.
                 for root, dirs, files in os.walk(temp_dir / app_dir):
@@ -591,6 +654,27 @@ def run_all(
                     logger.debug("  NSYS Data: %s", pass_results.nsys_data)
 
     return results, operations, long_results
+
+
+def _stage_hip_app(app: dict, gpa_root: Path, temp_dir: Path) -> str:
+    """Copy one hip app into temp_dir and return the top-level directory to chmod.
+
+    The cuda path copies the whole top-level app tree (all of rodinia/, including ~2 GB of
+    input data). The hip ports are self-contained: only the app's own directory is copied
+    (without object files and setup build logs; the driver cleans and rebuilds anyway), and
+    the read-only Rodinia inputs are symlinked as rodinia/data.
+    """
+    top = Path(app["path"]).parts[0]
+    ignore = shutil.ignore_patterns("*.o", ".frontier_build.log", ".rocprofv3")
+    if top == "rodinia":
+        app_rel = Path(app["path"])
+        shutil.copytree(gpa_root / app_rel, temp_dir / app_rel, ignore=ignore, symlinks=True)
+        data = gpa_root / "rodinia" / "data"
+        if data.exists():
+            (temp_dir / "rodinia" / "data").symlink_to(data.resolve(), target_is_directory=True)
+        return str(app_rel)
+    shutil.copytree(gpa_root / top, temp_dir / top, ignore=ignore, symlinks=True)
+    return top
 
 
 def run_driver(
@@ -770,6 +854,27 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Prepend Slurm srun to all commands and enforce timeout via srun --time=00:n; "
         "bypasses multiprocessing-based timeout handling (for use inside sbatch/salloc).",
+    )
+    parser.add_argument(
+        "--gpu-backend",
+        type=str,
+        choices=["cuda", "hip"],
+        default=None,
+        help="GPU backend (default: auto-detect; hip = AMD/Frontier: hipcc builds, rocprofv3 "
+        "timing via --nsys, driver_apps.frontier.yaml, no compute-sanitizer)",
+    )
+    parser.add_argument(
+        "--offload-arch",
+        type=str,
+        default=None,
+        help="AMD GPU ISA for hip builds (default: auto-detect from rocminfo, then gfx90a)",
+    )
+    parser.add_argument(
+        "--gpu-device",
+        type=int,
+        default=None,
+        help="Run the app on this GPU only (ROCR_VISIBLE_DEVICES on hip, CUDA_VISIBLE_DEVICES "
+        "on cuda)",
     )
     parser.add_argument(
         "--small-problem",

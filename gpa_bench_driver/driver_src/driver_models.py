@@ -16,7 +16,11 @@ from numpy import mean
 
 from gpa_bench_driver.driver_src.driver_operations import SanitizeTool
 from gpa_bench_driver.driver_src.driver_utils import (
+    GPU_BACKENDS,
     detect_cuda_home,
+    detect_gpu_backend,
+    detect_offload_arch,
+    detect_rocm_path,
     detect_sm_version,
     get_default_apps_config_path,
 )
@@ -62,6 +66,18 @@ class DriverConfig:
             timeout instead of multiprocessing-based timeout handling (default: False)
         small_problem: Use app["small_run_command"] (if provided) instead of app["run_command"]
             (default: False)
+        gpu_backend: "cuda" or "hip" (default: None = auto-detect: APPEB_PLATFORM, then
+            /dev/kfd or rocminfo -> "hip", else "cuda"). The hip backend builds with hipcc
+            (make OFFLOAD_ARCH=<arch>), skips compute-sanitizer, times kernels with rocprofv3
+            (--nsys selects it; see driver_rocprof) and reads driver_apps.frontier.yaml unless
+            config is given.
+        offload_arch: AMD GPU ISA for hip builds (default: None = rocminfo, else "gfx90a")
+        rocm_path: ROCm install for hip (default: None = ROCM_PATH, hipcc on PATH, else
+            /opt/rocm-7.0.2)
+        app_overrides: Keys merged into the selected app's YAML entry after loading (e.g. a
+            different run_command + expected_checksum); requires a single app (default: None)
+        gpu_device: Run the app on this GPU only: ROCR_VISIBLE_DEVICES=<n> (hip) or
+            CUDA_VISIBLE_DEVICES=<n> (cuda) (default: None = leave the environment alone)
 
     """
 
@@ -89,6 +105,11 @@ class DriverConfig:
     no_sanitize: bool
     srun: bool
     small_problem: bool
+    gpu_backend: str
+    offload_arch: str | None
+    rocm_path: Path | None
+    app_overrides: dict | None
+    gpu_device: int | None
 
     def __init__(
         self,
@@ -117,17 +138,38 @@ class DriverConfig:
         no_sanitize: bool = False,
         srun: bool = False,
         small_problem: bool = False,
+        gpu_backend: str | None = None,
+        offload_arch: str | None = None,
+        rocm_path: Path | None = None,
+        app_overrides: dict | None = None,
+        gpu_device: int | None = None,
     ) -> None:
         """Initialize a DriverConfig object."""
         logger.debug("Entering DriverConfig")
+        self.gpu_backend = gpu_backend or detect_gpu_backend()
+        if self.gpu_backend not in GPU_BACKENDS:
+            msg = f"gpu_backend must be one of {GPU_BACKENDS}, got {self.gpu_backend!r}"
+            raise ValueError(msg)
         self.app = app
         self.cuda_home = Path(cuda_home or detect_cuda_home() or "/usr/local/cuda")
         self.sm_version = sm_version or detect_sm_version() or 90
+        if self.gpu_backend == "hip":
+            self.rocm_path = Path(rocm_path) if rocm_path is not None else detect_rocm_path()
+            self.offload_arch = offload_arch or detect_offload_arch(self.rocm_path) or "gfx90a"
+        else:
+            self.rocm_path = Path(rocm_path) if rocm_path is not None else None
+            self.offload_arch = offload_arch
+        self.app_overrides = app_overrides
+        self.gpu_device = gpu_device
         self.no_clean = no_clean
         self.build_only = build_only
         self.nsys = nsys
         self.ncu = ncu
-        self.config = Path(config) if config is not None else get_default_apps_config_path()
+        self.config = (
+            Path(config)
+            if config is not None
+            else get_default_apps_config_path(self.gpu_backend)
+        )
         self.swaps = Path(swaps) if swaps is not None else None
         self.detect_regions = detect_regions
         self.postprocess_nsys = postprocess_nsys
@@ -141,7 +183,8 @@ class DriverConfig:
         self.timeout = timeout
         self.subprocess_output_char_limit = subprocess_output_char_limit
         self.suppress_command_stdout = suppress_command_stdout
-        self.no_sanitize = no_sanitize
+        # compute-sanitizer is CUDA-only: the hip backend never sanitizes
+        self.no_sanitize = no_sanitize or self.gpu_backend == "hip"
         self.srun = srun
         self.small_problem = small_problem
 
@@ -164,9 +207,7 @@ class DriverConfig:
             build_only=args.build_only,
             nsys=args.nsys,
             ncu=args.ncu,
-            config=Path(args.config)
-            if args.config is not None
-            else get_default_apps_config_path(),
+            config=Path(args.config) if args.config is not None else None,
             swaps=Path(args.swaps) if args.swaps is not None else None,
             detect_regions=args.detect_regions,
             postprocess_nsys=args.postprocess_nsys,
@@ -182,6 +223,9 @@ class DriverConfig:
             no_sanitize=args.no_sanitize,
             srun=args.srun,
             small_problem=args.small_problem,
+            gpu_backend=getattr(args, "gpu_backend", None),
+            offload_arch=getattr(args, "offload_arch", None),
+            gpu_device=getattr(args, "gpu_device", None),
         )
 
 

@@ -1,0 +1,4 @@
+"Kind","Agent_Id","Queue_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","Private_Segment_Size","Group_Segment_Size","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
+"KERNEL_DISPATCH",5,1,264666,1,18,"bpnn_layerforward_CUDA(float*, float*, float*, float*, int, int)",1,273041566061763,273041566520645,0,1088,16,16,1,16,1048560,1
+"KERNEL_DISPATCH",5,1,264666,2,8,"__amd_rocclr_copyBuffer",2,273041571079711,273041571086271,0,0,512,1,1,512,1,1
+"KERNEL_DISPATCH",5,1,264666,3,17,"bpnn_adjust_weights_cuda(float*, int, float*, int, float*, float*)",3,273041577698630,273041578114313,0,0,16,16,1,16,1048560,1

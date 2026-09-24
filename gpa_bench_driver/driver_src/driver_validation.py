@@ -53,6 +53,8 @@ def validate_app(
     """Validate the application output.
 
     Supports multiple validation types:
+    - expected_checksum: {regex, value}; exactly one stdout line must match regex (MULTILINE)
+      and its first group must equal value (the app's own "(Valid)" verdict is ignored)
     - fail_check_text: Returns False if stdout contains the fail check text
     - pass_check_text: Returns True if stdout contains the pass check text
     - reference_output: Compares stdout (or test_output file) to reference output
@@ -75,6 +77,10 @@ def validate_app(
 
     """
     stdout_text = result.stdout.decode("utf-8") if result.stdout is not None else ""
+
+    # Check a printed checksum against the stored value for the exact run arguments
+    if "expected_checksum" in app:
+        return validate_expected_checksum(stdout_text, app)
 
     # Check for fail text
     if "fail_check_text" in app:
@@ -323,3 +329,51 @@ def validate_float(test_output: str, app: dict, ref_output: str) -> tuple[bool, 
         f"Float comparison failed. Expected (reference): {ref_value}, got (test): {float_value}, "
         f"tolerance: {tolerance}, difference: {abs(float_value - ref_value)}."
     )
+
+
+DEFAULT_CHECKSUM_REGEX = r"^Verification checksum: (\d+)"
+
+
+def validate_expected_checksum(stdout_text: str, app: dict) -> tuple[bool, str | None]:
+    r"""Validate a checksum the app prints against the stored value.
+
+    ``app["expected_checksum"]`` is ``{"regex": <pattern with one group>, "value": <int>}``
+    (regex defaults to ``^Verification checksum: (\d+)``). The pattern is searched with
+    re.MULTILINE; exactly one line must match (a duplicated or missing checksum line fails) and
+    its first group must equal ``value`` as an integer. Anything else on the line, e.g.
+    XSBench's own "(Valid)" / "INAVALID CHECKSUM" verdict, is ignored: XSBench only knows the
+    hash of its default lookup count, so its verdict is meaningless at other sizes.
+
+    Args:
+        stdout_text: The app's stdout
+        app: Application configuration dictionary containing "expected_checksum"
+
+    Returns:
+        Tuple of (success, validation_output). validation_output is diagnostic text on failure.
+
+    Raises:
+        ValueError: If expected_checksum has no value
+
+    """
+    spec = app["expected_checksum"]
+    if not isinstance(spec, dict) or "value" not in spec:
+        msg = f"expected_checksum for {app['name']} must be a mapping with a 'value'"
+        raise ValueError(msg)
+    pattern = re.compile(spec.get("regex") or DEFAULT_CHECKSUM_REGEX, re.MULTILINE)
+    expected = int(spec["value"])
+    matches = list(pattern.finditer(stdout_text))
+    if len(matches) != 1:
+        return False, (
+            f"Expected exactly one line matching {pattern.pattern!r} in the output, "
+            f"found {len(matches)}."
+        )
+    try:
+        got = int(matches[0].group(1))
+    except (IndexError, ValueError):
+        return False, f"Checksum line {matches[0].group(0)!r} has no integer checksum."
+    if got != expected:
+        return False, (
+            f"Checksum mismatch: expected {expected} for this input, got {got} "
+            f"(line: {matches[0].group(0)!r})."
+        )
+    return True, None

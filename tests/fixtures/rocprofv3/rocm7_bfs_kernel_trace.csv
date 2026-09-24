@@ -1,0 +1,13 @@
+"Kind","Agent_Id","Queue_Id","Stream_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","LDS_Block_Size","Scratch_Size","VGPR_Count","Accum_VGPR_Count","SGPR_Count","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
+"KERNEL_DISPATCH","Agent 5",1,0,2567310,1,9,"__amd_rocclr_copyBuffer",1,761343761129331,761343761134611,0,0,20,4,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 5",1,0,2567310,2,18,"Kernel(Node*, int*, bool*, bool*, bool*, int*, int)",2,761343761619252,761343761630772,0,0,16,0,32,512,1,1,65536,1,1
+"KERNEL_DISPATCH","Agent 5",1,0,2567310,4,9,"__amd_rocclr_copyBuffer",4,761343761635092,761343761640212,0,0,20,4,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 5",1,0,2567310,3,17,"Kernel2(bool*, bool*, bool*, bool*, int)",3,761343761630772,761343761635092,0,0,8,0,32,512,1,1,65536,1,1
+"KERNEL_DISPATCH","Agent 5",1,0,2567310,5,9,"__amd_rocclr_copyBuffer",5,761343761649812,761343761653652,0,0,20,4,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 5",1,0,2567310,6,18,"Kernel(Node*, int*, bool*, bool*, bool*, int*, int)",6,761343761664212,761343761676372,0,0,16,0,32,512,1,1,65536,1,1
+"KERNEL_DISPATCH","Agent 5",1,0,2567310,7,17,"Kernel2(bool*, bool*, bool*, bool*, int)",7,761343761676372,761343761680692,0,0,8,0,32,512,1,1,65536,1,1
+"KERNEL_DISPATCH","Agent 5",1,0,2567310,8,9,"__amd_rocclr_copyBuffer",8,761343761680692,761343761685652,0,0,20,4,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 5",1,0,2567310,9,9,"__amd_rocclr_copyBuffer",9,761343761695892,761343761699572,0,0,20,4,32,512,1,1,512,1,1
+"KERNEL_DISPATCH","Agent 5",1,0,2567310,10,18,"Kernel(Node*, int*, bool*, bool*, bool*, int*, int)",10,761343761708852,761343761724693,0,0,16,0,32,512,1,1,65536,1,1
+"KERNEL_DISPATCH","Agent 5",1,0,2567310,11,17,"Kernel2(bool*, bool*, bool*, bool*, int)",11,761343761724693,761343761729653,0,0,8,0,32,512,1,1,65536,1,1
+"KERNEL_DISPATCH","Agent 5",1,0,2567310,12,9,"__amd_rocclr_copyBuffer",12,761343761729653,761343761734613,0,0,20,4,32,512,1,1,512,1,1

@@ -16,19 +16,29 @@ from gpa_bench_driver.driver_src.driver_utils import (
 
 
 def build_app(
-    app: dict, sm_version: int, runner: SubprocessRunner, temp_dir: Path, *, no_clean: bool,
+    app: dict,
+    sm_version: int,
+    runner: SubprocessRunner,
+    temp_dir: Path,
+    *,
+    no_clean: bool,
+    gpu_backend: str = "cuda",
+    offload_arch: str | None = None,
 ) -> tuple[bool, subprocess.CompletedProcess]:
     """Build the application.
 
     Cleans the application (unless no_clean is True), then builds it with the
-    specified SM version.
+    specified SM version (cuda: make ... SM_VERSION=<sm>) or AMD GPU ISA
+    (hip: make ... OFFLOAD_ARCH=<gfx...>).
 
     Args:
         app: Application configuration dictionary
-        sm_version: SM version to build for (e.g., 90 for 9.0)
+        sm_version: SM version to build for (e.g., 90 for 9.0); unused on hip
         runner: Configured subprocess runner
         temp_dir: Temporary directory where working copy of application directory is located
         no_clean: If True, skip the clean step
+        gpu_backend: "cuda" (default) or "hip"
+        offload_arch: AMD GPU ISA for hip builds (default gfx90a)
 
     Returns:
         Tuple of (success: bool, result: CompletedProcess)
@@ -53,7 +63,10 @@ def build_app(
     build_command = ["make", "-B", "-j", "8"]
     if "build_command" in app:
         build_command = app["build_command"].split()
-    build_command.append(f"SM_VERSION={sm_version}")
+    if gpu_backend == "hip":
+        build_command.append(f"OFFLOAD_ARCH={offload_arch or 'gfx90a'}")
+    else:
+        build_command.append(f"SM_VERSION={sm_version}")
 
     result = runner.run(build_command, build_path)
     return result.returncode == 0, result
