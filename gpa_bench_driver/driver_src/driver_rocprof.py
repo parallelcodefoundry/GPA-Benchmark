@@ -18,8 +18,8 @@ start with ``__amd_rocclr_``: copy/fill blits) are ignored everywhere. The targe
 kernel whose demangled name matches the app's ``score_regex`` (re.search, anchored in the YAML).
 
 The Frontier scoring rule (new/renamed kernels count as target, integrity guards) needs the
-baseline pass, so consumers compute it from ``kernels``; see ``scored_time_ns`` and
-``integrity_guards`` below for the reference implementation.
+baseline pass, so consumers compute it from ``kernels``; see ``scored_time_ns`` (pass the
+app's ``score_regex``) and ``integrity_guards`` below for the reference implementation.
 """
 
 from __future__ import annotations
@@ -267,15 +267,40 @@ def rocprof_time_app(
 # ---------------------------------------------------------------------------------------------
 
 
-def new_kernel_ns(sample: dict, baseline_kernel_names: Iterable[str]) -> int:
-    """Sum of the durations of the kernels in ``sample`` whose name is absent from the baseline."""
+def new_kernel_ns(
+    sample: dict,
+    baseline_kernel_names: Iterable[str],
+    score_regex: str | None = None,
+) -> int:
+    """Sum of the durations of the kernels in ``sample`` that are new relative to the baseline.
+
+    A kernel is new if its name is absent from ``baseline_kernel_names`` and, when
+    ``score_regex`` is given, does not match it: a new name that matches the target regex
+    (e.g. a renamed or templated variant of the target) is already part of
+    ``sample["target_ns"]`` and must not be counted a second time. Callers that omit
+    ``score_regex`` must put the target-matching names into ``baseline_kernel_names``
+    themselves.
+    """
     known = set(baseline_kernel_names)
-    return sum(ns for name, ns in sample["kernels"].items() if name not in known)
+    pattern = re.compile(score_regex) if score_regex else None
+    return sum(
+        ns
+        for name, ns in sample["kernels"].items()
+        if name not in known and not (pattern is not None and pattern.search(name))
+    )
 
 
-def scored_time_ns(sample: dict, baseline_kernel_names: Iterable[str]) -> int:
-    """Scored time of one run: every target dispatch + every kernel not seen in the baseline."""
-    return int(sample["target_ns"]) + new_kernel_ns(sample, baseline_kernel_names)
+def scored_time_ns(
+    sample: dict,
+    baseline_kernel_names: Iterable[str],
+    score_regex: str | None = None,
+) -> int:
+    """Scored time of one run: every target dispatch + every kernel not seen in the baseline.
+
+    Pass the app's ``score_regex`` so that a new name matching the target is counted once
+    (see ``new_kernel_ns``).
+    """
+    return int(sample["target_ns"]) + new_kernel_ns(sample, baseline_kernel_names, score_regex)
 
 
 def baseline_other_ns(sample: dict, baseline_samples: list[dict], score_regex: str) -> int:

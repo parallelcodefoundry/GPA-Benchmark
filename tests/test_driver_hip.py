@@ -151,6 +151,26 @@ def test_scored_time_adds_kernels_absent_from_baseline():
     assert scored_time_ns(renamed, base["kernels"]) == 60
 
 
+def test_new_target_matching_kernel_counts_once():
+    """A renamed/templated target variant absent from the baseline is already in target_ns."""
+    rx = r"^k(\(|<|$)"
+    base = _sample(100, {"k(int)": 100, "other(int)": 50})
+    variant = "k<64>(int)"  # templated target: new name, matches the regex
+    opt = _sample(30 + 25, {"k(int)": 30, variant: 25, "other(int)": 50, "helper(int)": 10})
+    assert summarize_kernel_trace([("k(int)", 30), (variant, 25), ("other(int)", 50),
+                                   ("helper(int)", 10)], rx)["target_ns"] == 55
+    assert new_kernel_ns(opt, base["kernels"], rx) == 10  # only helper(int) is new work
+    assert scored_time_ns(opt, base["kernels"], rx) == 55 + 10  # the variant counts once
+    # the same result through the caller-side workaround (target names passed as known)
+    known = set(base["kernels"]) | {variant}
+    assert scored_time_ns(opt, known) == scored_time_ns(opt, base["kernels"], rx)
+    # without the regex the variant would be counted a second time
+    assert scored_time_ns(opt, base["kernels"]) == 55 + 25 + 10
+    # a target renamed so that it no longer matches is still counted once, as new work
+    renamed = _sample(0, {"k_v2(int)": 60, "other(int)": 50})
+    assert scored_time_ns(renamed, base["kernels"], rx) == 60
+
+
 def test_integrity_guards_other_and_wall():
     base = [_sample(100, {"k(int)": 100, "other(int)": 1_000_000}, wall_s=2.0)] * 2
     ok = [_sample(50, {"k(int)": 50, "other(int)": 1_100_000}, wall_s=4.0)]
