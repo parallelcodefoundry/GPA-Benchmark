@@ -1,0 +1,142 @@
+# GPA-Benchmark on Frontier (AMD MI250X GCD, gfx90a, ROCm 7.0.2): the 9 HIP ports.
+# Same schema as driver_apps.yaml; the driver reads this file when its GPU backend is "hip"
+# (DriverConfig.gpu_backend / --gpu-backend hip, auto-detected on Frontier) unless a config is
+# given explicitly. Build: make [...] OFFLOAD_ARCH=<gfx> (the Makefiles take ROCM_PATH/HIPCC
+# from the environment, default /opt/rocm-7.0.2). Kernel files keep their CUDA basenames.
+# Setup (data, seeded bfs graph, builds, generated refs + md5 check): scripts/frontier_prepare.sh
+#
+# Fields beyond driver_apps.yaml:
+#   score_regex               anchored regex (Python re.search / ERE) on the demangled rocprofv3
+#                             kernel name: every dispatch it matches is target work.
+#   rocprof_compute_dispatch  0-based dispatch of the target kernel that rocprof-compute profiles
+#                             (GPA's ncu --launch-skip, 0 where GPA has none).
+#   profile_run_command       run_command for the profilers when it differs from the scored one.
+#   expected_checksum         {regex, value}: exactly one stdout line must match regex and its
+#                             group 1 must equal value (replaces pass_check_text "(Valid)").
+#   stdout_cap_bytes          max bytes of app stdout kept by runs whose stdout is not validated
+#                             (driver rocprofv3 timing runs, profiler wrappers).
+#
+# Timing (hip): rocprofv3 --kernel-trace; per sample the driver reports the summed duration of
+# every target dispatch (exec_time/target_ns), the per-kernel totals and the wall time; the
+# Frontier scoring rule (new kernels count as target, integrity guards) is applied by consumers.
+
+apps:
+
+- name: xsbench
+  aliases:
+  - XSBench
+  kernel_name: xs_lookup_kernel
+  score_regex: ^xs_lookup_kernel\(
+  rocprof_compute_dispatch: 0
+  path: XSBench-hip
+  clean_command: make clean
+  build_command: make -j 8
+  run_command: ./XSBench -m event -s large -l 100000000
+  # Profilers run XSBench's default large lookup count (17M; checksum 952131).
+  profile_run_command: ./XSBench -m event -s large
+  kernel_file: XSBench-hip/Simulation.cu
+  # Checksums verified on MI250X (GPA-G1 report A.md): -s large -l 100000000 -> 711949,
+  # -s large -> 952131, -s large -l 1000000 -> 995778, -s small -> 945990.
+  expected_checksum:
+    regex: '^Verification checksum: (\d+)'
+    value: 711949
+
+- name: b+tree
+  aliases:
+  - b_tree
+  - btree
+  kernel_name: findRangeK
+  score_regex: ^findRangeK$
+  rocprof_compute_dispatch: 0
+  path: rodinia/b+tree-hip
+  # command_frontier.txt = GPA's command.txt with j 60000 (was 6000): findRangeK >= 500 us.
+  run_command: ./b+tree.out file ../data/b+tree/mil.txt command ./command_frontier.txt
+  kernel_file: rodinia/b+tree-hip/kernel/kernel_gpu_cuda_2.cu
+  extra_files:
+  - rodinia/b+tree-hip/kernel/kernel_gpu_cuda_wrapper_2.cu
+  reference_output: rodinia/b+tree-hip/ref-output.txt
+  test_output: rodinia/b+tree-hip/output.txt
+
+- name: backprop
+  kernel_name: bpnn_layerforward_CUDA
+  score_regex: ^bpnn_layerforward_CUDA\(
+  rocprof_compute_dispatch: 0
+  path: rodinia/backprop-hip
+  run_command: ./backprop 1048560
+  kernel_file: rodinia/backprop-hip/backprop_cuda_kernel.cu
+  extra_files:
+  - rodinia/backprop-hip/backprop_cuda.cu
+  reference_output: rodinia/backprop-hip/ref-output.txt
+  float_grep: "sum:"
+  float_tolerance: 0.01
+
+- name: bfs
+  kernel_name: Kernel
+  score_regex: ^Kernel\(
+  rocprof_compute_dispatch: 8
+  path: rodinia/bfs-hip
+  run_command: ./bfs ../data/bfs/graph8M.txt
+  kernel_file: rodinia/bfs-hip/kernel.cu
+  extra_files:
+  - rodinia/bfs-hip/bfs.cu
+  reference_output: rodinia/bfs-hip/ref-result.txt
+  test_output: rodinia/bfs-hip/result.txt
+  build_command: make -B -j8
+
+- name: heartwall
+  kernel_name: kernel
+  score_regex: ^kernel\(
+  rocprof_compute_dispatch: 4
+  path: rodinia/heartwall-hip
+  run_command: ./heartwall ../data/heartwall/test.avi 10
+  kernel_file: rodinia/heartwall-hip/kernel.cu
+  extra_files:
+  - rodinia/heartwall-hip/main.cu
+  reference_output: rodinia/heartwall-hip/ref-result.txt
+  test_output: rodinia/heartwall-hip/result.txt
+
+- name: hotspot
+  kernel_name: calculate_temp
+  score_regex: ^calculate_temp\(
+  rocprof_compute_dispatch: 0
+  path: rodinia/hotspot-hip
+  run_command: ./hotspot 1024 5 100 ../data/hotspot/temp_1024 ../data/hotspot/power_1024 output.out
+  kernel_file: rodinia/hotspot-hip/hotspot.cu
+  reference_output: rodinia/hotspot-hip/ref-output.out
+  test_output: rodinia/hotspot-hip/output.out
+  numeric_tolerance: 0.01
+
+- name: nw
+  kernel_name: needle_cuda_shared_1
+  score_regex: ^needle_cuda_shared_1\(
+  rocprof_compute_dispatch: 127
+  path: rodinia/nw-hip
+  run_command: ./needle 32768 10
+  kernel_file: rodinia/nw-hip/needle_kernel.cu
+  extra_files:
+  - rodinia/nw-hip/needle.cu
+  reference_output: rodinia/nw-hip/ref-result.txt
+  test_output: rodinia/nw-hip/result.txt
+
+- name: pathfinder
+  kernel_name: dynproc_kernel
+  score_regex: ^dynproc_kernel\(
+  rocprof_compute_dispatch: 2
+  path: rodinia/pathfinder-hip
+  clean_command: make clean
+  build_command: make -j 8
+  run_command: ./pathfinder 300000 300 20
+  # -DBENCH_PRINT prints the whole 300 x 300000 wall (~180 MB); validated runs keep all of it.
+  stdout_cap_bytes: 1048576
+  kernel_file: rodinia/pathfinder-hip/pathfinder.cu
+  reference_output: rodinia/pathfinder-hip/ref-result.txt
+
+- name: streamcluster
+  kernel_name: kernel_compute_cost
+  score_regex: ^kernel_compute_cost\(
+  rocprof_compute_dispatch: 300
+  path: rodinia/streamcluster-hip
+  run_command: ./sc_gpu 10 20 256 131072 131072 16000 none output.txt 1
+  kernel_file: rodinia/streamcluster-hip/streamcluster_cuda.cu
+  reference_output: rodinia/streamcluster-hip/ref-output.txt
+  test_output: rodinia/streamcluster-hip/output.txt
