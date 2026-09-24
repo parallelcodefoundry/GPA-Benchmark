@@ -94,3 +94,36 @@ rodinia/gaussian/ref-output.txt
 rodinia/lavaMD/ref-result.txt
 rodinia/pathfinder/ref-result.txt
 rodinia/srad/srad_v1/ref_image_out.pgm
+
+# ---- Frontier (HIP) ports: build products, outputs and setup-generated files ----
+# (scripts/frontier_prepare.sh builds the -hip baselines in place and generates the refs
+# below; their md5s are pinned in frontier_refs.md5)
+rodinia/*-hip/.frontier_build.log
+XSBench-hip/.frontier_build.log
+rodinia/*-hip/.rocprofv3/
+XSBench-hip/.rocprofv3/
+rodinia/backprop-hip/backprop
+rodinia/backprop-opt*-hip/backprop
+rodinia/bfs-hip/bfs
+rodinia/bfs-opt-hip/bfs
+rodinia/heartwall-hip/heartwall
+rodinia/heartwall-opt-hip/heartwall
+rodinia/hotspot-hip/hotspot
+rodinia/hotspot-opt-hip/hotspot
+rodinia/nw-hip/needle
+rodinia/nw-opt-hip/needle
+rodinia/pathfinder-hip/pathfinder
+rodinia/pathfinder-opt-hip/pathfinder
+rodinia/streamcluster-hip/sc_gpu
+rodinia/streamcluster-opt-hip/sc_gpu
+XSBench-hip/XSBench
+rodinia/*-hip/result.txt
+rodinia/*-hip/output.txt
+rodinia/bfs-hip/ref-result.txt
+rodinia/pathfinder-hip/ref-result.txt
+rodinia/b+tree-hip/ref-output.txt
+rodinia/*-hip/*.bad
+rodinia/*-hip/*.tmp
+rodinia/data/bfs/graph8M.txt.bad
+.data_unpack.*/
+.graphgen.*/

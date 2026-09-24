@@ -1,0 +1,21 @@
+Random number generator seed: 7
+Input layer size : 1048560
+Starting training kernel
+Performing GPU computation
+sum: 261907.203125
+sum: 262206.281250
+sum: 262306.437500
+sum: 261958.000000
+sum: 262496.187500
+sum: 262059.875000
+sum: 261991.859375
+sum: 262009.093750
+sum: 262157.000000
+sum: 262006.218750
+sum: 261885.703125
+sum: 261795.671875
+sum: 261815.609375
+sum: 261983.078125
+sum: 262051.703125
+sum: 262214.875000
+Training done
