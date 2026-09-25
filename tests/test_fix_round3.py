@@ -154,8 +154,8 @@ def test_H2_round3_gate_evasions_fail(name, fixture, fragment):
 
 
 @needs_hipcc
-@pytest.mark.parametrize("name", ["FP1_blocking_sync_only", "FP2_restrict_regcache",
-                                  "FP3_blocksize_hipcheck"])
+# FP1_blocking_sync_only is now a J4 rejection (blocking-sync); see test_fix_round4.
+@pytest.mark.parametrize("name", ["FP2_restrict_regcache", "FP3_blocksize_hipcheck"])
 def test_H2_round3_legit_probes_pass(name):
     r = check_kernel_file(_apps()["streamcluster"], FIX / "round3" / "streamcluster" / f"{name}.cu",
                           gpa_root=GPA_ROOT)

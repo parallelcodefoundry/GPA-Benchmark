@@ -800,6 +800,16 @@ def _chmod_tree(root: Path) -> None:
             os.chmod(fp, os.stat(fp).st_mode | 0o644)
 
 
+class _SideError(Exception):
+    """Wraps a timing-run failure with the side index (0 = original, 1 = swap) so the caller can
+    attribute a side-0 (j=0) failure to infra and a side-1 failure to the agent (J2)."""
+
+    def __init__(self, side: int, exc: Exception) -> None:
+        self.side = side
+        self.exc = exc
+        super().__init__(str(exc))
+
+
 def _interleaved_series(
     app: dict,
     runner: SubprocessRunner,
@@ -832,17 +842,22 @@ def _interleaved_series(
     warm_fail: list[str | None] = [None for _ in roots]
     retain = config.retain_nsys_profiles
     n_samples = getattr(config, "final_samples", None) or config.num_samples
+    def _once(j, path, outdir):
+        # J2: a side-0 (original) failure is tagged so the caller treats it as infra, not the agent
+        try:
+            return profile_once(app, runner, path, outdir, score_regex=score_regex,
+                                rocm_path=rocm, validate=validate, retain_profiles=retain)
+        except (RocprofError, DriverInfraError) as exc:
+            raise _SideError(j, exc) from exc
+
     for j, path in enumerate(paths):  # warm-up, discarded
-        w = profile_once(app, runner, path, profile_dirs[j] / "rocprof_warmup",
-                         score_regex=score_regex, rocm_path=rocm, validate=validate)
+        w = _once(j, path, profile_dirs[j] / "rocprof_warmup")
         if w.get("valid") is False:
             warm_fail[j] = w.get("validation_output")
     order = 0
     for i in range(n_samples):
         for j, path in enumerate(paths):
-            s = profile_once(app, runner, path, profile_dirs[j] / f"rocprof_sample_{i}",
-                             score_regex=score_regex, rocm_path=rocm, validate=validate,
-                             retain_profiles=retain)
+            s = _once(j, path, profile_dirs[j] / f"rocprof_sample_{i}")
             s["order"] = order
             s["warmup"] = False
             order += 1
@@ -896,14 +911,21 @@ def _run_app_hip_interleaved(
         pairs = ready or [(None, None)]
         for k, (root, res) in enumerate(pairs):
             roots = [temp_dir] if root is None else [temp_dir, root]
-            try:  # H3: a swap's own crash under the profiler is an agent failure on that pass
+            try:
                 samples, warm = _interleaved_series(app, runner, config, hip_state, roots)
-            except RocprofError as exc:
-                if res is None:  # a baseline-only timing run failing is infra/baseline
-                    raise
+            except _SideError as se:
+                if se.side == 0:  # J2: the ORIGINAL failed during timing -> infra (retry once)
+                    if isinstance(se.exc, DriverInfraError):
+                        raise se.exc
+                    msg = (f"the original {app['name']} failed during the timing loop "
+                           f"(j=0): {se.exc}")
+                    raise DriverInfraError(msg) from se.exc
+                # H3: the swap's own crash is an agent failure on that pass
+                if res is None:
+                    raise se.exc
                 res.run = False
                 res.validate = False
-                res.validation_output = f"the program failed during timing: {exc}"
+                res.validation_output = f"the program failed during timing: {se.exc}"
                 continue
             base_problem = _first_invalid("baseline timed", samples[0], warm[0])
             if base_problem is not None:

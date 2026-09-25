@@ -121,6 +121,12 @@ _FORBIDDEN_CODE = [
     (r"\bprctl\b", "prctl"),
     # inline assembly (incl. asm labels asm("name")) reaches libc symbols the gate cannot see
     (r"\b(?:asm|__asm__|__asm)\b", "inline asm"),
+    # J4: blocking-sync scheduling only trades GPU wait for lower CPU time (a G-cpu lever) and
+    # hangs under the Frontier profiler; it is never needed for a GPU kernel optimization.
+    (r"\bhipDeviceScheduleBlockingSync\b", "blocking-sync scheduling"),
+    (r"\bhipEventBlockingSync\b", "blocking-sync scheduling"),
+    (r"\bcudaDeviceScheduleBlockingSync\b", "blocking-sync scheduling"),
+    (r"\bcudaEventBlockingSync\b", "blocking-sync scheduling"),
 ]
 _FORBIDDEN_CODE_RE = [(re.compile(rx), label) for rx, label in _FORBIDDEN_CODE]
 
@@ -134,8 +140,11 @@ _PRAGMA_MACRO_RE = re.compile(r"\b(push_macro|pop_macro)\s*\(\s*\\?\"([A-Za-z_]\
 _RESERVED_DEF_RE = re.compile(r"\b(__[A-Za-z_]\w*)\s*\(")
 _NOT_A_DEFINITION_PREFIX = re.compile(r"(\bif|\bwhile|\bfor|\bswitch|\breturn|[=,(!&|?:+\-*/<>])\s*$")
 # H2 directives
-_LINE_DIR_RE = re.compile(r"^[ \t]*#[ \t]*(?:line[ \t]+\d+|\d+[ \t]+\")", re.MULTILINE)
-_INCLUDE_RE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*([<"])([^>"]*)[>"]', re.MULTILINE)
+# any #line (even macro-computed: "#line LN ...") and any GNU line marker "# 1 ..." (J1a)
+_LINE_DIR_RE = re.compile(r"^[ \t]*#[ \t]*line\b", re.MULTILINE)
+_GNU_MARKER_RE = re.compile(r"^[ \t]*#[ \t]*\d", re.MULTILINE)
+# the whole #include operand (a literal <...>/"..." or anything else, e.g. a macro)
+_INCLUDE_RE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*(\S.*?)[ \t]*$', re.MULTILINE)
 # a C/C++ main definition: main ( <params> ) {  -> capture the parameter list
 _MAIN_DEF_RE = re.compile(r"\bmain\s*\(([^)]*)\)\s*\{")
 
@@ -266,18 +275,22 @@ def _features(text: str, other_idents: frozenset[str],
               pristine_main_params: int | None = None) -> Counter:
     code, literals, raw = _lex(text)
     feats: Counter = Counter()
-    for m in _LINE_DIR_RE.finditer(raw):
+    for _ in _LINE_DIR_RE.finditer(raw):
         feats[("line_directive",)] += 1
+    for _ in _GNU_MARKER_RE.finditer(raw):
+        feats[("gnu_marker",)] += 1
     if pristine_includes is not None:
-        # raw pass: only clear-cut bad includes (absolute path or '..'). #ifdef-guarded includes
-        # are handled by the preprocessed pass (which respects the preprocessor), and a brand-new
-        # file that does not exist fails to compile -> gate fails closed. New <system>/app-dir
-        # headers are allowed (H2). The regex cannot evaluate #ifdef, so a non-absolute name is
-        # not flagged here.
+        # J1a: the operand must be a literal <...> or "..."; a macro (#include MACRO) is rejected.
+        # Absolute paths and '..' are rejected for both bracket forms. A new plain <system>/app
+        # header is allowed here (the preprocessed pass attributes its tokens); #ifdef-dead ones
+        # are harmless.
         for m in _INCLUDE_RE.finditer(raw):
-            bracket, name = m.group(1), m.group(2)
-            if bracket == "<":
+            operand = m.group(1)
+            lit = re.match(r'^([<"])([^>"]*)[>"]\s*$', operand)
+            if not lit:
+                feats[("macro_include", operand[:40])] += 1
                 continue
+            name = lit.group(2)
             if name.startswith("/") or ".." in name.split("/"):
                 feats[("bad_include", name)] += 1
     if pristine_main_params is not None:
@@ -304,10 +317,15 @@ def _features(text: str, other_idents: frozenset[str],
 
 def _describe(feat: tuple, extra: int) -> str:  # noqa: PLR0911
     if feat[0] == "line_directive":
-        return ("a #line / '# N \"file\"' directive: rewriting line markers to make kernel-file "
-                "code look like another file is not allowed")
+        return ("a #line directive: rewriting line markers to make kernel-file code look like "
+                "another file is not allowed (even via a macro operand)")
+    if feat[0] == "gnu_marker":
+        return ("a '# N \"file\"' GNU line marker: rewriting line markers is not allowed")
+    if feat[0] == "macro_include":
+        return (f"#include {feat[1]}: the include operand must be a literal <...> or \"...\" "
+                "header name (a macro-computed include is not allowed)")
     if feat[0] == "bad_include":
-        return (f"#include \"{feat[1]}\": an absolute or '..' include path is not allowed "
+        return (f"#include of '{feat[1]}': an absolute or '..' include path is not allowed "
                 "(only <system/HIP> headers and headers in the app directory)")
     if feat[0] == "main_params":
         return ("a main() with more parameters than the original: reading argv/envp to detect the "
@@ -317,6 +335,13 @@ def _describe(feat: tuple, extra: int) -> str:  # noqa: PLR0911
 
 def _describe_orig(feat: tuple, extra: int) -> str:
     times = "" if extra == 1 else f" ({extra} more than the original)"
+    if feat[0] == "token" and feat[1] == "inline asm":
+        return (f"inline assembly{times}: raw asm (incl. asm labels) can reach syscalls or libc "
+                "symbols the gate cannot see, and is not allowed in the kernel file")
+    if feat[0] == "token" and feat[1] == "blocking-sync scheduling":
+        return (f"blocking-sync scheduling{times}: blocking-sync device/event flags trade GPU "
+                "wait for lower CPU time (which G-cpu governs) and hang under the Frontier "
+                "profiler; they are not allowed in the kernel file")
     if feat[0] == "macro":
         _, kind, name, why = feat
         return (f"#{kind} of '{name}'{times}: redefining {why} is not allowed (the kernel file is "
@@ -396,7 +421,7 @@ def _pp_spec(app: dict) -> tuple[str, list[str]]:
 
 
 def _run_pp(app: dict, gpa_root: Path, kernel_text: str | None, hipcc: Path,
-            extra: list[str], allowed_other: frozenset[str] | None = None) -> subprocess.CompletedProcess:
+            extra: list[str], system_dirs: tuple[str, ...] = ()) -> subprocess.CompletedProcess:
     """Preprocess the app's TU in a scratch copy of the app dir with the kernel file replaced."""
     app_dir = Path(gpa_root) / str(app["path"])
     kernel_rel = Path(str(app["kernel_file"])).relative_to(str(app["path"]))
@@ -414,15 +439,54 @@ def _run_pp(app: dict, gpa_root: Path, kernel_text: str | None, hipcc: Path,
         proc.work = str(work)  # type: ignore[attr-defined]
         if proc.returncode == 0:
             # resolve marker paths while the scratch copy still exists
-            kern, other, ids = _split_regions(proc.stdout, work, proc.kernel_abs, allowed_other)
+            kern, other, ids = _split_regions(proc.stdout, work, proc.kernel_abs, system_dirs)
             proc.regions = (kern, other)  # type: ignore[attr-defined]
             proc.marker_ids = ids  # type: ignore[attr-defined]
         return proc
 
 
+_SYSDIR_CACHE: dict[str, tuple[str, ...]] = {}
+
+
+def _system_include_dirs(hipcc: Path) -> tuple[str, ...]:
+    """Toolchain system-include search dirs (J1b), from `hipcc -E -v` plus the usual roots."""
+    key = str(hipcc)
+    if key in _SYSDIR_CACHE:
+        return _SYSDIR_CACHE[key]
+    dirs: list[str] = []
+    try:
+        proc = subprocess.run([str(hipcc), "-E", "-v", "-x", "hip", "-"],  # noqa: S603
+                              input="", capture_output=True, text=True, check=False, timeout=120)
+        out = proc.stderr
+        if "search starts here:" in out:
+            body = out.split("search starts here:", 1)[1].split("End of search list.", 1)[0]
+            for ln in body.splitlines():
+                d = ln.strip()
+                if d and os.path.isdir(d):
+                    dirs.append(os.path.realpath(d))
+    except (OSError, subprocess.SubprocessError):
+        pass
+    for d in ("/opt/rocm-7.0.2/include", "/opt/rocm/include", "/usr/include", "/usr/lib",
+              "/usr/lib64", str(Path(hipcc).resolve().parent.parent)):
+        rd = os.path.realpath(d)
+        if os.path.isdir(rd) and rd not in dirs:
+            dirs.append(rd)
+    result = tuple(dirs)
+    _SYSDIR_CACHE[key] = result
+    return result
+
+
+def _is_system_file(real: str, system_dirs: tuple[str, ...]) -> bool:
+    """A marker file is SYSTEM iff it is under a toolchain system dir AND root-owned (J1b)."""
+    if not any(real == d or real.startswith(d + os.sep) for d in system_dirs):
+        return False
+    try:
+        return os.stat(real).st_uid == 0
+    except OSError:
+        return False
+
+
 def _marker_id(name: str, work: Path, kernel_abs: str) -> str:
-    """A file identity that is stable across scratch dirs: 'K' for the kernel file, a path
-    relative to the work dir for app files, or the absolute realpath for system/HIP headers."""
     if name.startswith("<"):
         return "<builtin>"
     path = name if os.path.isabs(name) else os.path.join(work, name)
@@ -436,12 +500,15 @@ def _marker_id(name: str, work: Path, kernel_abs: str) -> str:
 
 
 def _split_regions(text: str, work: Path, kernel_abs: str,
-                   allowed_other: frozenset[str] | None = None) -> tuple[str, str, frozenset[str]]:
+                   system_dirs: tuple[str, ...] = ()) -> tuple[str, str, frozenset[str]]:
     """(kernel-file lines, all other lines) of preprocessor output, by line markers.
 
-    H2 fail-closed attribution: a token is treated as the kernel file's own unless its line
-    marker names one of the pristine include files (or the kernel file). A #line spoof or a new
-    include therefore lands in the kernel region and is analysed, never hidden as "other".
+    J1b allow-list attribution. A marker file's tokens are "other" (not analysed) ONLY when it is
+    the compiler's own builtin buffer or a SYSTEM header (root-owned, under a toolchain system
+    dir). The kernel file, the app dir's own headers, and ANY unknown / unresolvable / spoofed
+    path are the kernel file's own (fail closed) and are analysed. A macro-computed
+    `#line "…/hip_runtime.h"` cannot hide tokens: the physical file is still the kernel file,
+    which is not root-owned under a system dir.
     """
     kernel_lines: list[str] = []
     other_lines: list[str] = []
@@ -450,16 +517,14 @@ def _split_regions(text: str, work: Path, kernel_abs: str,
     for line in text.splitlines():
         m = _LINE_MARKER_RE.match(line)
         if m:
-            mid = _marker_id(m.group(2), work, kernel_abs)
-            seen.add(mid)
-            if mid == "K":
-                in_kernel = True
-            elif mid == "<builtin>":
-                in_kernel = False
-            elif allowed_other is None:
-                in_kernel = False  # first (pristine) pass: everything but the kernel is "other"
-            else:  # fail closed: a file the pristine TU did not include is the kernel's own
-                in_kernel = mid not in allowed_other
+            name = m.group(2)
+            seen.add(_marker_id(name, work, kernel_abs))
+            if name.startswith("<"):
+                in_kernel = False  # <built-in>, <command line>, <scratch space>
+            else:
+                path = name if os.path.isabs(name) else os.path.join(work, name)
+                real = os.path.realpath(path)
+                in_kernel = not _is_system_file(real, system_dirs)
             continue
         (kernel_lines if in_kernel else other_lines).append(line)
     return "\n".join(kernel_lines), "\n".join(other_lines), frozenset(seen)
@@ -470,8 +535,9 @@ def _declared_names(app: dict, gpa_root: Path, hipcc: Path) -> frozenset[str]:
     key = ("declared", str(gpa_root), str(app["path"]), str(app["kernel_file"]), str(hipcc))
     if key in _PP_CACHE:
         return _PP_CACHE[key][0]
-    empty = _run_pp(app, gpa_root, "", hipcc, [])
-    macros = _run_pp(app, gpa_root, "", hipcc, ["-dM"])
+    sysdirs = _system_include_dirs(hipcc)
+    empty = _run_pp(app, gpa_root, "", hipcc, [], sysdirs)
+    macros = _run_pp(app, gpa_root, "", hipcc, ["-dM"], sysdirs)
     if empty.returncode != 0 or macros.returncode != 0:
         msg = ("the kernel gate could not preprocess the app's sources: "
                f"{head_tail(empty.stderr or macros.stderr)}")
@@ -485,6 +551,19 @@ def _declared_names(app: dict, gpa_root: Path, hipcc: Path) -> frozenset[str]:
     result = frozenset(names)
     _PP_CACHE[key] = (result,)
     return result
+
+
+_MAIN_NAME_RE = re.compile(r"(?<![\w:])main\s*\(")
+
+
+def _max_main_params(code: str) -> int:
+    best = -1
+    for m in _MAIN_NAME_RE.finditer(code):
+        close = _balanced_close(code, m.end() - 1)
+        if close < 0:
+            continue
+        best = max(best, _param_count(code[m.end():close]))
+    return best
 
 
 def _expanded_features(kernel_region: str) -> Counter:
@@ -509,11 +588,11 @@ def _expanded_features(kernel_region: str) -> Counter:
 
 
 def _expanded_region(app: dict, gpa_root: Path, text: str, hipcc: Path,
-                     allowed_other: frozenset[str] | None = None):
-    proc = _run_pp(app, gpa_root, text, hipcc, [], allowed_other)
+                     system_dirs: tuple[str, ...] = ()):
+    proc = _run_pp(app, gpa_root, text, hipcc, [], system_dirs)
     if proc.returncode != 0:
         return None
-    return proc.regions[0], proc.marker_ids  # type: ignore[attr-defined]
+    return proc.regions[0]  # type: ignore[attr-defined]
 
 
 def _describe_expanded(feat: tuple, extra: int) -> str:
@@ -540,22 +619,20 @@ def _preprocessed_violations(app: dict, candidate: str, pristine: str, gpa_root:
     hipcc = _hipcc(rocm_path)
     pkey = ("pristine", str(gpa_root), str(app["path"]), str(app["kernel_file"]), str(hipcc),
             hash(pristine))
+    sysdirs = _system_include_dirs(hipcc)
     if pkey not in _PP_CACHE:
-        pr = _expanded_region(app, gpa_root, pristine, hipcc)
-        if pr is None:
+        region = _expanded_region(app, gpa_root, pristine, hipcc, sysdirs)
+        if region is None:
             msg = f"the kernel gate could not preprocess the pristine {app['kernel_file']}"
             raise DriverInfraError(msg)
-        region, allowed = pr
-        # the files the pristine TU legitimately includes; anything else in the candidate is
-        # attributed to the kernel file (fail closed, H2)
-        allowed = frozenset(m for m in allowed if m not in ("K", "<builtin>"))
-        _PP_CACHE[pkey] = (_expanded_features(region), allowed)
-    base, allowed_other = _PP_CACHE[pkey]
-    proc = _run_pp(app, gpa_root, candidate, hipcc, [], allowed_other)
+        _PP_CACHE[pkey] = (_expanded_features(region),)
+    base = _PP_CACHE[pkey][0]
+    proc = _run_pp(app, gpa_root, candidate, hipcc, [], sysdirs)
     if proc.returncode != 0:
         return [("the kernel file could not be preprocessed with the app's compiler flags, so it "
                  f"cannot be checked (fix the compile error first): {head_tail(proc.stderr, 600, 600)}")]
-    cand = _expanded_features(proc.regions[0])  # type: ignore[attr-defined]
+    cand_region = proc.regions[0]  # type: ignore[attr-defined]
+    cand = _expanded_features(cand_region)
     violations = [_describe_expanded(f, n - base.get(f, 0))
                   for f, n in sorted(cand.items(), key=lambda kv: repr(kv[0]))
                   if n > base.get(f, 0)]
@@ -570,6 +647,18 @@ def _preprocessed_violations(app: dict, candidate: str, pristine: str, gpa_root:
             violations.append(
                 f"#define/#undef of '{name}': it is declared or defined by the included headers "
                 "or the app's other sources; redefining it changes code outside the kernel")
+    # J1c: main() parameter count on the preprocessed kernel-file tokens (any form)
+    pkm = ("pristine_main", str(gpa_root), str(app["path"]), str(app["kernel_file"]), str(hipcc))
+    if pkm not in _PP_CACHE:
+        pr_region = _expanded_region(app, gpa_root, pristine, hipcc, sysdirs)
+        base_code, _, _ = _lex(pr_region if pr_region is not None else "")
+        _PP_CACHE[pkm] = (_max_main_params(base_code),)
+    base_main = _PP_CACHE[pkm][0]
+    cand_code, _, _ = _lex(cand_region)
+    if _max_main_params(cand_code) > base_main:
+        violations.append(
+            "a main() with more parameters than the original (after preprocessing): reading "
+            "argv/envp to detect the profiler or the inputs is not allowed")
     notes.append("preprocessed with " + " ".join([hipcc.name, *_pp_spec(app)[1], _pp_spec(app)[0]]))
     return violations
 
