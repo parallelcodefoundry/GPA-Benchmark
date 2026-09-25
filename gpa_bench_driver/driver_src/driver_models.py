@@ -86,8 +86,9 @@ class DriverConfig:
         interleave: hip only. Build every copy first, then time interleaved: 1 discarded
             warm-up per side, then alternating profiled samples (each carries cpu_s for G-cpu,
             H1) (default: True; False = sequential per pass)
-        final_samples: hip only. Overrides num_samples for the number of profiled samples per
-            side (the runner's final score uses the per-app yaml value, H6) (default: None)
+        pairs: hip only (J0 protocol T1). Number of ABBA pairs (even) per phase: None = the app's
+            yaml test_pairs (6); the runner's final score passes the yaml final_pairs (10)
+            (default: None)
 
     """
 
@@ -123,7 +124,7 @@ class DriverConfig:
     reference_from_baseline: bool
     kernel_gate: bool
     interleave: bool
-    final_samples: int | None
+    pairs: int | None
 
     def __init__(
         self,
@@ -160,7 +161,7 @@ class DriverConfig:
         reference_from_baseline: bool = False,
         kernel_gate: bool = True,
         interleave: bool = True,
-        final_samples: int | None = None,
+        pairs: int | None = None,
     ) -> None:
         """Initialize a DriverConfig object."""
         logger.debug("Entering DriverConfig")
@@ -182,7 +183,7 @@ class DriverConfig:
         self.reference_from_baseline = reference_from_baseline
         self.kernel_gate = kernel_gate
         self.interleave = interleave
-        self.final_samples = final_samples
+        self.pairs = pairs
         self.no_clean = no_clean
         self.build_only = build_only
         self.nsys = nsys

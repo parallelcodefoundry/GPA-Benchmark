@@ -101,10 +101,12 @@ def test_H4_no_sigma_means_not_checked():
     assert r["cpu"] == {"checked": False} and r["ok"]
 
 
-def test_every_app_sigma_and_final_samples_present():
+def test_every_app_sigma_and_j0_pairs_present():
     for name, app in _apps().items():
         assert isinstance(app.get("cpu_sigma_s"), (int, float)) and app["cpu_sigma_s"] > 0, name
-        assert isinstance(app.get("final_samples"), int) and app["final_samples"] >= 5, name
+        # J0 (M.md T1): ABBA pairs replace final_samples; both even
+        assert app.get("test_pairs") == 6 and app.get("final_pairs") == 10, name
+        assert "final_samples" not in app, name
 
 
 # =========================================================================== H2 gate

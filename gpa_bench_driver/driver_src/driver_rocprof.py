@@ -466,6 +466,109 @@ def _mean(values: list[float]) -> float:
     return sum(values) / len(values)
 
 
+# J0 protocol (M.md T3): level tolerance for the instability flag and the credit floor
+J0_LEVEL_TOL = 0.025
+J0_CREDIT_FLOOR = 1.005
+
+
+def _median(values: list[float]) -> float:
+    v = sorted(values)
+    n = len(v)
+    if n == 0:
+        msg = "median of an empty series"
+        raise ScoringError(msg)
+    mid = n // 2
+    return float(v[mid]) if n % 2 else (v[mid - 1] + v[mid]) / 2.0
+
+
+def _robust_spread(values: list[float]) -> float:
+    """(2nd largest - 2nd smallest) / median; 0 for fewer than 4 values (M.md T3)."""
+    if len(values) < 4:
+        return 0.0
+    v = sorted(values)
+    med = _median(v)
+    return (v[-2] - v[1]) / med if med > 0 else 0.0
+
+
+def _lower_bound_index(m: int) -> int:
+    """Order statistic of the pair ratios that bounds their median from below (M.md T3)."""
+    if m < 8:
+        return 0
+    if m < 12:
+        return 1
+    if m < 16:
+        return 2
+    return 4
+
+
+def _pair_ratios(b_samples: list[dict], o_samples: list[dict], b_scored: list[float],
+                 o_scored: list[float], charge: float) -> list[float]:
+    """r_k = scored_B[k] / (scored_O[k] + charge), paired by the samples' ABBA ``pair`` index
+    (by position when the samples carry no pair index)."""
+    def idx(samples: list[dict]) -> list:
+        return [s.get("pair", i) for i, s in enumerate(samples)]
+
+    bmap = dict(zip(idx(b_samples), b_scored))
+    omap = dict(zip(idx(o_samples), o_scored))
+    keys = [k for k in idx(b_samples) if k in omap]
+    if not keys:
+        msg = "no ABBA pairs in common between the baseline and optimized series"
+        raise ScoringError(msg)
+    return [bmap[k] / (omap[k] + charge) for k in keys]
+
+
+def _j0_estimate(b_samples: list[dict], o_samples: list[dict], b_scored: list[float],
+                 o_scored: list[float], charge: float, level_tol: float,
+                 placement_levels_ms: dict | None) -> dict[str, Any]:
+    """M.md T3/T5: min(ratio of medians, median pair ratio), instability flag, lower bound."""
+    s_med = _median(b_scored) / (_median(o_scored) + charge)
+    r = _pair_ratios(b_samples, o_samples, b_scored, o_scored, charge)
+    s_pair = _median(r)
+    spread_b = _robust_spread(b_scored)
+    spread_o = _robust_spread(o_scored)
+    unstable = spread_b > level_tol or spread_o > level_tol
+    speedup = s_pair if unstable else min(s_med, s_pair)
+    lower = sorted(r)[_lower_bound_index(len(r))]
+    credited = speedup > J0_CREDIT_FLOOR and (not unstable or lower > J0_CREDIT_FLOOR)
+    level_ms = _median(b_scored) / 1e6
+    regime = None
+    if placement_levels_ms:
+        regime = min(placement_levels_ms, key=lambda n: abs(float(placement_levels_ms[n]) - level_ms))
+    return {"protocol": "j0", "speedup": speedup, "speedup_median_ratio": s_med,
+            "speedup_pair_median": s_pair, "pair_ratios": r, "spread_b": spread_b,
+            "spread_o": spread_o, "level_tol": level_tol, "unstable": unstable,
+            "lower_bound": lower, "credit_floor": J0_CREDIT_FLOOR, "credited": credited,
+            "n_pairs": len(r), "baseline_level_ms": level_ms, "regime": regime,
+            "remeasured": False}
+
+
+def score_frontier_pooled(
+    baseline_series: list[list[dict]],
+    optimized_series: list[list[dict]],
+    score_regex: str,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """T4: score several ABBA series of one phase as one pooled series (e.g. the first series
+    and its re-measure). Pair indices are offset per series so pairs keep their own ratios;
+    the lower bound uses the pooled pair count (m=20 -> 5th smallest)."""
+    if len(baseline_series) != len(optimized_series) or not baseline_series:
+        msg = "pooled scoring needs the same number (>= 1) of baseline and optimized series"
+        raise ScoringError(msg)
+    bs: list[dict] = []
+    os_: list[dict] = []
+    offset = 0
+    for b_ser, o_ser in zip(baseline_series, optimized_series):
+        n = max([s.get("pair", i) for i, s in enumerate(b_ser)] + [-1]) + 1
+        bs += [{**s, "pair": offset + s.get("pair", i)} for i, s in enumerate(b_ser)]
+        os_ += [{**s, "pair": offset + s.get("pair", i)} for i, s in enumerate(o_ser)]
+        offset += n
+    result = score_frontier(bs, os_, score_regex, **kwargs)
+    if result.get("j0") is not None:
+        result["j0"]["remeasured"] = len(baseline_series) > 1
+        result["j0"]["n_series"] = len(baseline_series)
+    return result
+
+
 def _cpu_values(samples: list, label: str) -> list[float]:
     out = []
     for i, v in enumerate(samples):
@@ -536,8 +639,15 @@ def score_frontier(
     cpu_sigma_s: float | None = None,
     cpu_k: float = 5.0,
     cpu_floor_s: float = 0.10,
+    protocol: str = "j0",
+    level_tol: float = J0_LEVEL_TOL,
+    placement_levels_ms: dict | None = None,
 ) -> dict[str, Any]:
-    """Apply the Frontier GPA scoring rule (fix rounds 1 and 2) to baseline and optimized samples.
+    """Apply the Frontier GPA scoring rule to baseline and optimized samples.
+
+    protocol "j0" (GPA-G1 J0, M.md T2-T5; the default): medians and ABBA pair ratios, see
+    :func:`_j0_estimate`. protocol "mean": the fix-round-1..4 ratio of means (kept for
+    comparison and old records).
 
     Scored time per run = target + kernels new to the baseline (:func:`score_terms`); the
     increase of the baseline's other kernels is charged on MEANS: max(0, mean(other_opt) -
@@ -583,8 +693,13 @@ def score_frontier(
     o = side(optimized_samples)
     b["other_mean_ns"] = base.other_mean_ns
     other_opt = _mean(o["other_ns"])
-    charge = max(0.0, other_opt - base.other_mean_ns)
+    if protocol == "j0":  # T2: the other-kernel charge moves to medians
+        charge = max(0.0, _median(o["other_ns"]) - _median(b["other_ns"]))
+    else:
+        charge = max(0.0, other_opt - base.other_mean_ns)
     o["mean_scored_ns"] = _mean(o["scored_ns"]) + charge
+    b["median_scored_ns"] = _median(b["scored_ns"])
+    o["median_scored_ns"] = _median(o["scored_ns"]) + charge
     failures: list[dict[str, str]] = []
 
     launch_ok = True
@@ -618,10 +733,23 @@ def score_frontier(
                 "is not credited." + (" [marginal: re-measure]" if cpu["marginal"] else ""))})
 
     raw = None
-    if b["mean_scored_ns"] > 0 and o["mean_scored_ns"] > 0:
-        raw = b["mean_scored_ns"] / o["mean_scored_ns"]
+    j0: dict[str, Any] | None = None
+    key = "median_scored_ns" if protocol == "j0" else "mean_scored_ns"
+    if b[key] > 0 and o[key] > 0:
+        if protocol == "j0":
+            j0 = _j0_estimate(baseline_samples, optimized_samples, b["scored_ns"], o["scored_ns"],
+                              charge, level_tol, placement_levels_ms)
+            raw = j0["speedup"]
+            if j0["unstable"] and not j0["lower_bound"] > J0_CREDIT_FLOOR:
+                failures.append({"code": "unstable", "message": (
+                    f"TIMING UNSTABLE on this GCD (the VRAM placement changed between runs): "
+                    f"speedup {raw:.4f} (pair ratios {min(j0['pair_ratios']):.4f}.."
+                    f"{max(j0['pair_ratios']):.4f}, lower bound {j0['lower_bound']:.4f} is not "
+                    f"above {J0_CREDIT_FLOOR}).")})
+        else:
+            raw = b["mean_scored_ns"] / o["mean_scored_ns"]
     else:
-        side_name = "original" if b["mean_scored_ns"] <= 0 else "optimized"
+        side_name = "original" if b[key] <= 0 else "optimized"
         failures.append({"code": "G-zero", "message": (
             f"NO GPU TIME: the {side_name} program's scored GPU time is zero, so no speedup can "
             "be computed.")})
@@ -647,6 +775,8 @@ def score_frontier(
                          "baseline": base.target_dispatches,
                          "optimized": o["target_dispatches"], "ok": launch_ok},
         "rule": {"g_wall_factor": G_WALL_FACTOR, "g_wall_slack_s": G_WALL_SLACK_S},
+        "protocol": protocol,
+        "j0": j0,
     }
 
 

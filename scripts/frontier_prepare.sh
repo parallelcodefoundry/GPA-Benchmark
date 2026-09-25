@@ -174,6 +174,11 @@ phase_build() {
         [[ -x "$dir/$bin" ]] || die "build of $name produced no $dir/$bin"
     done
     log "build: 9 baselines built"
+    # J0 protocol T0: the VRAM reset tool, run by the driver before every timed process.
+    mkdir -p frontier_tools
+    "$HIPCC" -O2 --offload-arch="$OFFLOAD_ARCH" -o frontier_tools/vram_reset scripts/vram_reset.cpp \
+        >frontier_tools/.vram_reset_build.log 2>&1 || die "build of frontier_tools/vram_reset failed"
+    log "build: frontier_tools/vram_reset built"
 }
 
 # gen_ref <manifest path> <app dir> <binary> <produced file or -stdout> <args...>

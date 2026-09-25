@@ -130,3 +130,5 @@ rodinia/*-hip/*.tmp
 rodinia/data/bfs/graph8M.txt.bad
 .data_unpack.*/
 .graphgen.*/
+# J0: built VRAM reset tool (source: scripts/vram_reset.cpp)
+frontier_tools/

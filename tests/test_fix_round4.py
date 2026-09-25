@@ -211,7 +211,7 @@ _DRIVE = textwrap.dedent('''\
     from gpa_bench_driver.driver_src.driver_models import DriverConfig
     from gpa_bench_driver.driver_src.driver_utils import DriverInfraError
     cfg = DriverConfig(app="toy", gpu_backend="hip", rocm_path=root / "rocm", offload_arch="gfx90a",
-                       config=root / "apps.yaml", nsys=True, num_samples=3,
+                       config=root / "apps.yaml", nsys=True, num_samples=3, pairs=4,
                        swaps_override={Path("kernel.cu"): "// kernel.cu\\nMODE=" + mode},
                        temp_dir=root / "tmp", kernel_gate=False)
     try:
@@ -232,6 +232,11 @@ def toy(tmp_path):
     root = tmp_path / "gpa"
     shutil.copytree(GPA_ROOT / "gpa_bench_driver", root / "gpa_bench_driver",
                     ignore=shutil.ignore_patterns("__pycache__"))
+    tools = root / "frontier_tools"
+    tools.mkdir(exist_ok=True)
+    reset = tools / "vram_reset"
+    reset.write_text("#!/bin/bash\necho 'vram_reset allocs=1 GiB=0.00'\n")
+    reset.chmod(0o755)
     app = root / "rodinia" / "toy-hip"
     app.mkdir(parents=True)
     (app / "kernel.cu").write_text("MODE=good\n")

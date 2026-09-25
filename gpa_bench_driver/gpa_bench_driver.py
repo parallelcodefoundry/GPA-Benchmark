@@ -30,7 +30,9 @@ import contextlib
 import logging
 import os
 import shutil
+import subprocess
 import tempfile
+import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -800,6 +802,40 @@ def _chmod_tree(root: Path) -> None:
             os.chmod(fp, os.stat(fp).st_mode | 0o644)
 
 
+def _n_pairs(app: dict, config: DriverConfig) -> int:
+    """T1: number of ABBA pairs (even). DriverConfig.pairs, else yaml test_pairs (default 6)."""
+    m = getattr(config, "pairs", None) or app.get("test_pairs") or 6
+    m = int(m)
+    return m + (m % 2)  # ABBA needs an even count
+
+
+def _vram_reset_tool() -> Path:
+    tool = Path(__file__).parent.parent / "frontier_tools" / "vram_reset"
+    if not tool.is_file() or not os.access(tool, os.X_OK):
+        msg = (f"VRAM reset failed: {tool} is missing (run scripts/frontier_prepare.sh build); "
+               "the J0 protocol needs it before every timed process")
+        raise DriverInfraError(msg)
+    return tool
+
+
+def _vram_reset(tool: Path, runner: SubprocessRunner, cwd: Path) -> float:
+    """T0: allocate-and-free all VRAM on the visible GCD. Returns its wall time (s)."""
+    start = time.perf_counter()
+    try:
+        proc = subprocess.run([str(tool)], cwd=cwd, env=runner.env, stdin=subprocess.DEVNULL,  # noqa: S603
+                              capture_output=True, text=True, timeout=30, check=False)
+    except subprocess.TimeoutExpired as exc:
+        msg = "VRAM reset failed: vram_reset timed out after 30 s"
+        raise DriverInfraError(msg) from exc
+    except OSError as exc:
+        msg = f"VRAM reset failed: {exc}"
+        raise DriverInfraError(msg) from exc
+    if proc.returncode != 0:
+        msg = f"VRAM reset failed (exit {proc.returncode}): {(proc.stderr or proc.stdout)[-400:]}"
+        raise DriverInfraError(msg)
+    return time.perf_counter() - start
+
+
 class _SideError(Exception):
     """Wraps a timing-run failure with the side index (0 = original, 1 = swap) so the caller can
     attribute a side-0 (j=0) failure to infra and a side-1 failure to the agent (J2)."""
@@ -841,25 +877,38 @@ def _interleaved_series(
     samples: list[list[dict]] = [[] for _ in roots]
     warm_fail: list[str | None] = [None for _ in roots]
     retain = config.retain_nsys_profiles
-    n_samples = getattr(config, "final_samples", None) or config.num_samples
+    reset_tool = _vram_reset_tool()
+    reset_cwd = roots[0]
+
     def _once(j, path, outdir):
+        # T0 (J0): VRAM reset right before every timed process (not counted in cpu_s/wall_s).
+        reset_s = _vram_reset(reset_tool, runner, reset_cwd)
         # J2: a side-0 (original) failure is tagged so the caller treats it as infra, not the agent
         try:
-            return profile_once(app, runner, path, outdir, score_regex=score_regex,
-                                rocm_path=rocm, validate=validate, retain_profiles=retain)
+            s = profile_once(app, runner, path, outdir, score_regex=score_regex,
+                             rocm_path=rocm, validate=validate, retain_profiles=retain)
         except (RocprofError, DriverInfraError) as exc:
             raise _SideError(j, exc) from exc
+        s["vram_reset_s"] = reset_s
+        return s
 
-    for j, path in enumerate(paths):  # warm-up, discarded
+    for j, path in enumerate(paths):  # warm-ups W_B, W_O, discarded
         w = _once(j, path, profile_dirs[j] / "rocprof_warmup")
         if w.get("valid") is False:
             warm_fail[j] = w.get("validation_output")
+    if len(paths) == 1:  # baseline-only series (no swap): plain repeats
+        for i in range(_n_pairs(app, config)):
+            s = _once(0, paths[0], profile_dirs[0] / f"rocprof_sample_{i}")
+            s.update(order=i, warmup=False, pair=i, pos_in_pair=0, protocol="j0")
+            samples[0].append(s)
+        return samples, warm_fail
+    # T1 ABBA: pair k is (B,O) for even k and (O,B) for odd k -> B O O B B O O B ...
     order = 0
-    for i in range(n_samples):
-        for j, path in enumerate(paths):
-            s = _once(j, path, profile_dirs[j] / f"rocprof_sample_{i}")
-            s["order"] = order
-            s["warmup"] = False
+    for k in range(_n_pairs(app, config)):
+        sides = (0, 1) if k % 2 == 0 else (1, 0)
+        for pos, j in enumerate(sides):
+            s = _once(j, paths[j], profile_dirs[j] / f"rocprof_pair{k}_{j}")
+            s.update(order=order, warmup=False, pair=k, pos_in_pair=pos, protocol="j0")
             order += 1
             samples[j].append(s)
     return samples, warm_fail

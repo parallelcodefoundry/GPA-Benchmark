@@ -24,6 +24,9 @@
 #   gate_preprocess           {tu, flags}: the translation unit (relative to path) that compiles the
 #                             kernel file, and the preprocessor flags; the kernel gate runs
 #                             hipcc -E --cuda-host-only on it (fix round 2 F3).
+#   test_pairs / final_pairs  J0 protocol: ABBA pairs for gpa_test (6) and the runner's final score (10).
+#   level_tol                 J0: per-arm robust spread above which the series is "unstable" (0.025).
+#   placement_levels_ms       J0 T5 (bfs, nw): the discrete VRAM-placement levels (ms) of the target.
 #   cpu_sigma_s               calibrated std (s) of the CPU-time difference of a pristine pair of
 #                             unprofiled runs; G-cpu slack = max(5 sigma / sqrt(pairs), 0.05 s) (F4).
 #
@@ -57,8 +60,11 @@ apps:
   gate_preprocess: {tu: Simulation.cu, flags: '-x hip -std=c++17'}
   # G-cpu (H1): std 0.0637 s over 12 pristine PROFILED pairs (MI250X, 2026-09-25), rounded up
   cpu_sigma_s: 0.073
-  # final-score profiled samples per side (H6): short targets need more to keep a 5-replay spread <= 1.5%
-  final_samples: 5
+  # J0 protocol (M.md T1/T3): ABBA pairs for gpa_test / the runner's final score, and
+  # the per-arm robust-spread tolerance above which a series counts as unstable
+  test_pairs: 6
+  final_pairs: 10
+  level_tol: 0.025
   # Checksums verified on MI250X (GPA-G1 report A.md): -s large -l 100000000 -> 711949,
   # -s large -> 952131, -s large -l 1000000 -> 995778, -s small -> 945990.
   expected_checksum:
@@ -83,8 +89,11 @@ apps:
   gate_preprocess: {tu: kernel/kernel_gpu_cuda_wrapper_2.cu, flags: '-x hip'}
   # G-cpu (H1): std 0.0690 s over 12 pristine PROFILED pairs (MI250X, 2026-09-25), rounded up
   cpu_sigma_s: 0.079
-  # final-score profiled samples per side (H6): short targets need more to keep a 5-replay spread <= 1.5%
-  final_samples: 10
+  # J0 protocol (M.md T1/T3): ABBA pairs for gpa_test / the runner's final score, and
+  # the per-arm robust-spread tolerance above which a series counts as unstable
+  test_pairs: 6
+  final_pairs: 10
+  level_tol: 0.025
   extra_files:
   - rodinia/b+tree-hip/kernel/kernel_gpu_cuda_wrapper_2.cu
   reference_output: frontier_refs/b+tree/ref-output.txt
@@ -101,8 +110,11 @@ apps:
   gate_preprocess: {tu: backprop_cuda.cu, flags: '-x hip'}
   # G-cpu (H1): std 0.0899 s over 12 pristine PROFILED pairs (MI250X, 2026-09-25), rounded up
   cpu_sigma_s: 0.103
-  # final-score profiled samples per side (H6): short targets need more to keep a 5-replay spread <= 1.5%
-  final_samples: 10
+  # J0 protocol (M.md T1/T3): ABBA pairs for gpa_test / the runner's final score, and
+  # the per-arm robust-spread tolerance above which a series counts as unstable
+  test_pairs: 6
+  final_pairs: 10
+  level_tol: 0.025
   extra_files:
   - rodinia/backprop-hip/backprop_cuda.cu
   reference_output: frontier_refs/backprop/ref-output.txt
@@ -121,8 +133,13 @@ apps:
   gate_preprocess: {tu: bfs.cu, flags: '-x hip'}
   # G-cpu (H1): std 0.0803 s over 12 pristine PROFILED pairs (MI250X, 2026-09-25), rounded up
   cpu_sigma_s: 0.092
-  # final-score profiled samples per side (H6): short targets need more to keep a 5-replay spread <= 1.5%
-  final_samples: 5
+  # J0 protocol (M.md T1/T3): ABBA pairs for gpa_test / the runner's final score, and
+  # the per-arm robust-spread tolerance above which a series counts as unstable
+  test_pairs: 6
+  final_pairs: 10
+  level_tol: 0.025
+  # J0 T5: the discrete VRAM-placement levels of the summed target time (ms), M.md Q1/Q2
+  placement_levels_ms: {F: 13.87, M: 15.45, S: 15.66}
   extra_files:
   - rodinia/bfs-hip/bfs.cu
   reference_output: frontier_refs/bfs/ref-result.txt
@@ -140,8 +157,11 @@ apps:
   gate_preprocess: {tu: main.cu, flags: '-x hip -I./AVI -DOUTPUT'}
   # G-cpu (H1): std 0.0549 s over 12 pristine PROFILED pairs (MI250X, 2026-09-25), rounded up
   cpu_sigma_s: 0.063
-  # final-score profiled samples per side (H6): short targets need more to keep a 5-replay spread <= 1.5%
-  final_samples: 5
+  # J0 protocol (M.md T1/T3): ABBA pairs for gpa_test / the runner's final score, and
+  # the per-arm robust-spread tolerance above which a series counts as unstable
+  test_pairs: 6
+  final_pairs: 10
+  level_tol: 0.025
   extra_files:
   - rodinia/heartwall-hip/main.cu
   reference_output: frontier_refs/heartwall/ref-result.txt
@@ -158,8 +178,11 @@ apps:
   gate_preprocess: {tu: hotspot.cu, flags: '-x hip'}
   # G-cpu (H1): std 0.0350 s over 12 pristine PROFILED pairs (MI250X, 2026-09-25), rounded up
   cpu_sigma_s: 0.04
-  # final-score profiled samples per side (H6): short targets need more to keep a 5-replay spread <= 1.5%
-  final_samples: 5
+  # J0 protocol (M.md T1/T3): ABBA pairs for gpa_test / the runner's final score, and
+  # the per-arm robust-spread tolerance above which a series counts as unstable
+  test_pairs: 6
+  final_pairs: 10
+  level_tol: 0.025
   reference_output: frontier_refs/hotspot/ref-output.out
   test_output: rodinia/hotspot-hip/output.out
   numeric_tolerance: 0.01
@@ -175,8 +198,13 @@ apps:
   gate_preprocess: {tu: needle.cu, flags: '-x hip -DTRACEBACK'}
   # G-cpu (H1): std 0.1038 s over 12 pristine PROFILED pairs (MI250X, 2026-09-25), rounded up
   cpu_sigma_s: 0.119
-  # final-score profiled samples per side (H6): short targets need more to keep a 5-replay spread <= 1.5%
-  final_samples: 5
+  # J0 protocol (M.md T1/T3): ABBA pairs for gpa_test / the runner's final score, and
+  # the per-arm robust-spread tolerance above which a series counts as unstable
+  test_pairs: 6
+  final_pairs: 10
+  level_tol: 0.025
+  # J0 T5: the discrete VRAM-placement levels of the summed target time (ms), M.md Q1/Q2
+  placement_levels_ms: {fast: 142.1, slow: 156.7}
   extra_files:
   - rodinia/nw-hip/needle.cu
   reference_output: frontier_refs/nw/ref-result.txt
@@ -197,8 +225,11 @@ apps:
   gate_preprocess: {tu: pathfinder.cu, flags: '-x hip -DBENCH_PRINT'}
   # G-cpu (H1): std 0.0545 s over 12 pristine PROFILED pairs (MI250X, 2026-09-25), rounded up
   cpu_sigma_s: 0.063
-  # final-score profiled samples per side (H6): short targets need more to keep a 5-replay spread <= 1.5%
-  final_samples: 10
+  # J0 protocol (M.md T1/T3): ABBA pairs for gpa_test / the runner's final score, and
+  # the per-arm robust-spread tolerance above which a series counts as unstable
+  test_pairs: 6
+  final_pairs: 10
+  level_tol: 0.025
   reference_output: frontier_refs/pathfinder/ref-result.txt
 
 - name: streamcluster
@@ -212,7 +243,10 @@ apps:
   gate_preprocess: {tu: streamcluster_cuda.cu, flags: '-x hip'}
   # G-cpu (H1): std 0.1091 s over 12 pristine PROFILED pairs (MI250X, 2026-09-25), rounded up
   cpu_sigma_s: 0.126
-  # final-score profiled samples per side (H6): short targets need more to keep a 5-replay spread <= 1.5%
-  final_samples: 5
+  # J0 protocol (M.md T1/T3): ABBA pairs for gpa_test / the runner's final score, and
+  # the per-arm robust-spread tolerance above which a series counts as unstable
+  test_pairs: 6
+  final_pairs: 10
+  level_tol: 0.025
   reference_output: frontier_refs/streamcluster/ref-output.txt
   test_output: rodinia/streamcluster-hip/output.txt

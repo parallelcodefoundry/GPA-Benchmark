@@ -309,7 +309,7 @@ _DRIVE = textwrap.dedent('''\
     from gpa_bench_driver.driver_src.driver_utils import DriverInfraError
     mode = sys.argv[2]
     cfg = DriverConfig(app="toy", gpu_backend="hip", rocm_path=root / "rocm", offload_arch="gfx90a",
-                       config=root / "apps.yaml", nsys=True, num_samples=3,
+                       config=root / "apps.yaml", nsys=True, num_samples=3, pairs=4,
                        swaps_override={Path("kernel.cu"): "// kernel.cu\\nMODE=" + mode},
                        temp_dir=root / "tmp", kernel_gate=False)
     try:
@@ -332,6 +332,11 @@ def toy2(tmp_path):
     root = tmp_path / "gpa"
     shutil.copytree(GPA_ROOT / "gpa_bench_driver", root / "gpa_bench_driver",
                     ignore=shutil.ignore_patterns("__pycache__"))
+    tools = root / "frontier_tools"
+    tools.mkdir(exist_ok=True)
+    reset = tools / "vram_reset"
+    reset.write_text("#!/bin/bash\necho 'vram_reset allocs=1 GiB=0.00'\n")
+    reset.chmod(0o755)
     app = root / "rodinia" / "toy-hip"
     app.mkdir(parents=True)
     (app / "kernel.cu").write_text("MODE=good\n")
@@ -365,15 +370,17 @@ def _drive2(root: Path, mode: str, env: dict | None = None) -> dict:
 def test_F1_driver_interleaves_and_discards_warmup(toy2):
     out = _drive2(toy2, "good")
     assert out["validate"] is True
-    assert out["order_b"] == [0, 2, 4] and out["order_o"] == [1, 3, 5]  # B,O,B,O,B,O
+    # J0 T1: ABBA order (B O O B B O O B), not strict alternation (M.md: alternation aliases
+    # with period-2 VRAM-placement states). Mutation check: strict B,O,B,O would give [0,2,4,6].
+    assert out["order_b"] == [0, 3, 4, 7] and out["order_o"] == [1, 2, 5, 6]
     # H1: CPU rides in every profiled sample (no separate pairs)
-    assert len(out["cpu_b"]) == len(out["cpu_o"]) == 3 and out["base_same"]
+    assert len(out["cpu_b"]) == len(out["cpu_o"]) == 4 and out["base_same"]
 
 
 def test_H1_driver_measures_cpu_in_profiled_runs(toy2):
     out = _drive2(toy2, "cpuhog")
     assert out["validate"] is True
-    assert len(out["cpu_o"]) == 3 and all(c is not None for c in out["cpu_o"])
+    assert len(out["cpu_o"]) == 4 and all(c is not None for c in out["cpu_o"])
     delta = sum(out["cpu_o"]) / len(out["cpu_o"]) - sum(out["cpu_b"]) / len(out["cpu_b"])
     assert delta > 0.2, out
     assert not cpu_guard(out["cpu_b"], out["cpu_o"], 0.01)["ok"]
