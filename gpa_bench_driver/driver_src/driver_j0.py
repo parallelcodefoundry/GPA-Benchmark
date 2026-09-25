@@ -98,7 +98,7 @@ def rescore_kernel(
         gcd: GCD index (ROCR_VISIBLE_DEVICES)
         pairs: ABBA pairs (default: the app's yaml final_pairs, 10)
         gpa_root: GPA-Benchmark root (default: this checkout)
-        temp_dir: scratch dir for the working copies (node-local)
+        temp_dir: scratch dir for the working copies (node-local; created if missing)
         perturb_gib: if given (> 0), allocate this many GiB on the GCD and free it before the
             series (T6 decorrelation); if None and ``seed`` is given, a random 0-8 GiB is drawn
         overrides / reference_from_baseline: for an input variant (R7), as in DriverConfig
@@ -111,6 +111,7 @@ def rescore_kernel(
     """
     root = Path(gpa_root) if gpa_root is not None else _GPA_ROOT
     entry = app_entry(app, root)
+    Path(temp_dir).mkdir(parents=True, exist_ok=True)
     m = int(pairs or entry.get("final_pairs", 10))
     kernel_name = Path(entry["kernel_file"]).name
     if perturb_gib is None and seed is not None:

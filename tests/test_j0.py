@@ -278,3 +278,27 @@ def test_T0_reset_runs_before_every_timed_sample(tmp_path):
     out = _drive(_toy(tmp_path, "#!/bin/bash\necho 'vram_reset allocs=1 GiB=0.00'\n"))
     assert len(out["reset_s"]) == 2 and all(r is not None and r >= 0 for r in out["reset_s"])
     assert out["protocol"] == ["j0", "j0"]
+
+
+# ---------------------------------------------------------------- T6 entry point (driver_j0)
+
+def test_T6_rescore_kernel_creates_temp_dir_and_remeasures_when_unstable(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from gpa_bench_driver.driver_src import driver_j0
+
+    calls = []
+
+    def fake_series(app, kernel_name, kernel_text, gcd, m, temp_dir, overrides, rfb):
+        assert temp_dir.is_dir()  # created by rescore_kernel (the caller may pass a fresh path)
+        calls.append(m)
+        fn = _period2 if len(calls) == 1 else (lambda pos: 15.66)
+        b, o = _series(fn, m, "abba")
+        return None, SimpleNamespace(validate=True, validation_output="", nsys_data=o,
+                                     baseline_nsys_data=b)
+
+    monkeypatch.setattr(driver_j0, "_one_series", fake_series)
+    r = driver_j0.rescore_kernel("bfs", "// k\n", 3, temp_dir=tmp_path / "fresh" / "dir")
+    assert calls == [10, 10]  # yaml final_pairs, then one T4 pooled re-measure
+    assert r["gcd"] == 3 and r["pairs"] == 10 and r["remeasured"] is True
+    assert r["j0"]["n_pairs"] == 20 and not r["j0"]["credited"]
