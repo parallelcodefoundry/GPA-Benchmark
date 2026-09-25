@@ -264,33 +264,33 @@ def test_K3_snapshot_and_verified_run(tmp_path):
 
 
 def test_K3_sealed_copy_ignores_a_later_change_on_disk(tmp_path):
-    from gpa_bench_driver.driver_src.driver_t0 import VramResetTool
+    from gpa_bench_driver.driver_src.driver_t0 import BUILD_RECORD, VramResetTool
 
     root, tool = _tool_root(tmp_path)
-    with VramResetTool(None, root) as t:
+    with VramResetTool(BUILD_RECORD, root) as t:
         tool.write_text("#!/bin/bash\nexit 7\n")  # replaced after the check
         t.run(dict(os.environ), tmp_path)  # still the verified bytes: exit 0
 
 
 def test_K3_reviewer_tamper_binary_and_record_rewritten_is_caught_by_the_snapshot(tmp_path):
-    from gpa_bench_driver.driver_src.driver_t0 import VramResetTool, snapshot
+    from gpa_bench_driver.driver_src.driver_t0 import BUILD_RECORD, VramResetTool, snapshot
 
     root, tool = _tool_root(tmp_path)
     pre_agent = snapshot(root)["sha256"]
     tool.write_text("#!/bin/bash\n( sleep 0.2 ) &\nexit 0\n")  # the agent's script ...
     (root / "frontier_tools" / "vram_reset.sha256").write_text(  # ... with a matching record
         hashlib.sha256(tool.read_bytes()).hexdigest() + "  vram_reset\n")
-    VramResetTool(None, root).close()  # the build record alone is fooled (why K3 exists)
+    VramResetTool(BUILD_RECORD, root).close()  # the build record alone is fooled (why K3 exists)
     with pytest.raises(DriverInfraError, match="pre-agent sha256"):
         VramResetTool(pre_agent, root)
 
 
 def test_K3_missing_binary_or_record(tmp_path):
-    from gpa_bench_driver.driver_src.driver_t0 import VramResetTool, snapshot
+    from gpa_bench_driver.driver_src.driver_t0 import BUILD_RECORD, VramResetTool, snapshot
 
     root, tool = _tool_root(tmp_path, record=False)
     with pytest.raises(DriverInfraError, match="build record"):
-        VramResetTool(None, root)
+        VramResetTool(BUILD_RECORD, root)
     with pytest.raises(DriverInfraError, match="missing"):
         snapshot(root)
     tool.unlink()
@@ -377,7 +377,7 @@ _DRIVE = textwrap.dedent('''\
                        config=root / "apps.yaml", nsys=True, pairs=2,
                        swaps_override={Path("kernel.cu"): "// kernel.cu\\nMODE=good"},
                        temp_dir=root / "tmp", kernel_gate=False,
-                       vram_reset_sha256=opts.get("sha"))
+                       vram_reset_sha256=opts.get("sha", "build-record"))
     try:
         _, _, long = run_driver(cfg)
     except DriverInfraError as e:
@@ -489,3 +489,111 @@ def test_pathfinder_cpu_floor_is_025_and_reaches_the_score():
     assert score_kwargs(app_entry("hotspot", GPA_ROOT))["cpu_floor_s"] == 0.10
     g = cpu_guard([6.2] * 10, [6.2977] * 10, kw["cpu_sigma_s"], cpu_floor_s=kw["cpu_floor_s"])
     assert g["ok"] and g["slack_s"] == 0.25  # the reference opt's +0.098 s edge
+
+
+# ============================================================================= fix round 6
+
+def test_R6_K3_driver_refuses_the_reset_without_an_expected_sha256(tmp_path):
+    from gpa_bench_driver.driver_src.driver_t0 import VramResetTool
+
+    root, _ = _tool_root(tmp_path)
+    for missing in (None, ""):
+        with pytest.raises(DriverInfraError, match="no pre-agent sha256"):
+            VramResetTool(missing, root)
+
+
+def test_R6_K3_rescore_kernel_fails_closed_before_building(tmp_path):
+    from gpa_bench_driver.driver_src.driver_j0 import rescore_kernel
+
+    with pytest.raises(DriverInfraError, match="needs vram_reset_sha256"):
+        rescore_kernel("hotspot", "// k\n", 0, temp_dir=tmp_path)
+
+
+def test_R6_K3_toy_driver_without_sha_is_infra(toy5):
+    out = _drive5(toy5, sha=None)
+    assert "infra" in out and "no pre-agent sha256" in out["infra"], out
+
+
+@pytest.mark.parametrize("eol", ["\r", "\r\n"])
+def test_R6_phase12_lone_cr_and_crlf_end_lines(eol):
+    pristine = (GPA_ROOT / _apps()["hotspot"]["kernel_file"]).read_text()
+    evil = eol.join(["int k_x;", f'#line 1 "{SYS}"', "int k_y;", ""])
+    res = _gate_text("hotspot", pristine + "\n" + evil, preprocess=False)
+    assert not res.ok and _has_line_rule(res), res.message()
+    assert driver_gate._phase12("a\rb\r\nc") == "a\nb\nc"
+
+
+@needs_hipcc
+def test_R6_keep_system_includes_pass_fails_closed(monkeypatch):
+    real = driver_gate._run_pp
+
+    def fake(app, gpa_root, text, hipcc, extra, *a, **k):
+        proc = real(app, gpa_root, text, hipcc, extra, *a, **k)
+        if driver_gate._KEEP_SYS in extra and text is not None and "k_marker_r6" in text:
+            proc.returncode = 1
+            proc.stderr = "error: simulated -fkeep-system-includes failure"
+        return proc
+
+    monkeypatch.setattr(driver_gate, "_run_pp", fake)
+    pristine = (GPA_ROOT / _apps()["hotspot"]["kernel_file"]).read_text()
+    res = _gate_text("hotspot", pristine + "\nstatic int k_marker_r6;\n")
+    assert not res.ok and any("-fkeep-system-includes" in v for v in res.violations), res.message()
+
+
+# ---- L2: crash classification under the profiler
+
+_L2_RUN = textwrap.dedent('''\
+    #!/bin/bash
+    . ./kernel.cu
+    n=$(cat .runs 2>/dev/null || echo 0); n=$((n+1)); echo $n > .runs
+    echo "toy_kernel(int),1000" >> kernels.csv
+    case "$MODE" in
+      crash_at2_stdout) echo "launching toy_kernel"; [ $n -eq 2 ] && exit 7 ;;
+      crash_at2_trace)  [ $n -eq 2 ] && exit 7 ;;
+      crash_at2_silent) [ $n -eq 2 ] && { rm -f kernels.csv; exit 7; } ;;
+    esac
+    echo "result 42" > output.txt
+    ''')
+# like the toy profiler, but the trace of a failed run is still written (rocprofv3 finalizes at
+# exit) when the program dispatched kernels before it failed
+_L2_ROCPROF = _FAKE_ROCPROF.replace(
+    '"$@" || exit $?\nmkdir -p "$out"',
+    '"$@"; rc=$?\n[ -s kernels.csv ] || exit $rc\nmkdir -p "$out"').replace(
+    '} > "$out/trace_kernel_trace.csv"\n', '} > "$out/trace_kernel_trace.csv"\nexit $rc\n')
+assert _L2_ROCPROF.count("exit $rc") == 2
+
+
+def _l2_toy(toy5: Path, mode: str) -> Path:
+    (toy5 / "rodinia" / "toy-hip" / "run.sh").write_text(_L2_RUN)
+    (toy5 / "rocm" / "bin" / "rocprofv3").write_text(_L2_ROCPROF)
+    return toy5
+
+
+def _drive_mode(root: Path, mode: str, env: dict | None = None) -> dict:
+    script = _DRIVE.replace('"// kernel.cu\\nMODE=good"', '"// kernel.cu\\nMODE=" + opts["mode"]')
+    assert script != _DRIVE
+    proc = subprocess.run([sys.executable, "-c", script, str(root), json.dumps({"mode": mode})],
+                          capture_output=True, text=True, check=False, timeout=600,
+                          env={**os.environ, **(env or {})})
+    assert proc.returncode == 0, proc.stderr[-3000:]
+    return json.loads(proc.stdout.strip().splitlines()[-1])
+
+
+@pytest.mark.parametrize("mode", ["crash_at2_stdout", "crash_at2_trace"])
+def test_L2_intermittent_crash_after_start_is_the_agents_failure_no_retry(toy5, mode):
+    out = _drive_mode(_l2_toy(toy5, mode), mode)
+    assert out.get("validate") is False and out.get("run") is False, out
+    assert "after it had started" in out["vo"], out
+
+
+def test_L2_silent_crash_before_any_sign_of_start_is_retried(toy5):
+    # no stdout, no output, no dispatch: indistinguishable from a profiler failure -> retried
+    # once (K4) and the retry passes
+    out = _drive_mode(_l2_toy(toy5, "crash_at2_silent"), "crash_at2_silent")
+    assert out.get("validate") is True, out
+
+
+def test_L2_profiler_failing_before_exec_is_infra_retry(toy5):
+    _l2_toy(toy5, "good")
+    out = _drive_mode(toy5, "good", env={"FAIL_SWAP_N": "1"})
+    assert out.get("validate") is True and out["n"] == 2, out

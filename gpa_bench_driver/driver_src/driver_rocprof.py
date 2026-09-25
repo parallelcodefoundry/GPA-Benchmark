@@ -235,16 +235,21 @@ def profile_once(
         what = (f"rocprofv3 timing run failed with return code {result.returncode}"
                 if result.returncode != 0 else f"rocprofv3 wrote no kernel trace under {outdir}")
         stderr = head_tail(result.stderr)
-        # H3: infra ONLY when the profiler never started the app (its output dir was not even
-        # created) AND the plain binary is fine. Otherwise a non-zero exit is the AGENT's program
-        # (a lucky plain rerun must not launder an intermittent kernel crash).
-        if not outdir.exists():
+        # H3 / L2: infra ONLY when the program demonstrably never started under the profiler
+        # (no dispatch in the trace, no stdout, no output file) AND the plain binary is fine.
+        # A program that started and then crashed or exited non-zero is the AGENT's failure, no
+        # retry (a lucky plain rerun must not launder an intermittent crash).
+        started = _started_evidence(outdir, out_file, result)
+        if started is None:
             plain = runner.run(app["run_command"].split(), run_path)
             if plain.returncode == 0:
-                msg = (f"{what} before the app started (output dir never created), but the same "
-                       f"binary runs fine without the profiler (profiler/harness failure): {stderr}")
+                msg = (f"{what} and the program left no sign of having started (no kernel "
+                       "dispatch, no output), but the same binary runs fine without the profiler "
+                       f"(profiler/harness failure): {stderr}")
                 raise ProfilerOnlyError(msg)
         msg = f"the program failed under the profiler (return code {result.returncode})"
+        if started is not None:
+            msg += f" after it had started ({started})"
         if stderr:
             msg += f": {stderr}"
         raise RocprofError(msg)
@@ -263,6 +268,23 @@ def profile_once(
     if not retain_profiles:
         shutil.rmtree(outdir, ignore_errors=True)
     return sample
+
+
+def _started_evidence(outdir: Path, out_file: Path | None,
+                      result: subprocess.CompletedProcess) -> str | None:
+    """L2: evidence that the program started under the profiler, or None. rocprofv3 writes its
+    own messages to stderr, so stdout carries only the program's output."""
+    if out_file is not None and out_file.exists():
+        return f"it wrote {out_file.name}"
+    if (result.stdout or "").strip():
+        return "it wrote to stdout"
+    if outdir.exists():
+        try:
+            if read_kernel_trace(find_kernel_trace_files(outdir)):
+                return "its kernels were dispatched"
+        except (OSError, ValueError, KeyError, csv.Error):
+            return "the profiler recorded a partial kernel trace"
+    return None
 
 
 def cpu_run_once(
@@ -673,9 +695,10 @@ def score_frontier(
     o = side(optimized_samples)
     b["other_mean_ns"] = base.other_mean_ns
     other_opt = _mean(o["other_ns"])
-    other_j0: dict[str, float] = {}
-    if protocol == "j0":  # T2 on medians, minus a noise tolerance (fix round 5)
-        other_j0 = _rule.other_charge(b["other_ns"], o["other_ns"])
+    other_j0: dict[str, Any] = {}
+    if protocol == "j0":  # T2 on medians, minus a noise tolerance capped at half the floor
+        # margin of the baseline's scored time (fix rounds 5/6, L1)
+        other_j0 = _rule.other_charge(b["other_ns"], o["other_ns"], b["scored_ns"])
         charge = other_j0["charge_ns"]
         # the per-sample lists hold the charge actually applied (not legacy per-run values)
         b["other_charge_ns"] = [0.0] * len(b["other_ns"])

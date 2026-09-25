@@ -311,7 +311,7 @@ _DRIVE = textwrap.dedent('''\
     cfg = DriverConfig(app="toy", gpu_backend="hip", rocm_path=root / "rocm", offload_arch="gfx90a",
                        config=root / "apps.yaml", nsys=True, num_samples=3, pairs=4,
                        swaps_override={Path("kernel.cu"): "// kernel.cu\\nMODE=" + mode},
-                       temp_dir=root / "tmp", kernel_gate=False)
+                       temp_dir=root / "tmp", kernel_gate=False, vram_reset_sha256="build-record")
     try:
         _, _, long = run_driver(cfg)
     except DriverInfraError as e:

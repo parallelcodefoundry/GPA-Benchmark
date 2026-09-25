@@ -9,6 +9,7 @@ old order + mean estimator the same no-op IS falsely credited).
 from __future__ import annotations
 
 import json
+import statistics
 import os
 import shutil
 import subprocess
@@ -164,7 +165,8 @@ def _noisy_other(seed, n, shift_ns=0.0, rel=0.02, base_ns=440_000):
 
 
 def test_other_kernel_charge_is_noise_tolerant_on_a_noop():
-    """fix round 5: backprop's other kernel (~440 us, +-2% per run) no longer charges a no-op."""
+    """fix round 5: the one-sided median charge is reduced by a noise tolerance; fix round 6 (L1)
+    caps that tolerance at half the floor margin (backprop: 1.1 us), so some bias remains."""
     charged_old = charged_new = 0
     sum_old = sum_new = 0.0
     for seed in range(200):
@@ -175,13 +177,13 @@ def test_other_kernel_charge_is_noise_tolerant_on_a_noop():
             s["kernels"]["other(int)"] = int(v)
         r = score_frontier(b, o, RX, protocol="j0")
         med = r["other"]["optimized_median_ns"] - r["other"]["baseline_median_ns"]
+        assert r["other"]["tol_ns"] == pytest.approx(0.5 * 0.005 * 440_000)  # the L1 cap
+        assert r["other"]["charge_ns"] <= max(0.0, med)
         charged_old += med > 0
         charged_new += r["other"]["charge_ns"] > 0
         sum_old += max(0.0, med)
         sum_new += r["other"]["charge_ns"]
-    assert charged_old > 60            # the old one-sided median charge hit about half the no-ops
-    assert charged_new <= 20           # the tolerant one: rarely (tol ~ 2 sigma of the median gap)
-    assert sum_new < 0.15 * sum_old    # and the bias it leaves is ~10% of the old one
+    assert charged_new < charged_old and sum_new < 0.85 * sum_old
 
 
 def test_other_kernel_charge_still_charges_a_real_increase_under_noise():
@@ -191,8 +193,9 @@ def test_other_kernel_charge_still_charges_a_real_increase_under_noise():
     for s, v in zip(o, _noisy_other(2, 10, shift_ns=60_000)):  # +60 us per run, moved work
         s["kernels"]["other(int)"] = int(v)
     r = score_frontier(b, o, RX, protocol="j0")
-    assert 60_000 - 2 * r["other"]["tol_ns"] < r["other"]["charge_ns"] < 60_000 + r["other"]["tol_ns"]
-    assert r["other"]["tol_ns"] < 15_000
+    tol = r["other"]["tol_ns"]
+    assert 60_000 - tol - 6_000 < r["other"]["charge_ns"] < 60_000 + 6_000  # medians' own noise
+    assert tol <= 0.5 * 0.005 * 440_000 + 1e-6
 
 
 def test_T4_pooled_series_uses_pooled_lower_bound():
@@ -260,7 +263,7 @@ _DRIVE = textwrap.dedent('''\
     cfg = DriverConfig(app="toy", gpu_backend="hip", rocm_path=root / "rocm", offload_arch="gfx90a",
                        config=root / "apps.yaml", nsys=True, pairs=2,
                        swaps_override={Path("kernel.cu"): "// kernel.cu\\nMODE=good"},
-                       temp_dir=root / "tmp", kernel_gate=False)
+                       temp_dir=root / "tmp", kernel_gate=False, vram_reset_sha256="build-record")
     try:
         _, _, long = run_driver(cfg)
     except DriverInfraError as e:
@@ -349,7 +352,8 @@ def test_T6_rescore_kernel_creates_temp_dir_and_remeasures_when_unstable(tmp_pat
                                      baseline_nsys_data=b)
 
     monkeypatch.setattr(driver_j0, "_one_series", fake_series)
-    r = driver_j0.rescore_kernel("bfs", "// k\n", 3, temp_dir=tmp_path / "fresh" / "dir")
+    r = driver_j0.rescore_kernel("bfs", "// k\n", 3, temp_dir=tmp_path / "fresh" / "dir",
+                                 vram_reset_sha256="f" * 64)
     assert calls == [10, 10]  # yaml final_pairs, then one T4 pooled re-measure
     assert r["gcd"] == 3 and r["pairs"] == 10 and r["remeasured"] is True
     assert r["j0"]["n_pairs"] == 20 and not r["j0"]["credited"]
@@ -371,7 +375,7 @@ def test_T6_rescore_kernel_remeasures_a_marginal_g_cpu_miss_like_the_runner(tmp_
                                      baseline_nsys_data=b)
 
     monkeypatch.setattr(driver_j0, "_one_series", fake_series)
-    r = driver_j0.rescore_kernel("nw", "// k\n", 0, temp_dir=tmp_path)
+    r = driver_j0.rescore_kernel("nw", "// k\n", 0, temp_dir=tmp_path, vram_reset_sha256="f" * 64)
     assert calls == [10, 10]
     assert r["first"]["failures"] == ["G-cpu"] and r["remeasured"] is True
     assert r["cpu"]["ok"] and r["cpu"]["n_pairs"] == 20  # decided on the pooled series
@@ -443,3 +447,61 @@ def test_K2_j0_decision_recomputes_the_lower_bound_from_the_pair_ratios():
     assert j0_decision(rec)[0] is True
     ratios = [1.001, 1.002, 1.003, 1.004] + [1.03] * 12  # j=3 -> 1.004: not credited
     assert j0_decision({**rec, "pair_ratios": ratios})[0] is False
+
+
+# ---------------------------------------------------------------- L1: tolerance capped (round 6)
+
+BP = json.loads((GPA_ROOT / "tests/fixtures/j0/backprop_noop_series.json").read_text())
+
+
+@pytest.mark.parametrize("key", sorted(BP["series"]))
+def test_L1_reviewer_scenario_shift_of_tol_is_never_credited(key):
+    """verify6/reviewer/charge_tol_backprop.txt: moving exactly `tol` of target work into the
+    unchanged other kernel goes uncharged; the shift-only speedup is T / (T - tol). Capped at half
+    the floor margin it is <= 1 / (1 - 0.0025) = 1.0025 and never credited; the round-5 (uncapped) tolerance gave
+    1.006-1.018 on these same replays."""
+    from gpa_bench_driver.driver_src.driver_j0_rule import j0_credited, other_charge
+
+    d = BP["series"][key]
+    t = statistics.median(d["b_scored"])
+    capped = other_charge(d["b_other"], d["o_other"], d["b_scored"])["tol_ns"]
+    uncapped = other_charge(d["b_other"], d["o_other"])["tol_ns"]
+    shift_only = t / (t - capped)
+    assert capped <= 0.5 * 0.005 * t + 1e-6
+    assert shift_only <= 1 / (1 - 0.0025) + 1e-9 and not j0_credited(shift_only, False, None)
+    assert t / (t - uncapped) > 1.005  # mutation: the round-5 tolerance credits the shift
+
+
+@pytest.mark.parametrize("key", sorted(BP["series"]))
+def test_L1_measured_shift_gain_is_bounded_by_tol_plus_favourable_other_noise(key):
+    """On the real series a shift can also absorb the other kernel's favourable median noise
+    g < 0 (the one-sided charge ignores it): the optimized arm's effective time drops by at most
+    tol + max(0, -g). Documented residual (A.md, fix round 6)."""
+    from gpa_bench_driver.driver_src.driver_j0_rule import j0_estimate, median, other_charge
+
+    d = BP["series"][key]
+    t = median(d["b_scored"])
+    c0 = other_charge(d["b_other"], d["o_other"], d["b_scored"])
+    g = median(d["o_other"]) - median(d["b_other"])
+    base = j0_estimate(d["b_scored"], d["o_scored"])  # the no-op's own target-only reading
+    bound = max(base["speedup_median_ratio"], base["speedup_pair_median"]) * t / (
+        t - c0["tol_ns"] - max(0.0, -g))
+    for shift in [x * 250.0 for x in range(0, 61)]:  # 0 .. 15 us
+        oo = [v + shift for v in d["o_other"]]
+        os_ = [v - shift for v in d["o_scored"]]
+        c = other_charge(d["b_other"], oo, d["b_scored"])
+        j = j0_estimate(d["b_scored"], os_, charge_ns=c["charge_ns"])
+        assert j["speedup"] <= bound * 1.0005, (shift, j["speedup"], bound)
+
+
+def test_L1_score_frontier_reports_the_cap():
+    d = BP["series"]["k5_replay_honest/variant"]
+    def samples(scored, other):
+        return [{"target_ns": int(x), "target_dispatches": 1,
+                 "kernels": {"k(int)": int(x), "other(int)": int(y)}, "wall_s": 1.0, "cpu_s": 1.0,
+                 "pair": i} for i, (x, y) in enumerate(zip(scored, other))]
+    r = score_frontier(samples(d["b_scored"], d["b_other"]), samples(d["o_scored"], d["o_other"]),
+                       RX, protocol="j0")
+    o = r["other"]
+    assert o["tol_cap_ns"] == pytest.approx(0.5 * 0.005 * statistics.median(d["b_scored"]))
+    assert o["tol_ns"] == min(o["tol_noise_ns"], o["tol_cap_ns"])

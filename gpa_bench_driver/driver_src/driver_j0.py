@@ -127,8 +127,8 @@ def rescore_kernel(
             series (T6 decorrelation); if None and ``seed`` is given, a random 0-8 GiB is drawn
         overrides / reference_from_baseline: for an input variant (R7), as in DriverConfig
         seed: seed for the random perturb size
-        vram_reset_sha256: the pre-batch sha256 of frontier_tools/vram_reset (K3); None = its
-            build record
+        vram_reset_sha256: the pre-agent/pre-batch sha256 of frontier_tools/vram_reset (K3);
+            required (None is refused by the driver: fail closed)
 
     Returns:
         the score_frontier result, plus "gcd", "perturb_gib", "pairs", "remeasured", the pass
@@ -137,6 +137,10 @@ def rescore_kernel(
 
     """
     root = Path(gpa_root) if gpa_root is not None else _GPA_ROOT
+    if not vram_reset_sha256:  # fix round 6: fail closed before building anything
+        msg = ("rescore_kernel needs vram_reset_sha256 (the pre-batch snapshot of "
+               "frontier_tools/vram_reset, driver_j0.vram_reset_snapshot())")
+        raise DriverInfraError(msg)
     entry = app_entry(app, root)
     Path(temp_dir).mkdir(parents=True, exist_ok=True)
     m = int(pairs or entry.get("final_pairs", 10))

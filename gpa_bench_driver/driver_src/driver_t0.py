@@ -6,8 +6,9 @@ cannot see it. Instead:
 
 - the runner takes :func:`snapshot` BEFORE the agent runs and passes its ``sha256`` to the driver
   (``DriverConfig.vram_reset_sha256``); R9 re-checks :func:`snapshot` after the agent;
-- :class:`VramResetTool` checks the binary against THAT value (or, without one, against the build
-  record ``frontier_tools/vram_reset.sha256``), then keeps the verified bytes in a sealed
+- :class:`VramResetTool` checks the binary against THAT value (or, only when the caller passes
+  :data:`BUILD_RECORD` -- gpa_test -- against the build record
+  ``frontier_tools/vram_reset.sha256``; no value is refused), then keeps the verified bytes in a sealed
   in-memory file (memfd, F_SEAL_WRITE) and executes that copy, so nothing on disk can change
   what runs between the check and the uses. Where memfd is unavailable it falls back to a private
   0700 copy whose sha256 is re-checked before every use.
@@ -28,6 +29,9 @@ from gpa_bench_driver.driver_src.driver_utils import DriverInfraError
 _GPA_ROOT = Path(__file__).resolve().parent.parent.parent
 TOOL_REL = "frontier_tools/vram_reset"
 RECORD_REL = "frontier_tools/vram_reset.sha256"
+# explicit opt-in to checking against the build record in the (agent-writable) tree: gpa_test
+# only. Scoring paths must pass the pre-agent sha256; None is refused (fix round 6, K3 closed).
+BUILD_RECORD = "build-record"
 
 
 def _root(gpa_root: Path | None) -> Path:
@@ -81,7 +85,12 @@ class VramResetTool:
             raise DriverInfraError(msg)
         data = tool.read_bytes()
         got = sha256_bytes(data)
-        if expected_sha256:
+        if not expected_sha256:
+            msg = ("VRAM reset refused: no pre-agent sha256 of frontier_tools/vram_reset was "
+                   "given (DriverConfig.vram_reset_sha256); a scoring path must pass the runner's "
+                   "snapshot (gpa_test passes 'build-record')")
+            raise DriverInfraError(msg)
+        if expected_sha256 != BUILD_RECORD:
             if got != expected_sha256.lower():
                 msg = (f"VRAM reset failed: {tool} sha256 {got} does not match the pre-agent "
                        f"sha256 {expected_sha256.lower()} (the binary changed after the snapshot)")

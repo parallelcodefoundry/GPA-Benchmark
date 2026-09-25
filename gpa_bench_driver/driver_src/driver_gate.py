@@ -192,8 +192,10 @@ def split_source(text: str) -> tuple[str, list[str]]:
 
 
 def _phase12(text: str, trigraphs: bool = False) -> str:
-    """Translation phases 1-2 as clang does them (K1a): trigraphs (only when the app's flags enable
-    them) and line splices, incl. backslash + horizontal whitespace + newline."""
+    """Translation phases 1-2 as clang does them (K1a): line terminators (CRLF and a lone CR end a
+    line, fix round 6), trigraphs (only when the app's flags enable them) and line splices, incl.
+    backslash + horizontal whitespace + newline."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     if trigraphs:
         text = _TRIGRAPH_RE.sub(lambda m: _TRIGRAPHS[m.group(1)], text)
     return _SPLICE_RE.sub("", text)
@@ -873,7 +875,11 @@ def _preprocessed_violations(app: dict, candidate: str, pristine: str, gpa_root:
         _PP_CACHE[kkey] = (_expanded_features(_all_program_text(kproc.stdout)),)
     kbase = _PP_CACHE[kkey][0]
     kproc = _run_pp(app, gpa_root, candidate, hipcc, [_KEEP_SYS], sysdirs)
-    if kproc.returncode == 0:
+    if kproc.returncode != 0:  # fail closed (fix round 6), like the plain -E pass
+        violations.append(
+            "the kernel file could not be preprocessed with -fkeep-system-includes, so it cannot "
+            f"be checked: {head_tail(kproc.stderr, 600, 600)}")
+    else:
         kcand = _expanded_features(_all_program_text(kproc.stdout))
         for f, n in sorted(kcand.items(), key=lambda kv: repr(kv[0])):
             if n > kbase.get(f, 0) and not cand.get(f, 0) > base.get(f, 0):

@@ -91,8 +91,9 @@ class DriverConfig:
             (default: None)
         vram_reset_sha256: hip only (fix round 5 K3). The sha256 of frontier_tools/vram_reset
             that the runner snapshotted BEFORE the agent ran; the driver checks the binary
-            against it before use and runs a sealed in-memory copy. None = check against the
-            build record frontier_tools/vram_reset.sha256 (gpa_test) (default: None)
+            against it before use and runs a sealed in-memory copy. "build-record" = check against
+            the build record frontier_tools/vram_reset.sha256 (gpa_test only). None = the timing
+            loop refuses to run (fix round 6: fail closed on scoring paths) (default: None)
 
     """
 

@@ -586,7 +586,7 @@ _DRIVE = textwrap.dedent('''\
     cfg = DriverConfig(app="toy", gpu_backend="hip", rocm_path=root / "rocm", offload_arch="gfx90a",
                        config=root / "apps.yaml", nsys=True, num_samples=2, pairs=2, swaps_override=swaps,
                        temp_dir=root / "tmp", reference_from_baseline=rfb,
-                       app_overrides={"run_command": "./toy " + args} if args else None)
+                       app_overrides={"run_command": "./toy " + args} if args else None, vram_reset_sha256="build-record")
     try:
         _, _, long = run_driver(cfg)
     except Exception as e:  # noqa: BLE001

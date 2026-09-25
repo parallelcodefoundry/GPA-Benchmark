@@ -162,14 +162,27 @@ def j0_decision(j0: dict) -> tuple[bool, str]:
                   + (f" (unstable; lower bound {lower:.4f} > {J0_CREDIT_FLOOR})" if unstable else ""))
 
 
-def other_charge(other_b_ns: list[float], other_o_ns: list[float]) -> dict[str, float]:
-    """T2 noise-tolerant other-kernel charge (fix round 5):
-    max(0, med(O) - med(B) - tol), tol = max(1 us, 3 (MAD_O + MAD_B) / sqrt(n))."""
+def other_charge(other_b_ns: list[float], other_o_ns: list[float],
+                 baseline_scored_ns: list[float] | None = None,
+                 floor: float = J0_CREDIT_FLOOR) -> dict[str, float | None]:
+    """T2 noise-tolerant other-kernel charge (fix round 5, capped in fix round 6 L1):
+    charge = max(0, med(O) - med(B) - tol),
+    tol = min(max(1 us, 3 (MAD_O + MAD_B) / sqrt(n)), 0.5 (floor - 1) med(B_scored)).
+
+    The cap (half the credit margin of the baseline's scored time) bounds what a pure
+    target -> other-kernel shift can gain uncharged to a speedup of 1 / (1 - (floor - 1) / 2),
+    about 1.0025, so such a shift can never be credited on its own. Without ``baseline_scored_ns``
+    the tolerance is not capped (old callers)."""
     n = min(len(other_b_ns), len(other_o_ns))
     med_b = median(other_b_ns)
     med_o = median(other_o_ns)
     mad_b = mad(other_b_ns)
     mad_o = mad(other_o_ns)
-    tol = max(1000.0, 3.0 * (mad_o + mad_b) / math.sqrt(max(n, 1)))
+    noise_tol = max(1000.0, 3.0 * (mad_o + mad_b) / math.sqrt(max(n, 1)))
+    cap = None
+    if baseline_scored_ns:
+        cap = 0.5 * (floor - 1.0) * median(baseline_scored_ns)
+    tol = noise_tol if cap is None else min(noise_tol, cap)
     return {"charge_ns": max(0.0, med_o - med_b - tol), "baseline_median_ns": med_b,
-            "optimized_median_ns": med_o, "mad_b_ns": mad_b, "mad_o_ns": mad_o, "tol_ns": tol}
+            "optimized_median_ns": med_o, "mad_b_ns": mad_b, "mad_o_ns": mad_o, "tol_ns": tol,
+            "tol_noise_ns": noise_tol, "tol_cap_ns": cap}
