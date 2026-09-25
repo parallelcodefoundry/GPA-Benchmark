@@ -145,12 +145,49 @@ def reference_from_output(app: dict, produced: bytes | None) -> Reference:
     return Reference(kind="bytes", data=bytes(produced), source="pristine run")
 
 
+# Characters shown on each side of the first differing column of a long line. Matches
+# APPEB's tools/gpa_harness/lib/gpa_failure_text.CONTEXT, so a line windowed here looks the same
+# as one windowed there (that module leaves these pre-windowed lines unchanged).
+_WINDOW_CONTEXT = 48
+
+
 def _clip(line: str) -> str:
     return line if len(line) <= _MAX_LINE_CHARS else line[:_MAX_LINE_CHARS] + " [...]"
 
 
+def _first_diff_col(a: str, b: str) -> int:
+    """0-based index of the first differing character (min length if one is a prefix)."""
+    n = min(len(a), len(b))
+    return next((k for k in range(n) if a[k] != b[k]), n)
+
+
+def _window(x: str, lo: int, hi: int) -> str:
+    return ("..." if lo else "") + x[lo:hi] + ("..." if hi < len(x) else "")
+
+
+def _line_pair(k: int, exp: str, got: str) -> list[str]:
+    """Report lines for one expected/got pair.
+
+    Short lines (and a missing line) keep the plain ``line N expected: ...`` form (unchanged).
+    A long line is shown as a window around its first differing COLUMN (1-based), since the
+    start of e.g. pathfinder's 300 000-value result row says nothing about where it differs.
+    """
+    missing = "<no line>" in (exp, got)
+    if missing or max(len(exp), len(got)) <= _MAX_LINE_CHARS:
+        return [f"  line {k + 1} expected: {_clip(exp)}", f"  line {k + 1} got:      {_clip(got)}"]
+    if exp == got:
+        return [f"  line {k + 1}: expected and got are identical ({len(exp)} characters)"]
+    c = _first_diff_col(exp, got)
+    lo, hi = max(0, c - _WINDOW_CONTEXT), c + _WINDOW_CONTEXT
+    return [f"  line {k + 1} expected (first difference at column {c + 1}): {_window(exp, lo, hi)}",
+            f"  line {k + 1} got      (first difference at column {c + 1}): {_window(got, lo, hi)}"]
+
+
 def first_difference(ref: str, test: str) -> str:
-    """Bounded report of where two texts first differ (line numbers are 1-based)."""
+    """Bounded report of where two texts first differ (line numbers are 1-based).
+
+    Long lines are windowed around their first differing column (see :func:`_line_pair`).
+    """
     ref_lines = ref.splitlines()
     test_lines = test.splitlines()
     n = min(len(ref_lines), len(test_lines))
@@ -160,8 +197,7 @@ def first_difference(ref: str, test: str) -> str:
     for k in range(i, min(i + _MAX_REPORT_LINES // 2, max(len(ref_lines), len(test_lines)))):
         exp = ref_lines[k] if k < len(ref_lines) else "<no line>"
         got = test_lines[k] if k < len(test_lines) else "<no line>"
-        out.append(f"  line {k + 1} expected: {_clip(exp)}")
-        out.append(f"  line {k + 1} got:      {_clip(got)}")
+        out += _line_pair(k, exp, got)
     return "\n".join(out)
 
 

@@ -309,3 +309,48 @@ def test_J3_recorded_compute_evidence(name, expect_fail):
         assert d["raw_speedup"] > 1.5  # dropping the warmup would nearly double the score
     if expect_fail == "G-cpu":
         assert d["cpu_delta_s"] > d["cpu_slack_s"]  # the offload's CPU cost exceeds the slack
+
+
+# =========================================================================== J10 (driver side)
+
+def test_J10_long_line_windowed_around_first_difference_mid_row():
+    """pathfinder prints one ~300 000-value row; the report must show the first differing
+    COLUMN, not the first 300 characters (which are identical)."""
+    from gpa_bench_driver.driver_src.driver_check import first_difference
+
+    row = " ".join(str(i % 10) for i in range(300000))
+    col = 250000                                     # far beyond the old 300-char clip
+    assert row[col] != "9"
+    bad = row[:col] + "9" + row[col + 1:]
+    ref = "hdr\n" + row + "\n"
+    out = first_difference(ref, "hdr\n" + bad + "\n")
+    lines = out.splitlines()
+    assert lines[0].startswith("first difference at line 2 ")
+    exp_line = next(x for x in lines if "line 2 expected (first difference at column" in x)
+    got_line = next(x for x in lines if "line 2 got      (first difference at column" in x)
+    assert f"column {col + 1})" in exp_line and f"column {col + 1})" in got_line
+    exp_win = exp_line.split("): ", 1)[1]
+    got_win = got_line.split("): ", 1)[1]
+    # a bounded window centred on the difference, with the differing value inside it
+    assert exp_win.startswith("...") and exp_win.endswith("...")
+    assert len(exp_win) <= 2 * 48 + 6 and len(got_win) <= 2 * 48 + 6
+    assert exp_win != got_win and "9" in got_win
+    # the old behaviour (first 300 chars, identical on both sides) is gone
+    assert row[:300] not in out
+
+
+def test_J10_short_lines_keep_the_plain_format_byte_identical():
+    from gpa_bench_driver.driver_src.driver_check import first_difference
+
+    out = first_difference("a 1\nb 2\nc 3\n", "a 1\nb 9\nc 3\n")
+    assert out == ("first difference at line 2 (reference has 3 lines, output has 3 lines):\n"
+                   "  line 2 expected: b 2\n  line 2 got:      b 9\n"
+                   "  line 3 expected: c 3\n  line 3 got:      c 3")
+
+
+def test_J10_identical_long_trailing_line_is_reported_as_identical():
+    from gpa_bench_driver.driver_src.driver_check import first_difference
+
+    long = "x" * 1000
+    out = first_difference("a\n" + long + "\n", "b\n" + long + "\n")
+    assert "line 2: expected and got are identical (1000 characters)" in out
