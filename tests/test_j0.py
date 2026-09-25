@@ -302,3 +302,37 @@ def test_T6_rescore_kernel_creates_temp_dir_and_remeasures_when_unstable(tmp_pat
     assert calls == [10, 10]  # yaml final_pairs, then one T4 pooled re-measure
     assert r["gcd"] == 3 and r["pairs"] == 10 and r["remeasured"] is True
     assert r["j0"]["n_pairs"] == 20 and not r["j0"]["credited"]
+
+
+def test_T6_rescore_kernel_remeasures_a_marginal_g_cpu_miss_like_the_runner(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from gpa_bench_driver.driver_src import driver_j0
+
+    calls = []
+
+    def fake_series(app, kernel_name, kernel_text, gcd, m, temp_dir, overrides, rfb):
+        calls.append(m)
+        b, o = _series(lambda pos: 15.66, m, "abba")
+        if len(calls) == 1:  # first series: one +2.5 s CPU spike in the optimized arm
+            o[0]["cpu_s"] = 3.5  # nw: +0.25 s mean > slack 0.188 (marginal); pooled 0.125 < 0.133
+        return None, SimpleNamespace(validate=True, validation_output="", nsys_data=o,
+                                     baseline_nsys_data=b)
+
+    monkeypatch.setattr(driver_j0, "_one_series", fake_series)
+    r = driver_j0.rescore_kernel("nw", "// k\n", 0, temp_dir=tmp_path)
+    assert calls == [10, 10]
+    assert r["first"]["failures"] == ["G-cpu"] and r["remeasured"] is True
+    assert r["cpu"]["ok"] and r["cpu"]["n_pairs"] == 20  # decided on the pooled series
+
+
+def test_needs_remeasure_rule():
+    from gpa_bench_driver.driver_src.driver_j0 import needs_remeasure
+
+    g = {"code": "G-cpu"}
+    assert needs_remeasure({"ok": False, "j0": {"unstable": True}, "failures": []})
+    assert needs_remeasure({"ok": False, "failures": [g], "cpu": {"marginal": True}})
+    assert not needs_remeasure({"ok": False, "failures": [g], "cpu": {"marginal": False}})
+    assert not needs_remeasure({"ok": False, "failures": [g, {"code": "G-wall"}],
+                                "cpu": {"marginal": True}})
+    assert not needs_remeasure({"ok": True, "j0": {"unstable": False}, "failures": []})

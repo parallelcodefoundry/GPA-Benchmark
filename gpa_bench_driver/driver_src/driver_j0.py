@@ -77,6 +77,25 @@ def _one_series(app: str, kernel_name: str, kernel_text: str, gcd: int, pairs: i
     return passes[0], passes[1]
 
 
+def needs_remeasure(result: dict) -> bool:
+    """T4 / H1: re-measure once when the timing was unstable, or when the only failure is a
+    G-cpu miss by less than 2 x slack (the runner's rule, frameworks' gpa_frontier_score)."""
+    if (result.get("j0") or {}).get("unstable"):
+        return True
+    codes = [f.get("code") for f in result.get("failures", [])]
+    return (not result.get("ok") and codes == ["G-cpu"]
+            and bool((result.get("cpu") or {}).get("marginal")))
+
+
+def _summary(result: dict) -> dict[str, Any]:
+    j = result.get("j0") or {}
+    cpu = result.get("cpu") or {}
+    return {"ok": result.get("ok"), "speedup": j.get("speedup"), "unstable": j.get("unstable"),
+            "lower_bound": j.get("lower_bound"), "credited": j.get("credited"),
+            "failures": [f.get("code") for f in result.get("failures", [])],
+            "cpu_delta_s": cpu.get("delta_s"), "cpu_slack_s": cpu.get("slack_s")}
+
+
 def rescore_kernel(
     app: str,
     kernel_text: str,
@@ -105,8 +124,9 @@ def rescore_kernel(
         seed: seed for the random perturb size
 
     Returns:
-        the score_frontier result, plus "gcd", "perturb_gib", "remeasured" and the pass
-        validation state ("validate", "validation_output") of the kernel's pass
+        the score_frontier result, plus "gcd", "perturb_gib", "pairs", "remeasured", the pass
+        validation state ("validate", "validation_output") of the kernel's pass and, when
+        re-measured (:func:`needs_remeasure`), "first": a summary of the first series' score
 
     """
     root = Path(gpa_root) if gpa_root is not None else _GPA_ROOT
@@ -130,10 +150,16 @@ def rescore_kernel(
                                   "message": swap.validation_output or "no timing data"}]})
         return out
     result = score_frontier(swap.baseline_nsys_data, swap.nsys_data, entry["score_regex"], **kw)
-    if result.get("j0") and result["j0"]["unstable"]:  # T4: one pooled re-measure
+    if needs_remeasure(result):  # T4 / H1: one pooled re-measure
+        out["first"] = _summary(result)
         base2, swap2 = _one_series(entry["name"], kernel_name, kernel_text, gcd, m,
                                    Path(temp_dir), overrides, reference_from_baseline)
-        if swap2.validate and swap2.nsys_data and swap2.baseline_nsys_data:
+        if not swap2.validate:  # R4: every timed run is validated, the re-measure too
+            out.update({"ok": False, "speedup": None, "remeasured": True,
+                        "failures": [{"code": "correctness",
+                                      "message": swap2.validation_output or "no timing data"}]})
+            return out
+        if swap2.nsys_data and swap2.baseline_nsys_data:
             result = score_frontier_pooled([swap.baseline_nsys_data, swap2.baseline_nsys_data],
                                            [swap.nsys_data, swap2.nsys_data],
                                            entry["score_regex"], **kw)
