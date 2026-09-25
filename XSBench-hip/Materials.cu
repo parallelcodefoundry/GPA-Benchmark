@@ -99,6 +99,7 @@ int * load_mats( int * num_nucs, long n_isotopes, int * max_num_nucs )
 double * load_concs( int * num_nucs, int max_num_nucs )
 {
         uint64_t seed = STARTING_SEED * STARTING_SEED;
+        if( XS_DATA_SEED ) seed = XS_DATA_SEED * 2654435761ULL + 1; // APPEB/Frontier: -d
         double * concs = (double *) malloc( 12 * max_num_nucs * sizeof( double ) );
 
         for( int i = 0; i < 12; i++ )

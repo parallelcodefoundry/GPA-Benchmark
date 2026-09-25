@@ -33,6 +33,8 @@
 
 // Starting Seed
 #define STARTING_SEED 1070
+// APPEB/Frontier: host-side data seed (-d); 0 keeps XSBench's default seeds
+extern unsigned long long XS_DATA_SEED;
 
 #define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(hipError_t code, const char *file, int line, bool abort=true)

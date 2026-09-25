@@ -106,7 +106,8 @@ void runTest( int argc, char** argv)
 	if (!input_itemsets)
 		fprintf(stderr, "error: can not allocate memory");
 
-    srand ( 7 );
+    /* APPEB/Frontier: optional 3rd argument = input seed (default 7; used by the input variants) */
+    srand ( argc > 3 ? atoi(argv[3]) : 7 );
 	
 	
     for (int i = 0 ; i < max_cols; i++){

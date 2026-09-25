@@ -111,7 +111,7 @@ SimulationData grid_init_do_not_profile( Inputs in, int mype )
         size_t nbytes = 0;
 
         // Set the initial seed value
-        uint64_t seed = 42;
+        uint64_t seed = XS_DATA_SEED ? (uint64_t) XS_DATA_SEED : 42;
 
         ////////////////////////////////////////////////////////////////////
         // Initialize Nuclide Grids

@@ -895,7 +895,8 @@ int main(int argc, char **argv)
   strcpy(outfilename, argv[8]);
   nproc = atoi(argv[9]);
 
-  srand48(SEED);
+  /* APPEB/Frontier: optional 10th argument = point seed (default SEED; used by the input variants) */
+  srand48(argc > 10 ? atol(argv[10]) : SEED);
   PStream* stream;
   if( n > 0 ) {
     stream = new SimStream(n);

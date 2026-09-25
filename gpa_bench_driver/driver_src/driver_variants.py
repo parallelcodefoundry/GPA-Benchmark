@@ -1,13 +1,30 @@
 """Random input variants for the post-agent generalization test (GPA-G1 fix round 1, R7).
 
-``draw_variant(app, seed, workdir=...)`` draws one input variant of a Frontier GPA app: problem
-parameters about +-25% around the public size, deterministic given (app, seed), cheap to make
-(only bfs generates a data file: a seeded random graph; b+tree writes a 2-line command file).
-Generated files go to ``workdir``, which must lie outside every directory an app runs in.
+``draw_variant(app, seed, workdir=...)`` draws one input variant of a Frontier GPA app. A
+variant keeps the public input's SHAPE (problem dimensions, alignment / power-of-2 structure,
+launch geometry, iteration counts) and changes the DATA (seeds, values, penalties, query sets,
+graph edges), so the outputs differ from the public run and cannot be hardcoded or copied, while
+an optimization that fixes a shape-specific pathology of the public input (e.g. nw's power-of-2
+stride) keeps its speedup. Only pathfinder has no data knob outside its whole-program kernel
+file; its variant changes the column count by at most 10% within the same alignment class.
+
+Per-app knob (``VARIANT_KNOBS``; host-side seed arguments were added to NON-editable host files,
+and the public run without them is byte-identical):
+
+    bfs            graph seed (scripts/graphgen_seeded.cpp), same 8388608 nodes
+    backprop       weight seed (facetrain.c 2nd argument), same layer size 1048560
+    b+tree         query seed ("seed N" argument of main.cu), same command file (count, range)
+    heartwall      first frame of the 10-frame window (main.cu 3rd argument)
+    hotspot        temperature/power data (generated files), same 1024 grid, pyramid 5, 100 steps
+    pathfinder     column count within +-10% (odd multiple of 32, like 300000), same rows/pyramid
+    nw             input seed (needle.cu 3rd argument) and gap penalty, same dimension 32768
+    streamcluster  point seed (streamcluster_cuda_cpu.cpp 10th argument), same sizes
+    xsbench        nuclide/material data seed (XSBench -d), same 100000000 lookups
 
 The variant is run with the driver's ``reference_from_baseline=True``: the PRISTINE baseline's
 output on the variant is the reference, and the agent's output must pass the app's own check
 (type and tolerance) against it; for xsbench the checksum comes from the pristine run.
+Deterministic given (app, seed); generated files go to ``workdir`` (outside every run dir).
 
     v = draw_variant("bfs", 1234, workdir=Path("/tmp/v"))
     DriverConfig(app="bfs", gpu_backend="hip", app_overrides=v.overrides,
@@ -25,7 +42,21 @@ from typing import Any
 VARIANT_APPS = ("bfs", "backprop", "b+tree", "heartwall", "hotspot", "pathfinder", "nw",
                 "streamcluster", "xsbench")
 
+VARIANT_KNOBS = {
+    "bfs": "graph seed (same 8388608 nodes)",
+    "backprop": "weight seed (same layer size 1048560)",
+    "b+tree": "query seed (same command file: j 60000 3000, k 10000)",
+    "heartwall": "first frame of the 10-frame window",
+    "hotspot": "temperature/power data (same 1024 grid, pyramid 5, 100 iterations)",
+    "pathfinder": "columns within +-10% (odd multiple of 32; same 300 rows, pyramid 20)",
+    "nw": "input seed + gap penalty (same dimension 32768)",
+    "streamcluster": "point seed (same n, dim, chunk and cluster sizes)",
+    "xsbench": "nuclide/material data seed -d (same 100000000 lookups)",
+}
+
 _GPA_ROOT = Path(__file__).resolve().parent.parent.parent
+_PUBLIC_GRAPH_SEED = 20260924  # scripts/graphgen_seeded.cpp DEFAULT_SEED
+_HEARTWALL_FRAMES = 104        # frames in rodinia/data/heartwall/test.avi
 
 
 @dataclass(frozen=True)
@@ -44,13 +75,11 @@ def _rng(app: str, seed: int) -> random.Random:
     return random.Random(f"gpa-frontier-variant:{app}:{int(seed)}")  # noqa: S311 - not crypto
 
 
-def _around(rng: random.Random, public: int, *, lo: float = 0.75, hi: float = 1.25,
-            multiple: int = 1, cap: int | None = None) -> int:
-    low = max(multiple, int(public * lo) // multiple * multiple)
-    high = int(public * hi) // multiple * multiple
-    if cap is not None:
-        high = min(high, cap // multiple * multiple)
-    return rng.randrange(low, high + 1, multiple)
+def _seed(rng: random.Random, *public: int) -> int:
+    while True:
+        value = rng.randrange(1, 2**31 - 1)
+        if value not in public:
+            return value
 
 
 def _graphgen(workdir: Path, gpa_root: Path) -> Path:
@@ -62,8 +91,30 @@ def _graphgen(workdir: Path, gpa_root: Path) -> Path:
     return exe
 
 
+def _hotspot_inputs(rng: random.Random, gpa_root: Path, workdir: Path, tag: str) -> tuple[Path, Path]:
+    """New 1024x1024 temperature and power files with the public files' value distribution.
+
+    temperature = public temperature + uniform(-0.5, 0.5) K; power = a random permutation of the
+    public power values (the hot spots move). Same format (one "%f" value per line).
+    """
+    data = gpa_root / "rodinia" / "data" / "hotspot"
+    temp = [float(x) for x in (data / "temp_1024").read_text().split()]
+    power = (data / "power_1024").read_text().split()
+    temp_out = workdir / f"temp_1024_{tag}"
+    power_out = workdir / f"power_1024_{tag}"
+    if not temp_out.exists():
+        temp_out.write_text("".join(f"{t + rng.uniform(-0.5, 0.5):f}\n" for t in temp))
+    else:
+        for _ in temp:  # keep the rng sequence identical whether or not the file is cached
+            rng.uniform(-0.5, 0.5)
+    rng.shuffle(power)
+    if not power_out.exists():
+        power_out.write_text("".join(f"{p}\n" for p in power))
+    return temp_out, power_out
+
+
 def draw_variant(app: str, seed: int, *, workdir: Path, gpa_root: Path | None = None) -> Variant:
-    """Draw a random input variant of ``app`` (deterministic given app and seed).
+    """Draw a random input variant of ``app`` (same shape as the public input, other data).
 
     Args:
         app: canonical app name (one of VARIANT_APPS)
@@ -83,69 +134,59 @@ def draw_variant(app: str, seed: int, *, workdir: Path, gpa_root: Path | None = 
     rng = _rng(app, seed)
     files: list[str] = []
     overrides: dict[str, Any] = {}
+    tag = f"v{int(seed)}"
 
     if app == "bfs":
-        nodes = _around(rng, 8388608)
-        graph_seed = rng.randrange(1, 2**31 - 1)
-        params = {"nodes": nodes, "graph_seed": graph_seed}
+        graph_seed = _seed(rng, _PUBLIC_GRAPH_SEED)
+        params = {"nodes": 8388608, "graph_seed": graph_seed}
         workdir.mkdir(parents=True, exist_ok=True)
-        tag = f"v{int(seed)}_{nodes}"
-        graph = workdir / f"graph{tag}.txt"
+        graph = workdir / f"graph8M_{tag}.txt"
         if not graph.exists():
             exe = _graphgen(workdir, root)
-            subprocess.run([str(exe), str(nodes), tag, str(graph_seed)],  # noqa: S603
+            subprocess.run([str(exe), "8388608", f"8M_{tag}", str(graph_seed)],  # noqa: S603
                            cwd=workdir, check=True, capture_output=True)
         files.append(str(graph))
         run_command = f"./bfs {graph}"
     elif app == "backprop":
-        # layer size must be a multiple of 16; blocks (size/16) stay <= 65535 (grid y limit)
-        size = _around(rng, 1048560, hi=1.0, multiple=16, cap=16 * 65535)
-        params = {"layer_size": size}
-        run_command = f"./backprop {size}"
+        weight_seed = _seed(rng, 7)
+        params = {"layer_size": 1048560, "weight_seed": weight_seed}
+        run_command = f"./backprop 1048560 {weight_seed}"
     elif app == "b+tree":
-        count = _around(rng, 60000)
-        kcount = _around(rng, 10000, cap=65535)
-        params = {"j_count": count, "k_count": kcount}
-        workdir.mkdir(parents=True, exist_ok=True)
-        cmd = workdir / f"command_v{int(seed)}.txt"
-        # same format as command_frontier.txt; the pristine parser reads j's count for both
-        # count and rSize, so the second number is inert (kept for parity)
-        cmd.write_text(f"j {count} 3000\nk {kcount}\n\n\n", encoding="utf-8")
-        files.append(str(cmd))
-        run_command = f"./b+tree.out file ../data/b+tree/mil.txt command {cmd}"
+        query_seed = _seed(rng, 1)
+        params = {"command_file": "command_frontier.txt", "query_seed": query_seed}
+        run_command = (f"./b+tree.out file ../data/b+tree/mil.txt command ./command_frontier.txt "
+                       f"seed {query_seed}")
     elif app == "heartwall":
-        frames = rng.randrange(8, 13)
-        params = {"frames": frames}
-        run_command = f"./heartwall ../data/heartwall/test.avi {frames}"
+        first = rng.randrange(1, _HEARTWALL_FRAMES - 10 + 1)
+        params = {"frames": 10, "first_frame": first}
+        run_command = f"./heartwall ../data/heartwall/test.avi 10 {first}"
     elif app == "hotspot":
-        pyramid = rng.randrange(4, 7)
-        iterations = _around(rng, 100)
-        params = {"pyramid_height": pyramid, "sim_time": iterations}
-        run_command = (f"./hotspot 1024 {pyramid} {iterations} ../data/hotspot/temp_1024 "
-                       "../data/hotspot/power_1024 output.out")
+        workdir.mkdir(parents=True, exist_ok=True)
+        temp, power = _hotspot_inputs(rng, root, workdir, tag)
+        files += [str(temp), str(power)]
+        params = {"grid": 1024, "pyramid_height": 5, "sim_time": 100, "data": tag}
+        run_command = f"./hotspot 1024 5 100 {temp} {power} output.out"
     elif app == "pathfinder":
-        cols = _around(rng, 300000)
-        rows = _around(rng, 300)
-        pyramid = rng.randrange(15, 26)
-        params = {"cols": cols, "rows": rows, "pyramid_height": pyramid}
-        run_command = f"./pathfinder {cols} {rows} {pyramid}"
+        # 300000 = 32 * 9375: keep an odd multiple of 32 within +-10%, never the public count
+        k = rng.randrange(8437, 10312, 2)  # odd k: 32 * k in [269984, 329984]
+        cols = 32 * (k if k != 9375 else k + 2)
+        params = {"cols": cols, "rows": 300, "pyramid_height": 20}
+        run_command = f"./pathfinder {cols} 300 20"
     elif app == "nw":
-        dim = _around(rng, 32768, multiple=16)
-        penalty = rng.randrange(8, 13)
-        params = {"dim": dim, "penalty": penalty}
-        run_command = f"./needle {dim} {penalty}"
+        input_seed = _seed(rng, 7)
+        penalty = rng.choice([p for p in range(1, 21) if p != 10])
+        params = {"dim": 32768, "penalty": penalty, "input_seed": input_seed}
+        run_command = f"./needle 32768 {penalty} {input_seed}"
     elif app == "streamcluster":
-        n = _around(rng, 131072)
-        dim = rng.choice((192, 224, 256, 288, 320))
-        clustersize = _around(rng, 16000)
-        params = {"n": n, "dim": dim, "clustersize": clustersize}
-        run_command = f"./sc_gpu 10 20 {dim} {n} {n} {clustersize} none output.txt 1"
+        point_seed = _seed(rng, 1)
+        params = {"n": 131072, "dim": 256, "clustersize": 16000, "point_seed": point_seed}
+        run_command = f"./sc_gpu 10 20 256 131072 131072 16000 none output.txt 1 {point_seed}"
     elif app == "xsbench":
-        lookups = _around(rng, 100_000_000)
-        params = {"lookups": lookups}
-        run_command = f"./XSBench -m event -s large -l {lookups}"
-        # the stored checksum is only valid for the public count: the reference must come
-        # from the pristine run (reference_from_baseline)
+        data_seed = _seed(rng, 42)
+        params = {"lookups": 100_000_000, "data_seed": data_seed}
+        run_command = f"./XSBench -m event -s large -l 100000000 -d {data_seed}"
+        # the stored checksum is for the public data: the reference must come from the
+        # pristine run (reference_from_baseline)
         overrides["expected_checksum"] = {"regex": r"^Verification checksum: (\d+)",
                                           "value": None}
     else:

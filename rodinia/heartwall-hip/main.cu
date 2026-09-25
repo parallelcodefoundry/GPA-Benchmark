@@ -142,10 +142,13 @@ int main(int argc, char *argv []){
 	// 	FRAME
 	//======================================================================================================================================================
 
-	if(argc!=3){
+	/* APPEB/Frontier: optional 3rd argument = first frame of the processed window (default 0;
+	   used by the input variants). Frame numbers seen by the kernel stay 0-based in the window. */
+	if(argc!=3 && argc!=4){
 		printf("ERROR: usage: heartwall <inputfile> <num of frames>\n");
 		exit(1);
 	}
+	int first_frame = (argc == 4) ? atoi(argv[3]) : 0;
 	
 	// open movie file
  	video_file_name = argv[1];
@@ -170,7 +173,7 @@ int main(int argc, char *argv []){
 	//======================================================================================================================================================
 	
 	frames_processed = atoi(argv[2]);
-		if(frames_processed<0 || frames_processed>common.no_frames){
+		if(frames_processed<0 || first_frame<0 || first_frame+frames_processed>common.no_frames){
 			printf("ERROR: %d is an incorrect number of frames specified, select in the range of 0-%d\n", frames_processed, common.no_frames);
 			return 0;
 	}
@@ -651,7 +654,7 @@ int main(int argc, char *argv []){
 
 		// Extract a cropped version of the first frame from the video file
 		frame = get_frame(	frames,						// pointer to video file
-										common_change.frame_no,				// number of frame that needs to be returned
+										first_frame + common_change.frame_no,	// number of frame that needs to be returned
 										0,								// cropped?
 										0,								// scaled?
 										1);							// converted

@@ -410,7 +410,22 @@ def test_split_source_keeps_literals_and_strips_comments():
 # =========================================================================== R7 variants
 
 
-def test_R7_variants_deterministic_and_about_25_percent(tmp_path, monkeypatch):
+def _fake_gpa_root(tmp_path: Path) -> Path:
+    root = tmp_path / "gpa"
+    hot = root / "rodinia" / "data" / "hotspot"
+    hot.mkdir(parents=True)
+    (hot / "temp_1024").write_text("323.861017\n323.861208\n330.000000\n")
+    (hot / "power_1024").write_text("0.000008\n0.000500\n0.000008\n")
+    (root / "scripts").mkdir()
+    (root / "scripts" / "graphgen_seeded.cpp").write_text("// fake")
+    return root
+
+
+PUBLIC_RUN = {  # public run_command of every app (driver_apps.frontier.yaml)
+    name: entry["run_command"] for name, entry in _apps().items()}
+
+
+def test_R7_variants_keep_the_public_shape_and_change_the_data(tmp_path, monkeypatch):
     calls = []
 
     def fake_run(cmd, **kw):
@@ -420,41 +435,74 @@ def test_R7_variants_deterministic_and_about_25_percent(tmp_path, monkeypatch):
         return subprocess.CompletedProcess(cmd, 0, b"", b"")
 
     monkeypatch.setattr(driver_variants.subprocess, "run", fake_run)
-    public = {"bfs": 8388608, "backprop": 1048560, "b+tree": 60000, "nw": 32768,
-              "pathfinder": 300000, "streamcluster": 131072, "xsbench": 100_000_000}
-    key = {"bfs": "nodes", "backprop": "layer_size", "b+tree": "j_count", "nw": "dim",
-           "pathfinder": "cols", "streamcluster": "n", "xsbench": "lookups"}
+    root = _fake_gpa_root(tmp_path)
     for app in driver_variants.VARIANT_APPS:
+        assert app in driver_variants.VARIANT_KNOBS
         seen = set()
-        for seed in range(40):
-            a = driver_variants.draw_variant(app, seed, workdir=tmp_path / "w")
-            b = driver_variants.draw_variant(app, seed, workdir=tmp_path / "w")
-            assert a == b, app
-            assert a.overrides["run_command"] == a.run_command
+        for seed in range(30):
+            a = driver_variants.draw_variant(app, seed, workdir=tmp_path / "w", gpa_root=root)
+            b = driver_variants.draw_variant(app, seed, workdir=tmp_path / "w", gpa_root=root)
+            assert a == b, app  # deterministic given (app, seed)
+            assert a.overrides["run_command"] == a.run_command != PUBLIC_RUN[app]
             seen.add(a.run_command)
-            if app in key:
-                v = a.params[key[app]]
-                assert 0.75 * public[app] - 16 <= v <= 1.25 * public[app], (app, v)
-            if app == "backprop":
-                assert v % 16 == 0 and v // 16 <= 65535
-            if app == "nw":
-                assert v % 16 == 0
+            args, public = a.run_command.split(), PUBLIC_RUN[app].split()
+            if app == "pathfinder":  # the only size knob: odd multiple of 32 within +-10%
+                cols = a.params["cols"]
+                assert args[2:] == public[2:] and cols % 32 == 0 and (cols // 32) % 2 == 1
+                assert 0.9 * 300000 - 32 <= cols <= 1.1 * 300000 and cols != 300000
+            else:  # every public argument is kept; only data knobs are added/changed
+                keep = {"bfs": [0], "backprop": [0, 1], "b+tree": [0, 1, 2, 3, 4],
+                        "heartwall": [0, 1, 2], "hotspot": [0, 1, 2, 3, 6], "nw": [0, 1],
+                        "streamcluster": list(range(10)), "xsbench": list(range(7))}[app]
+                assert [args[i] for i in keep] == [public[i] for i in keep], (app, args)
             if app == "xsbench":
                 assert a.overrides["expected_checksum"]["value"] is None
+                assert a.params["lookups"] == 100_000_000 and a.params["data_seed"] != 42
             else:
                 assert a.overrides["reference_output"] is None
-        assert len(seen) >= (5 if app == "heartwall" else 20), app  # random across seeds
-    assert driver_variants.draw_variant("bfs", 3, workdir=tmp_path / "w").generated_files
+            if app == "nw":
+                assert a.params["dim"] == 32768 and a.params["penalty"] != 10
+                assert a.params["input_seed"] != 7
+            if app == "heartwall":
+                assert 1 <= a.params["first_frame"] <= 94 and args[2] == "10"
+            if app == "bfs":
+                assert a.params["nodes"] == 8388608 and a.params["graph_seed"] != 20260924
+        assert len(seen) >= (15 if app == "heartwall" else 25), app  # random across seeds
+    gg = [c for c in calls if Path(c[0]).name == "graphgen_seeded"]
+    assert gg and all(c[1] == "8388608" for c in gg)
 
 
-def test_R7_btree_variant_command_file(tmp_path):
-    v = driver_variants.draw_variant("b+tree", 11, workdir=tmp_path)
-    cmd = Path(v.generated_files[0])
-    assert cmd.parent == tmp_path.resolve()
-    assert cmd.read_text() == f"j {v.params['j_count']} 3000\nk {v.params['k_count']}\n\n\n"
-    assert v.run_command.endswith(f"command {cmd}")
+def test_R7_hotspot_variant_data_files(tmp_path):
+    root = _fake_gpa_root(tmp_path)
+    v = driver_variants.draw_variant("hotspot", 5, workdir=tmp_path / "w", gpa_root=root)
+    temp, power = (Path(f) for f in v.generated_files)
+    assert v.run_command == f"./hotspot 1024 5 100 {temp} {power} output.out"
+    t = [float(x) for x in temp.read_text().split()]
+    assert len(t) == 3 and all(abs(a - b) <= 0.5 for a, b in zip(t, [323.861017, 323.861208, 330.0]))
+    assert sorted(power.read_text().split()) == ["0.000008", "0.000008", "0.000500"]
+    again = driver_variants.draw_variant("hotspot", 5, workdir=tmp_path / "w2", gpa_root=root)
+    assert Path(again.generated_files[0]).read_text() == temp.read_text()
     with pytest.raises(ValueError):
-        driver_variants.draw_variant("srad", 1, workdir=tmp_path)
+        driver_variants.draw_variant("srad", 1, workdir=tmp_path, gpa_root=root)
+
+
+def test_R7_host_seed_arguments_default_to_the_public_behaviour():
+    src = {p: (GPA_ROOT / p).read_text() for p in (
+        "rodinia/backprop-hip/facetrain.c", "rodinia/nw-hip/needle.cu",
+        "rodinia/streamcluster-hip/streamcluster_cuda_cpu.cpp", "rodinia/heartwall-hip/main.cu",
+        "rodinia/b+tree-hip/main.cu", "XSBench-hip/io.cu", "XSBench-hip/GridInit.cu",
+        "XSBench-hip/Materials.cu")}
+    assert "seed = (argc == 3) ? atoi(argv[2]) : 7;" in src["rodinia/backprop-hip/facetrain.c"]
+    assert "srand ( argc > 3 ? atoi(argv[3]) : 7 );" in src["rodinia/nw-hip/needle.cu"]
+    assert "srand48(argc > 10 ? atol(argv[10]) : SEED);" in src[
+        "rodinia/streamcluster-hip/streamcluster_cuda_cpu.cpp"]
+    assert "int first_frame = (argc == 4) ? atoi(argv[3]) : 0;" in src["rodinia/heartwall-hip/main.cu"]
+    assert 'strcmp(argv[cur_arg], "seed")==0' in src["rodinia/b+tree-hip/main.cu"]
+    assert "unsigned long long XS_DATA_SEED = 0;" in src["XSBench-hip/io.cu"]
+    assert "XS_DATA_SEED ? (uint64_t) XS_DATA_SEED : 42" in src["XSBench-hip/GridInit.cu"]
+    # the knobs live in NON-editable host files: none of them is an app's kernel file
+    kernels = {Path(a["kernel_file"]).as_posix() for a in _apps().values()}
+    assert not kernels & set(src)
 
 
 @pytest.mark.skipif(shutil.which("g++") is None, reason="needs g++")

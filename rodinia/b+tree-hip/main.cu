@@ -1890,6 +1890,12 @@ main(	int argc,
 	      return -1;
 	    }
 	  }
+	  // APPEB/Frontier: optional "seed N" = srand(N) for the random queries (default: no srand;
+	  // used by the input variants)
+	  else if(strcmp(argv[cur_arg], "seed")==0 && cur_arg+1<argc){
+	    srand((unsigned) atoi(argv[cur_arg+1]));
+	    cur_arg = cur_arg+1;
+	  }
 	  else if(strcmp(argv[cur_arg], "command")==0){
 	    // check if value provided
 	    if(argc>=cur_arg+1){

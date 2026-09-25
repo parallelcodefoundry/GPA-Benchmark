@@ -1,6 +1,9 @@
 #include "hip/hip_runtime.h"
 #include "XSbench_header.cuh"
 
+// APPEB/Frontier: see -d in read_CLI
+unsigned long long XS_DATA_SEED = 0;
+
 // Prints program logo
 void logo(int version)
 {
@@ -221,6 +224,7 @@ void print_CLI_error(void)
 	printf("  -b <binary mode>         Read or write all data structures to file. If reading, this will skip initialization phase. (read, write)\n");
 	printf("  -t <thread block size>   Thread block size. (128 is default.)\n");
 	printf("  -n <num iterations>      Specifies how many kernel iterations to run. (1 is default.)\n");
+	printf("  -d <data seed>           Seed for the nuclide grid and material data (0 = default).\n");
 	printf("  -w <num warmups>         Specifies how many warmup iterations to run. (0 is default.)\n");
 	printf("  --csv <file path>        Save output to csv file. (Default is stdout)\n");
 	printf("Default is equivalent to: -m history -s large -l 34 -p 500000 -G unionized -t 128 -n 1\n");
@@ -427,6 +431,15 @@ Inputs read_CLI( int argc, char * argv[] )
 			else
 				print_CLI_error();
     }
+		// APPEB/Frontier: data seed for the nuclide grids and material concentrations (-d; 0 =
+		// XSBench's default seeds; used by the input variants)
+		else if( strcmp(arg, "-d") == 0 )
+		{
+			if( ++i < argc)
+				XS_DATA_SEED = strtoull(argv[i], NULL, 10);
+			else
+				print_CLI_error();
+		}
 		else if( strcmp(arg, "-w") == 0 )
 		{
 			if( ++i < argc)

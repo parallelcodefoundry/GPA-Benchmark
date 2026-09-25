@@ -34,7 +34,8 @@ char *argv[];
 	
   int seed;
 
-  if (argc!=2){
+  /* APPEB/Frontier: optional 2nd argument = weight seed (default 7; used by the input variants) */
+  if (argc!=2 && argc!=3){
   fprintf(stderr, "usage: backprop <num of input elements>\n");
   exit(0);
   }
@@ -45,7 +46,7 @@ char *argv[];
   }
   
 
-  seed = 7;   
+  seed = (argc == 3) ? atoi(argv[2]) : 7;   
   bpnn_initialize(seed);
   backprop_face();
 
