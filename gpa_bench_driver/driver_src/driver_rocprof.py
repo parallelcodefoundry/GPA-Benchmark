@@ -520,12 +520,14 @@ def _lower_bound_index(m: int) -> int:
 
 def _j0_estimate(b_samples: list[dict], o_samples: list[dict], b_scored: list[float],
                  o_scored: list[float], charge: float, level_tol: float,
-                 placement_levels_ms: dict | None) -> dict[str, Any]:
+                 placement_levels_ms: dict | None,
+                 charge_strict: float | None = None) -> dict[str, Any]:
     """M.md T3/T5 via :func:`driver_j0_rule.j0_estimate`, paired by the samples' ABBA ``pair``
-    index (by position when the samples carry none)."""
+    index (by position when the samples carry none). ``charge`` is the reported charge,
+    ``charge_strict`` the one that decides credit (fix round 6b)."""
     try:
         return _rule.j0_estimate(
-            b_scored, o_scored, charge_ns=charge,
+            b_scored, o_scored, charge_ns=charge, charge_strict_ns=charge_strict,
             pairs_b=[s.get("pair", i) for i, s in enumerate(b_samples)],
             pairs_o=[s.get("pair", i) for i, s in enumerate(o_samples)],
             level_tol=level_tol, placement_levels_ms=placement_levels_ms)
@@ -746,15 +748,17 @@ def score_frontier(
     if b[key] > 0 and o[key] > 0:
         if protocol == "j0":
             j0 = _j0_estimate(baseline_samples, optimized_samples, b["scored_ns"], o["scored_ns"],
-                              charge, level_tol, placement_levels_ms)
+                              charge, level_tol, placement_levels_ms,
+                              other_j0.get("charge_strict_ns", charge))
             raw = j0["speedup"]
-            # unstable: only the lower bound can carry credit (j0_credited); below it -> failure
-            if j0["unstable"] and not j0["lower_bound"] > J0_CREDIT_FLOOR:
+            # unstable: only the (strict) lower bound can carry credit; below it -> failure
+            if j0["unstable"] and not j0["lower_bound_strict"] > J0_CREDIT_FLOOR:
                 failures.append({"code": "unstable", "message": (
                     f"TIMING UNSTABLE on this GCD (the VRAM placement changed between runs): "
-                    f"speedup {raw:.4f} (pair ratios {min(j0['pair_ratios']):.4f}.."
-                    f"{max(j0['pair_ratios']):.4f}, lower bound {j0['lower_bound']:.4f} is not "
-                    f"above {J0_CREDIT_FLOOR}).")})
+                    f"speedup {j0['speedup_strict']:.4f} (pair ratios "
+                    f"{min(j0['pair_ratios_strict']):.4f}..{max(j0['pair_ratios_strict']):.4f}, "
+                    f"lower bound {j0['lower_bound_strict']:.4f} is not above "
+                    f"{J0_CREDIT_FLOOR}).")})
         else:
             raw = b["mean_scored_ns"] / o["mean_scored_ns"]
     else:
@@ -775,6 +779,7 @@ def score_frontier(
             "optimized_mean_ns": other_opt,
             "charge_ns": charge,
             "charge_mean_ns": charge,  # alias (fix round 1 name)
+            "charge_reported_ns": charge,  # fix round 6b; charge_strict_ns decides credit
             "ratio": other_opt / base.other_mean_ns if base.other_mean_ns > 0 else None,
             **{k: v for k, v in other_j0.items() if k != "charge_ns"},
         },

@@ -505,3 +505,69 @@ def test_L1_score_frontier_reports_the_cap():
     o = r["other"]
     assert o["tol_cap_ns"] == pytest.approx(0.5 * 0.005 * statistics.median(d["b_scored"]))
     assert o["tol_ns"] == min(o["tol_noise_ns"], o["tol_cap_ns"])
+
+
+# ---------------------------------------------------------------- fix round 6b: split charge
+
+def _both(d, shift=0.0):
+    from gpa_bench_driver.driver_src.driver_j0_rule import j0_estimate, other_charge
+
+    oo = [v + shift for v in d["o_other"]]
+    os_ = [v - shift for v in d["o_scored"]]
+    c = other_charge(d["b_other"], oo, d["b_scored"])
+    return c, j0_estimate(d["b_scored"], os_, charge_ns=c["charge_ns"],
+                          charge_strict_ns=c["charge_strict_ns"])
+
+
+@pytest.mark.parametrize("key", sorted(BP["series"]))
+def test_R6b_strict_decision_never_credits_a_pure_shift_on_the_real_backprop_series(key):
+    d = BP["series"][key]
+    for shift in [x * 250.0 for x in range(0, 61)]:  # 0 .. 15 us
+        c, j = _both(d, shift)
+        assert c["charge_strict_ns"] >= c["charge_ns"]
+        assert j["speedup_strict"] <= j["speedup_reported"] + 1e-12
+        assert not j["credited"], (shift, j["speedup_strict"], j["speedup_reported"])
+        assert j["credit_decided_by"] == "strict"
+
+
+@pytest.mark.parametrize("key", sorted(BP["opt_series"]))
+def test_R6b_reference_opt_is_credited_under_the_strict_decision(key):
+    c, j = _both(BP["opt_series"][key])
+    assert j["credited"] and j["speedup_strict"] > 1.8 and j["speedup_reported"] > 1.8
+
+
+def test_R6b_nw_two_regime_pooled_is_credited_under_the_strict_decision():
+    from gpa_bench_driver.driver_src.driver_j0_rule import j0_decision
+
+    c, j = _both({"b_scored": NW2["baseline_scored_ns"], "o_scored": NW2["optimized_scored_ns"],
+                  "b_other": NW2["baseline_other_ns"], "o_other": NW2["optimized_other_ns"]})
+    assert j["unstable"] and j["credited"] and j["lower_bound_strict"] > 1.02
+    assert j0_decision(j)[0] is True
+
+
+def test_R6b_j0_decision_uses_the_strict_fields():
+    from gpa_bench_driver.driver_src.driver_j0_rule import j0_decision
+
+    rec = {"speedup": 1.02, "pair_ratios": [1.02] * 10, "unstable": False,
+           "speedup_strict": 1.004, "pair_ratios_strict": [1.004] * 10}
+    ok, why = j0_decision(rec)
+    assert ok is False and "strict J0 speedup 1.0040" in why
+    legacy = {"speedup": 1.02, "pair_ratios": [1.02] * 10, "unstable": False}
+    assert j0_decision(legacy)[0] is True
+
+
+def test_R6b_score_frontier_records_both_charges_and_decides_on_strict():
+    d = BP["series"]["k2_replay_1/public"]
+    shift = 2500.0  # the round-6 worst case: reported 1.0051 (credited then), strict below
+    def samples(scored, other, dt=0.0):
+        return [{"target_ns": int(x - dt), "target_dispatches": 1,
+                 "kernels": {"k(int)": int(x - dt), "other(int)": int(y + dt)}, "wall_s": 1.0,
+                 "cpu_s": 1.0, "pair": i} for i, (x, y) in enumerate(zip(scored, other))]
+    r = score_frontier(samples(d["b_scored"], d["b_other"]),
+                       samples(d["o_scored"], d["o_other"], shift), RX, protocol="j0")
+    j, o = r["j0"], r["other"]
+    assert o["charge_strict_ns"] > o["charge_reported_ns"] == o["charge_ns"]
+    assert j["charge_strict_ns"] == o["charge_strict_ns"]
+    assert j["charge_reported_ns"] == o["charge_reported_ns"]
+    assert j["speedup"] == j["speedup_reported"] > 1.005  # the reported value
+    assert j["speedup_strict"] < 1.005 and not j["credited"]  # the decision

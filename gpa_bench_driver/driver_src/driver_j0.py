@@ -94,7 +94,8 @@ def needs_remeasure(result: dict) -> bool:
 def _summary(result: dict) -> dict[str, Any]:
     j = result.get("j0") or {}
     cpu = result.get("cpu") or {}
-    return {"ok": result.get("ok"), "speedup": j.get("speedup"), "unstable": j.get("unstable"),
+    return {"ok": result.get("ok"), "speedup": j.get("speedup"),
+            "speedup_strict": j.get("speedup_strict"), "unstable": j.get("unstable"),
             "lower_bound": j.get("lower_bound"), "credited": j.get("credited"),
             "failures": [f.get("code") for f in result.get("failures", [])],
             "cpu_delta_s": cpu.get("delta_s"), "cpu_slack_s": cpu.get("slack_s")}
