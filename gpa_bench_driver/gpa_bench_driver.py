@@ -78,8 +78,14 @@ from gpa_bench_driver.driver_src.driver_check import (
 )
 from gpa_bench_driver.driver_src.driver_gate import check_kernel_source
 from gpa_bench_driver.driver_src.driver_reporting import print_report_table, save_results
-from gpa_bench_driver.driver_src.driver_rocprof import rocprof_time_app
+from gpa_bench_driver.driver_src.driver_rocprof import (
+    cpu_run_once,
+    get_score_regex,
+    profile_once,
+    rocprof_time_app,
+)
 from gpa_bench_driver.driver_src.driver_utils import (
+    DriverInfraError,
     SubprocessRunner,
     SubprocessRunnerConfig,
     get_bin_path,
@@ -109,6 +115,8 @@ class DriverPassContext:
     swap_config: SwapConfig | None
     pbar: Callable[[], None] | None
     hip_state: dict | None = None  # hip only: {"gpa_root": Path, "ref": Reference | None}
+    skip_timing: bool = False  # hip interleaved flow: timing happens after all builds
+    keep_swapped: bool = False  # hip interleaved flow: the swap copy keeps the swapped sources
 
 
 logger = logging.getLogger("GPA-Benchmark")
@@ -599,6 +607,7 @@ def run_driver_pass(ctx: DriverPassContext) -> DriverPassResult:
     hip = _backend(ctx.config) == "hip"
     if hip:
         runner_config.stdin_devnull = True  # R4: apps never read the driver's stdin
+        runner_config.raise_infra = True  # F5: harness failures are DriverInfraError
     runner = SubprocessRunner(env=ctx.env, config=runner_config)
 
     if not ctx.config.postprocess_nsys:
@@ -623,9 +632,10 @@ def run_driver_pass(ctx: DriverPassContext) -> DriverPassResult:
             validate_phase = _run_hip_validate_phase if hip else _run_validate_phase
             if not validate_phase(ctx, result, run_result):
                 return _handle_early_exit(ctx, result, "validate")
-            _run_profiling_phase(ctx, result, runner)
+            if not ctx.skip_timing:
+                _run_profiling_phase(ctx, result, runner)
         finally:
-            if ctx.swap_config:
+            if ctx.swap_config and not ctx.keep_swapped:
                 swap_file_out_app(ctx.app, ctx.temp_dir, ctx.swap_config)
 
     _run_nsys_post_phase(ctx, result, runner)
@@ -687,7 +697,9 @@ def run_all(
             if config.app != "all" and app["name"].lower() != config.app.lower():
                 continue
 
-            with tempfile.TemporaryDirectory(dir=config.temp_dir) as temp_dir_raw:
+            with tempfile.TemporaryDirectory(
+                dir=config.temp_dir, **({"ignore_cleanup_errors": True} if _backend(config) == "hip" else {}),
+            ) as temp_dir_raw:
                 temp_dir = Path(temp_dir_raw)
                 if _backend(config) == "hip":
                     app_dir = _stage_hip_app(app, Path(__file__).parent.parent, temp_dir)
@@ -726,6 +738,17 @@ def run_all(
                     else None
                 )
 
+                if hip_state is not None and getattr(config, "interleave", True):
+                    app_passes = _run_app_hip_interleaved(
+                        app, driver_passes, env, config, pbar, temp_dir, hip_state,
+                    )
+                    for pass_num, pass_results in enumerate(app_passes):
+                        results[app_name].update_from_pass_result(
+                            pass_result=pass_results, is_swap=pass_num > 0,
+                        )
+                        long_results[app_name].append(pass_results)
+                    continue
+
                 # Run each pass
                 for pass_num, driver_pass in enumerate(driver_passes):
                     pass_ctx = DriverPassContext(
@@ -754,6 +777,161 @@ def run_all(
                     logger.debug("  NSYS Data: %s", pass_results.nsys_data)
 
     return results, operations, long_results
+
+
+def _hip_runner(config: DriverConfig, env: dict) -> SubprocessRunner:
+    return SubprocessRunner(env=env, config=SubprocessRunnerConfig(
+        log_level=config.log_level,
+        timeout=config.timeout,
+        output_char_limit=config.subprocess_output_char_limit,
+        suppress_command_stdout=config.suppress_command_stdout,
+        use_srun=config.srun,
+        stdin_devnull=True,
+        raise_infra=True,
+    ))
+
+
+def _chmod_tree(root: Path) -> None:
+    for dirpath, dirs, files in os.walk(root):
+        for d in dirs:
+            os.chmod(os.path.join(dirpath, d), 0o755)
+        for f in files:
+            fp = os.path.join(dirpath, f)
+            os.chmod(fp, os.stat(fp).st_mode | 0o644)
+
+
+def _interleaved_series(
+    app: dict,
+    runner: SubprocessRunner,
+    config: DriverConfig,
+    hip_state: dict,
+    roots: list[Path],
+) -> tuple[list[list[dict]], list[list[dict]], list[str | None]]:
+    """F1/F4 timing: 1 discarded profiled warm-up per side, then num_samples alternating
+    profiled samples (side 0, side 1, ...), then cpu_pairs alternating UNPROFILED runs with CPU
+    time. Every run's output is checked against hip_state["ref"] (R4).
+
+    Returns:
+        (profiled samples per side, cpu samples per side, warm-up failure message per side)
+
+    """
+    ref = hip_state.get("ref")
+
+    def validate(run_result: CompletedProcess, run_dir: Path) -> tuple[bool, str | None]:
+        if ref is None:
+            return True, None
+        return check_output(app, produced_output(app, run_result.stdout, run_dir), ref)
+
+    score_regex = get_score_regex(app)
+    rocm = getattr(config, "rocm_path", None)
+    paths = [get_run_path(app, root) for root in roots]
+    profile_dirs = [root / "profiles" for root in roots]
+    for d in profile_dirs:
+        d.mkdir(parents=True, exist_ok=True)
+    samples: list[list[dict]] = [[] for _ in roots]
+    cpu: list[list[dict]] = [[] for _ in roots]
+    warm_fail: list[str | None] = [None for _ in roots]
+    retain = config.retain_nsys_profiles
+    for j, path in enumerate(paths):  # warm-up, discarded
+        w = profile_once(app, runner, path, profile_dirs[j] / "rocprof_warmup",
+                         score_regex=score_regex, rocm_path=rocm, validate=validate)
+        if w.get("valid") is False:
+            warm_fail[j] = w.get("validation_output")
+    order = 0
+    for i in range(config.num_samples):
+        for j, path in enumerate(paths):
+            s = profile_once(app, runner, path, profile_dirs[j] / f"rocprof_sample_{i}",
+                             score_regex=score_regex, rocm_path=rocm, validate=validate,
+                             retain_profiles=retain)
+            s["order"] = order
+            s["warmup"] = False
+            order += 1
+            samples[j].append(s)
+    for _ in range(int(getattr(config, "cpu_pairs", 2) or 0)):
+        for j, path in enumerate(paths):
+            c = cpu_run_once(app, runner, path, validate=validate)
+            c["order"] = order
+            order += 1
+            cpu[j].append(c)
+    return samples, cpu, warm_fail
+
+
+def _first_invalid(label: str, samples: list[dict], warm: str | None) -> str | None:
+    bad = [(i, s) for i, s in enumerate(samples) if s.get("valid") is False]
+    if not bad:
+        return None if warm is None else f"WARM-UP RUN: {warm}"
+    i, s = bad[0]
+    more = f" ({len(bad)} of {len(samples)} {label} runs failed)" if len(bad) > 1 else ""
+    return f"{label.upper()} RUN {i}: {s.get('validation_output')}{more}"
+
+
+def _run_app_hip_interleaved(
+    app: dict,
+    driver_passes: list,
+    env: dict,
+    config: DriverConfig,
+    pbar: Callable | None,
+    temp_dir: Path,
+    hip_state: dict,
+) -> list[DriverPassResult]:
+    """hip flow (fix round 2 F1): build and check every copy first, then time interleaved."""
+    try:
+        base_ctx = DriverPassContext(app=app, env=env, config=config, temp_dir=temp_dir,
+                                     swap_config=None, pbar=pbar, hip_state=hip_state,
+                                     skip_timing=True)
+        base = run_driver_pass(base_ctx)
+        passes = [base]
+        if config.build_only:
+            return passes
+        ready: list[tuple[Path, DriverPassResult]] = []
+        gpa_root = Path(__file__).parent.parent
+        for i, swap in enumerate(driver_passes[1:]):
+            root = temp_dir / f"swap{i}"
+            _stage_hip_app(app, gpa_root, root)
+            _chmod_tree(root)
+            ctx = DriverPassContext(app=app, env=env, config=config, temp_dir=root,
+                                    swap_config=swap, pbar=pbar, hip_state=hip_state,
+                                    skip_timing=True, keep_swapped=True)
+            res = run_driver_pass(ctx)
+            passes.append(res)
+            if res.build and res.run and res.validate:
+                ready.append((root, res))
+        if not config.nsys:
+            return passes
+        runner = _hip_runner(config, env)
+        pairs = ready or [(None, None)]
+        for k, (root, res) in enumerate(pairs):
+            roots = [temp_dir] if root is None else [temp_dir, root]
+            samples, cpu, warm = _interleaved_series(app, runner, config, hip_state, roots)
+            base_problem = _first_invalid("baseline timed", samples[0], warm[0])
+            if base_problem is not None:
+                msg = f"Validate failed for baseline timed run ({app['name']}): {base_problem}"
+                raise BaselineError(msg)
+            if any(s["target_dispatches"] == 0 for s in samples[0]):
+                logger.warning("No dispatch of the target kernel (score_regex %r) in the %s "
+                               "baseline trace", get_score_regex(app), app["name"])
+                b_nsys = None
+            else:
+                b_nsys = samples[0]
+            if k == 0:
+                base.nsys_data, base.cpu_data = b_nsys, cpu[0]
+                base.nsys_profile = base.nsys_post = b_nsys is not None
+            if res is None:
+                continue
+            res.nsys_data, res.cpu_data = samples[1], cpu[1]
+            res.baseline_nsys_data, res.baseline_cpu_data = b_nsys, cpu[0]
+            res.nsys_profile = res.nsys_post = True
+            problem = _first_invalid("timed", samples[1], warm[1]) or _first_invalid(
+                "unprofiled", cpu[1], None)
+            if problem is not None:
+                res.validate = False
+                res.validation_output = problem
+        return passes
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        if not Path(temp_dir).is_dir():
+            msg = f"the driver's working directory {temp_dir} vanished: {exc}"
+            raise DriverInfraError(msg) from exc
+        raise
 
 
 def _stage_hip_app(app: dict, gpa_root: Path, temp_dir: Path) -> str:

@@ -42,8 +42,10 @@ from typing import Any
 
 from gpa_bench_driver.driver_src.driver_models import SwapConfig
 from gpa_bench_driver.driver_src.driver_utils import (
+    DriverInfraError,
     SubprocessRunner,
     get_run_path,
+    head_tail,
     setup_profile_dir,
 )
 
@@ -183,6 +185,110 @@ def _profile_dir_name(app: dict, swap_config: SwapConfig | None, i: int) -> str:
     return f"rocprof_{name}_sample_{i}".replace("/", "_")
 
 
+def _app_output_path(app: dict, run_path: Path) -> Path | None:
+    if "test_output" not in app:
+        return None
+    return run_path / Path(str(app["test_output"])).name
+
+
+def profile_once(
+    app: dict,
+    runner: SubprocessRunner,
+    run_path: Path,
+    outdir: Path,
+    *,
+    score_regex: str,
+    rocm_path: Path | None = None,
+    validate: Callable[[subprocess.CompletedProcess, Path], tuple[bool, str | None]]
+    | None = None,
+    retain_profiles: bool = False,
+) -> dict[Hashable, Any]:
+    """One rocprofv3 kernel-trace run of the app in run_path: its sample dict (see module doc).
+
+    The app's test_output file is deleted first; ``validate`` checks this run's output.
+
+    Raises:
+        RocprofError: the app fails under the profiler (and also without it)
+        DriverInfraError: the profiler failed or wrote no trace although the same binary runs
+            fine without it (F5)
+
+    """
+    if outdir.exists():
+        shutil.rmtree(outdir)
+    out_file = _app_output_path(app, run_path)
+    if out_file is not None:  # never let a previous run's output validate this one
+        out_file.unlink(missing_ok=True)
+    command = rocprofv3_command(rocm_path, outdir, app["run_command"].split())
+    start = time.perf_counter()
+    result = runner.run(command, run_path)
+    wall_s = time.perf_counter() - start
+    trace_files = find_kernel_trace_files(outdir) if result.returncode == 0 else []
+    if result.returncode != 0 or not trace_files:
+        what = (f"rocprofv3 timing run failed with return code {result.returncode}"
+                if result.returncode != 0 else f"rocprofv3 wrote no kernel trace under {outdir}")
+        plain = runner.run(app["run_command"].split(), run_path)
+        stderr = head_tail(result.stderr)
+        if plain.returncode == 0:
+            msg = (f"{what}, but the same binary runs fine without the profiler (harness/profiler "
+                   f"failure, not the program's): {stderr}")
+            raise DriverInfraError(msg)
+        msg = f"{what}; the program also fails without the profiler (rc {plain.returncode})"
+        if stderr:
+            msg += f": {stderr}"
+        raise RocprofError(msg)
+    sample = summarize_kernel_trace(read_kernel_trace(trace_files), score_regex)
+    sample["wall_s"] = wall_s
+    sample["backend"] = BACKEND_NAME
+    sample["valid"] = None
+    sample["validation_output"] = None
+    if validate is not None:
+        ok, message = validate(result, run_path)
+        sample["valid"] = bool(ok)
+        sample["validation_output"] = None if ok else message
+    if not retain_profiles:
+        shutil.rmtree(outdir, ignore_errors=True)
+    return sample
+
+
+def cpu_run_once(
+    app: dict,
+    runner: SubprocessRunner,
+    run_path: Path,
+    *,
+    validate: Callable[[subprocess.CompletedProcess, Path], tuple[bool, str | None]]
+    | None = None,
+) -> dict[str, Any]:
+    """One UNPROFILED run of the app: its CPU time (user + sys, all threads), wall time, check.
+
+    Raises:
+        DriverInfraError: the CPU time could not be measured
+        RocprofError: the program fails (non-zero exit)
+
+    """
+    out_file = _app_output_path(app, run_path)
+    if out_file is not None:
+        out_file.unlink(missing_ok=True)
+    start = time.perf_counter()
+    result = runner.run(app["run_command"].split(), run_path, measure_cpu=True)
+    wall_s = time.perf_counter() - start
+    if result.returncode != 0:
+        msg = (f"unprofiled run failed with return code {result.returncode}: "
+               f"{head_tail(result.stderr)}")
+        raise RocprofError(msg)
+    user = getattr(result, "cpu_user_s", None)
+    sys_t = getattr(result, "cpu_sys_s", None)
+    if user is None or sys_t is None:
+        msg = "the program's CPU time could not be measured (runner without rusage support)"
+        raise DriverInfraError(msg)
+    sample: dict[str, Any] = {"cpu_s": user + sys_t, "user_s": user, "sys_s": sys_t,
+                              "wall_s": wall_s, "valid": None, "validation_output": None}
+    if validate is not None:
+        ok, message = validate(result, run_path)
+        sample["valid"] = bool(ok)
+        sample["validation_output"] = None if ok else message
+    return sample
+
+
 def rocprof_time_app(
     app: dict,
     runner: SubprocessRunner,
@@ -229,39 +335,9 @@ def rocprof_time_app(
 
     for i in range(num_samples):
         outdir = profile_dir / _profile_dir_name(app, swap_config, i)
-        if outdir.exists():
-            shutil.rmtree(outdir)
-        if "test_output" in app:  # never let a previous run's output validate this one
-            (run_path / Path(str(app["test_output"])).name).unlink(missing_ok=True)
-        command = rocprofv3_command(rocm_path, outdir, app["run_command"].split())
-        start = time.perf_counter()
-        result = runner.run(command, run_path)
-        wall_s = time.perf_counter() - start
-
-        if result.returncode != 0:
-            stderr_text = (result.stderr or b"").decode("utf-8", errors="replace")[-2000:]
-            msg = f"rocprofv3 timing run failed with return code {result.returncode}"
-            if stderr_text:
-                msg += f": {stderr_text}"
-            raise RocprofError(msg)
-
-        trace_files = find_kernel_trace_files(outdir)
-        if not trace_files:
-            msg = f"rocprofv3 wrote no kernel trace under {outdir}"
-            raise RocprofError(msg)
-
-        sample = summarize_kernel_trace(read_kernel_trace(trace_files), score_regex)
-        sample["wall_s"] = wall_s
-        sample["backend"] = BACKEND_NAME
-        sample["valid"] = None
-        sample["validation_output"] = None
-        if validate is not None:
-            ok, message = validate(result, run_path)
-            sample["valid"] = bool(ok)
-            sample["validation_output"] = None if ok else message
-
-        if not retain_profiles:
-            shutil.rmtree(outdir, ignore_errors=True)
+        sample = profile_once(app, runner, run_path, outdir, score_regex=score_regex,
+                              rocm_path=rocm_path, validate=validate,
+                              retain_profiles=retain_profiles)
 
         if swap_config is None and sample["target_dispatches"] == 0:
             logger.warning(
@@ -354,12 +430,12 @@ def summarize_baseline(baseline_samples: list[dict], score_regex: str) -> Baseli
 
 
 def score_terms(sample: dict, base: BaselineSummary) -> dict[str, Any]:
-    """R1 scored time of one run and its terms.
+    """R1 terms of one run.
 
-    scored_ns = target_ns (every dispatch matching score_regex)
-              + new_ns (kernels absent from the baseline and not matching score_regex)
-              + other_charge_ns = max(0, other_ns - baseline mean other_ns), where other_ns is
-                the time of the baseline-known non-target kernels in this run.
+    target_ns (every dispatch matching score_regex), new_ns (kernels absent from the baseline
+    and not matching score_regex), other_ns (the baseline-known non-target kernels in this run).
+    scored_ns = target_ns + new_ns. (other_charge_ns = max(0, other_ns - baseline mean) is kept
+    for reference; score_frontier charges the increase on MEANS, fix round 2 F1.)
     """
     pattern = re.compile(base.score_regex)
     new_kernels = {name: int(ns) for name, ns in sample["kernels"].items()
@@ -373,7 +449,7 @@ def score_terms(sample: dict, base: BaselineSummary) -> dict[str, Any]:
         "new_ns": new_ns,
         "other_ns": other_ns,
         "other_charge_ns": charge,
-        "scored_ns": target_ns + new_ns + charge,
+        "scored_ns": target_ns + new_ns,
         "new_kernels": new_kernels,
     }
 
@@ -382,25 +458,79 @@ def _mean(values: list[float]) -> float:
     return sum(values) / len(values)
 
 
+def _cpu_values(values: list, label: str) -> list[float]:
+    out = []
+    for i, v in enumerate(values):
+        cpu = v.get("cpu_s") if isinstance(v, dict) else v
+        if cpu is None:
+            msg = f"{label} CPU sample {i} has no cpu_s"
+            raise ScoringError(msg)
+        out.append(float(cpu))
+    return out
+
+
+def cpu_guard(
+    baseline_cpu: list,
+    optimized_cpu: list,
+    cpu_sigma_s: float | None,
+    *,
+    cpu_k: float = 5.0,
+    cpu_floor_s: float = 0.05,
+) -> dict[str, Any]:
+    """G-cpu (fix round 2 F4): the program's own CPU time must not grow beyond the noise.
+
+    slack = max(cpu_k * cpu_sigma_s / sqrt(n_pairs), cpu_floor_s); FAIL when
+    mean(optimized CPU) - mean(baseline CPU) > slack. cpu_sigma_s is the app's calibrated std
+    of the CPU-time difference of a pristine unprofiled pair.
+
+    Raises:
+        ScoringError: empty or differently sized lists, missing values, or no cpu_sigma_s
+
+    """
+    base = _cpu_values(list(baseline_cpu or []), "baseline")
+    opt = _cpu_values(list(optimized_cpu or []), "optimized")
+    if not base or not opt:
+        msg = "G-cpu needs at least one baseline and one optimized unprofiled run"
+        raise ScoringError(msg)
+    if len(base) != len(opt):
+        msg = f"{len(base)} baseline CPU samples but {len(opt)} optimized CPU samples"
+        raise ScoringError(msg)
+    if cpu_sigma_s is None:
+        msg = "G-cpu needs the app's calibrated cpu_sigma_s"
+        raise ScoringError(msg)
+    n = len(opt)
+    slack = max(cpu_k * float(cpu_sigma_s) / math.sqrt(n), cpu_floor_s)
+    delta = _mean(opt) - _mean(base)
+    return {"checked": True, "baseline_mean_s": _mean(base), "optimized_mean_s": _mean(opt),
+            "delta_s": delta, "sigma_s": float(cpu_sigma_s), "n_pairs": n, "k": cpu_k,
+            "floor_s": cpu_floor_s, "slack_s": slack, "ok": delta <= slack,
+            "baseline_s": base, "optimized_s": opt}
+
+
 def score_frontier(
     baseline_samples: list[dict],
     optimized_samples: list[dict],
     score_regex: str,
     *,
     fixed_target_dispatches: bool = False,
+    baseline_cpu: list | None = None,
+    optimized_cpu: list | None = None,
+    cpu_sigma_s: float | None = None,
+    cpu_k: float = 5.0,
+    cpu_floor_s: float = 0.05,
 ) -> dict[str, Any]:
-    """Apply the Frontier GPA scoring rule (fix round 1) to baseline and optimized samples.
+    """Apply the Frontier GPA scoring rule (fix rounds 1 and 2) to baseline and optimized samples.
 
-    R1 scored time per run (see :func:`score_terms`), speedup = mean(baseline scored) /
-    mean(optimized scored). Failures (no speedup credited): R2 ``launch-count`` (only with
-    fixed_target_dispatches: every optimized run must launch the target exactly as often as the
-    baseline), R3 ``G-wall`` (mean optimized wall > 1.5 x mean baseline wall + 1 s), R11
-    ``G-zero`` (a mean scored time <= 0). The other-kernel increase is charged, not guarded; its
-    numbers are reported under "other".
+    Scored time per run = target + kernels new to the baseline (:func:`score_terms`); the
+    increase of the baseline's other kernels is charged on MEANS: max(0, mean(other_opt) -
+    mean(other_base)) is added to the optimized mean. speedup = mean(baseline scored) /
+    mean(optimized scored + charge). Failures (no speedup credited): R2 ``launch-count`` (only
+    with fixed_target_dispatches), R3 ``G-wall`` (mean optimized wall > 1.5 x baseline + 1 s),
+    F4 ``G-cpu`` (with CPU samples: see :func:`cpu_guard`), R11 ``G-zero`` (a mean <= 0).
 
     Raises:
-        ScoringError: empty or differently sized sample lists, malformed samples, or baseline
-            runs that disagree on the target launch count when it must stay fixed
+        ScoringError: empty or differently sized sample lists, malformed samples, baseline runs
+            that disagree on the launch count when it must stay fixed, bad CPU inputs
 
     """
     _check_samples(baseline_samples, "baseline")
@@ -434,6 +564,9 @@ def score_frontier(
     b = side(baseline_samples)
     o = side(optimized_samples)
     b["other_mean_ns"] = base.other_mean_ns
+    other_opt = _mean(o["other_ns"])
+    charge = max(0.0, other_opt - base.other_mean_ns)
+    o["mean_scored_ns"] = _mean(o["scored_ns"]) + charge
     failures: list[dict[str, str]] = []
 
     launch_ok = True
@@ -453,6 +586,17 @@ def score_frontier(
             f"{G_WALL_FACTOR} x the original's {base.wall_mean_s:.2f} s + {G_WALL_SLACK_S:.0f} s "
             f"= {wall_limit:.2f} s (work moved to the CPU or to an untimed phase).")})
 
+    cpu: dict[str, Any] = {"checked": False}
+    if baseline_cpu is not None or optimized_cpu is not None:
+        cpu = cpu_guard(baseline_cpu or [], optimized_cpu or [], cpu_sigma_s, cpu_k=cpu_k,
+                        cpu_floor_s=cpu_floor_s)
+        if not cpu["ok"]:
+            failures.append({"code": "G-cpu", "message": (
+                f"CPU TIME: your program used {cpu['optimized_mean_s']:.3f} s of CPU per run, "
+                f"{cpu['delta_s']:.3f} s more than the original's {cpu['baseline_mean_s']:.3f} s "
+                f"(allowed: {cpu['slack_s']:.3f} s of noise); work moved from the GPU to the CPU "
+                "is not credited.")})
+
     raw = None
     if b["mean_scored_ns"] > 0 and o["mean_scored_ns"] > 0:
         raw = b["mean_scored_ns"] / o["mean_scored_ns"]
@@ -462,7 +606,6 @@ def score_frontier(
             f"NO GPU TIME: the {side_name} program's scored GPU time is zero, so no speedup can "
             "be computed.")})
 
-    other_opt = _mean(o["other_ns"])
     return {
         "ok": not failures,
         "speedup": raw if not failures else None,
@@ -473,9 +616,11 @@ def score_frontier(
         "other": {
             "baseline_mean_ns": base.other_mean_ns,
             "optimized_mean_ns": other_opt,
-            "charge_mean_ns": _mean(o["other_charge_ns"]),
+            "charge_ns": charge,
+            "charge_mean_ns": charge,  # alias (fix round 1 name)
             "ratio": other_opt / base.other_mean_ns if base.other_mean_ns > 0 else None,
         },
+        "cpu": cpu,
         "g_wall": {"baseline_s": base.wall_mean_s, "optimized_s": o["wall_mean_s"],
                    "limit_s": wall_limit, "ok": wall_ok},
         "launch_count": {"required": bool(fixed_target_dispatches),

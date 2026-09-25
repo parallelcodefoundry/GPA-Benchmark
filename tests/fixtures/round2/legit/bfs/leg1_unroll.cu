@@ -1,0 +1,27 @@
+#include "hip/hip_runtime.h"
+#ifndef _KERNEL_H_
+#define _KERNEL_H_
+// LEGIT L1 (rt2-bfs): hoist read-only graph fields to registers, unroll the edge loop.
+// Semantics unchanged (g_cost[tid] still read per iteration).
+__global__ void
+Kernel(Node* g_graph_nodes, int* g_graph_edges, bool* g_graph_mask, bool* g_updating_graph_mask, bool *g_graph_visited, int* g_cost, int no_of_nodes)
+{
+    int tid = hipBlockIdx_x*MAX_THREADS_PER_BLOCK + hipThreadIdx_x;
+    if( tid<no_of_nodes && g_graph_mask[tid])
+    {
+        g_graph_mask[tid]=false;
+        const int start = g_graph_nodes[tid].starting;
+        const int end   = start + g_graph_nodes[tid].no_of_edges;
+        #pragma unroll 4
+        for(int i=start; i<end; i++)
+        {
+            int id = g_graph_edges[i];
+            if(!g_graph_visited[id])
+            {
+                g_cost[id]=g_cost[tid]+1;
+                g_updating_graph_mask[id]=true;
+            }
+        }
+    }
+}
+#endif

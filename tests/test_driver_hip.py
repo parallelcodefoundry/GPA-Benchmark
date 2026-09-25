@@ -195,13 +195,17 @@ def test_integrity_guards_other_and_wall():
 class _FakeRocprofRunner:
     """Stands in for SubprocessRunner: writes a kernel trace where rocprofv3 would."""
 
-    def __init__(self, trace: Path, returncode: int = 0):
+    def __init__(self, trace: Path, returncode: int = 0, plain_returncode: int | None = None):
         self.trace = trace
         self.returncode = returncode
+        self.plain_returncode = plain_returncode
         self.calls: list[tuple[list[str], Path, int | None]] = []
 
-    def run(self, command, cwd, *, quiet=None, stdout_cap_bytes=None):
+    def run(self, command, cwd, *, quiet=None, stdout_cap_bytes=None, measure_cpu=False):
         self.calls.append((command, cwd, stdout_cap_bytes))
+        if "-d" not in command:  # the unprofiled re-run after a profiler failure
+            rc = self.returncode if self.plain_returncode is None else self.plain_returncode
+            return subprocess.CompletedProcess(command, rc, b"out", b"err")
         outdir = Path(command[command.index("-d") + 1])
         outdir.mkdir(parents=True, exist_ok=True)
         (outdir / "trace_kernel_trace.csv").write_text(self.trace.read_text())
@@ -280,6 +284,15 @@ def test_rocprof_time_app_swap_without_target_is_data(tmp_path):
 def test_rocprof_time_app_failure_raises(tmp_path):
     runner = _FakeRocprofRunner(FIXTURES / "rocm7_bfs_kernel_trace.csv", returncode=3)
     with pytest.raises(RocprofError, match="return code 3"):
+        rocprof_time_app(_bfs_app(), runner, tmp_path, 1)
+
+
+def test_profiler_failure_with_working_binary_is_infra(tmp_path):
+    from gpa_bench_driver.driver_src.driver_utils import DriverInfraError
+
+    runner = _FakeRocprofRunner(FIXTURES / "rocm7_bfs_kernel_trace.csv", returncode=139,
+                                plain_returncode=0)
+    with pytest.raises(DriverInfraError, match="runs fine without the profiler"):
         rocprof_time_app(_bfs_app(), runner, tmp_path, 1)
 
 
@@ -555,7 +568,7 @@ out = {}
 for kw in ({"app": "bfs", "nsys": True}, {"app": "xsbench", "ncu": True, "no_sanitize": True},
            {"app": "all"}, {"app": "backprop", "swaps_override": {Path("backprop_cuda_kernel.cu"): "// backprop_cuda_kernel.cu\nX"}, "nsys": True}):
     cfg = DriverConfig(sm_version=80, cuda_home=Path("/fake/cuda"), temp_dir=Path("/tmp"), **kw)
-    old_keys = sorted(k for k in vars(cfg) if k not in ("gpu_backend", "offload_arch", "rocm_path", "app_overrides", "gpu_device", "reference_from_baseline", "kernel_gate"))
+    old_keys = sorted(k for k in vars(cfg) if k not in ("gpu_backend", "offload_arch", "rocm_path", "app_overrides", "gpu_device", "reference_from_baseline", "kernel_gate", "interleave", "cpu_pairs"))
     app_config, swaps, env = setup_app_config(cfg)
     key = repr(sorted((k, repr(v)) for k, v in kw.items()))
     out[key] = {

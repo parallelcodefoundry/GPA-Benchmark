@@ -83,6 +83,11 @@ class DriverConfig:
             (input variants, driver_variants) (default: False)
         kernel_gate: hip only. Gate every swapped file with driver_gate before building; a
             violation fails the pass without building it (default: True)
+        interleave: hip only. Build every copy first, then time interleaved: 1 discarded
+            warm-up per side, alternating profiled samples, then cpu_pairs unprofiled pairs
+            (default: True; False = sequential per pass)
+        cpu_pairs: hip only. Unprofiled interleaved baseline/swap run pairs that measure the
+            program's CPU time (G-cpu) (default: 2)
 
     """
 
@@ -117,6 +122,8 @@ class DriverConfig:
     gpu_device: int | None
     reference_from_baseline: bool
     kernel_gate: bool
+    interleave: bool
+    cpu_pairs: int
 
     def __init__(
         self,
@@ -152,6 +159,8 @@ class DriverConfig:
         gpu_device: int | None = None,
         reference_from_baseline: bool = False,
         kernel_gate: bool = True,
+        interleave: bool = True,
+        cpu_pairs: int = 2,
     ) -> None:
         """Initialize a DriverConfig object."""
         logger.debug("Entering DriverConfig")
@@ -172,6 +181,8 @@ class DriverConfig:
         self.gpu_device = gpu_device
         self.reference_from_baseline = reference_from_baseline
         self.kernel_gate = kernel_gate
+        self.interleave = interleave
+        self.cpu_pairs = cpu_pairs
         self.no_clean = no_clean
         self.build_only = build_only
         self.nsys = nsys
@@ -361,6 +372,11 @@ class DriverPassResult:
     run_stdout: str | None = None
     run_stderr: str | None = None
     gate_violations: list[str] | None = None  # hip: kernel-file gate (driver_gate) violations
+    # hip (fix round 2): unprofiled runs with CPU time, and for swap passes the baseline series
+    # interleaved with this swap (score the swap against these)
+    cpu_data: list[dict[str, Any]] | None = None
+    baseline_nsys_data: list[dict[Hashable, Any]] | None = None
+    baseline_cpu_data: list[dict[str, Any]] | None = None
 
     def to_dict(
         self,
@@ -417,8 +433,9 @@ class DriverPassResult:
             "run_stdout": self.run_stdout,
             "run_stderr": self.run_stderr,
         }
-        if self.gate_violations is not None:  # hip only; cuda output unchanged
-            result["gate_violations"] = self.gate_violations
+        for key in ("gate_violations", "cpu_data", "baseline_nsys_data", "baseline_cpu_data"):
+            if getattr(self, key) is not None:  # hip only; cuda output unchanged
+                result[key] = getattr(self, key)
         return result
 
 

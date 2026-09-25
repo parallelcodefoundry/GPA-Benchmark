@@ -84,23 +84,28 @@ def test_G1_work_moved_into_existing_runtime_kernel_name_is_charged():
     base = [_sample(560_000, {"findRangeK": 560_000, COPY: 10_000})] * 5
     attack = [_sample(3_000, {"findRangeK": 3_000, COPY: 565_000})] * 5  # same name as a blit
     r = score_frontier(base, attack, RX)
-    assert r["optimized"]["other_charge_ns"] == [555_000] * 5
-    assert r["optimized"]["scored_ns"] == [558_000] * 5
+    assert r["other"]["charge_ns"] == 555_000  # charged on means (fix round 2 F1)
+    assert r["optimized"]["mean_scored_ns"] == 558_000
     assert r["raw_speedup"] == pytest.approx(560_000 / 558_000)
     assert r["other"]["ratio"] == pytest.approx(56.5)
 
 
-def test_other_kernel_charge_is_one_sided_and_applies_to_baseline_too():
+def test_other_kernel_charge_is_on_means():
     base = [_sample(100, {"k": 100, "o": 50}), _sample(100, {"k": 100, "o": 70})]
     s = summarize_baseline(base, r"^k$")
     assert s.other_mean_ns == 60
-    assert score_terms(base[0], s)["other_charge_ns"] == 0
-    assert score_terms(base[1], s)["other_charge_ns"] == 10
+    assert score_terms(base[1], s)["scored_ns"] == 100  # no per-sample charge any more
+    # a no-op kernel (same noisy other kernels) is not biased below 1.0
+    noop = [_sample(100, {"k": 100, "o": 70}), _sample(100, {"k": 100, "o": 50})]
+    r = score_frontier(base, noop, r"^k$")
+    assert r["other"]["charge_ns"] == 0 and r["speedup"] == pytest.approx(1.0)
     faster_other = [_sample(80, {"k": 80, "o": 1}), _sample(80, {"k": 80, "o": 1})]
     r = score_frontier(base, faster_other, r"^k$")
-    assert r["optimized"]["other_charge_ns"] == [0, 0]
-    assert r["baseline"]["mean_scored_ns"] == 105
-    assert r["ok"] and r["speedup"] == pytest.approx(105 / 80)
+    assert r["baseline"]["mean_scored_ns"] == 100
+    assert r["ok"] and r["speedup"] == pytest.approx(100 / 80)
+    slower_other = [_sample(80, {"k": 80, "o": 90}), _sample(80, {"k": 80, "o": 90})]
+    r = score_frontier(base, slower_other, r"^k$")
+    assert r["other"]["charge_ns"] == 30 and r["optimized"]["mean_scored_ns"] == 110
 
 
 def test_new_target_matching_kernel_counts_once_under_r1():

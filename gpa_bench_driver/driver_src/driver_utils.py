@@ -11,6 +11,7 @@ import logging
 import multiprocessing
 import os
 import re
+import resource
 import shutil
 import signal
 import subprocess
@@ -24,6 +25,23 @@ logger = logging.getLogger("GPA-Benchmark")
 _RESULT_RETURNCODE_FILE = "returncode.txt"
 _RESULT_STDOUT_FILE = "stdout.bin"
 _RESULT_STDERR_FILE = "stderr.bin"
+_RESULT_CPU_FILE = "cpu.txt"
+
+
+class DriverInfraError(RuntimeError):
+    """A harness-side failure (not the agent's): vanished working dir, missing worker result,
+    profiler failure while the same binary runs fine without the profiler (hip backend)."""
+
+
+def head_tail(text: str | bytes | None, head: int = 1500, tail: int = 1500) -> str:
+    """Excerpt of a (possibly long) text: its head and tail with the omitted size in between."""
+    if text is None:
+        return ""
+    if isinstance(text, bytes):
+        text = text.decode("utf-8", errors="replace")
+    if len(text) <= head + tail:
+        return text
+    return f"{text[:head]}\n[... {len(text) - head - tail} chars omitted ...]\n{text[-tail:]}"
 
 MAX_OUTPUT_CHAR_LIMIT = 25000
 
@@ -41,6 +59,8 @@ class SubprocessRunnerConfig:
         use_srun: When True, prepend srun and use srun --time for timeout.
         stdin_devnull: When True, every command gets stdin=/dev/null (hip backend) instead of
             inheriting the driver's stdin.
+        raise_infra: When True (hip backend), a missing working directory or a worker that left
+            no result raises DriverInfraError instead of returning returncode -1.
 
     """
 
@@ -51,6 +71,7 @@ class SubprocessRunnerConfig:
     suppress_command_stdout: bool = False
     use_srun: bool = False
     stdin_devnull: bool = False
+    raise_infra: bool = False
 
 
 class SubprocessRunner:
@@ -92,6 +113,7 @@ class SubprocessRunner:
         self.suppress_command_stdout = config.suppress_command_stdout
         self.use_srun = config.use_srun
         self.stdin = subprocess.DEVNULL if config.stdin_devnull else None
+        self.raise_infra = config.raise_infra
 
     def run(
         self,
@@ -100,6 +122,7 @@ class SubprocessRunner:
         *,
         quiet: bool | None = None,
         stdout_cap_bytes: int | None = None,
+        measure_cpu: bool = False,
     ) -> subprocess.CompletedProcess:
         """Execute a command and return the completed process.
 
@@ -121,6 +144,9 @@ class SubprocessRunner:
             stdout_cap_bytes: If set, only the first stdout_cap_bytes bytes of the command's stdout
                 are read back into the CompletedProcess (the rest is discarded).  Used for runs whose
                 stdout is not validated (e.g. rocprofv3 timing runs of pathfinder, ~180 MB each).
+            measure_cpu: If True (multiprocessing mode only), the command's CPU time (rusage of the
+                child: user and sys, all threads) is attached as ``result.cpu_user_s`` /
+                ``result.cpu_sys_s`` (None when unavailable).
 
         Returns:
             CompletedProcess object with returncode, stdout, and stderr attributes.
@@ -129,10 +155,15 @@ class SubprocessRunner:
         faulthandler.enable()
         effective_quiet = self.quiet if quiet is None else quiet
 
+        if self.raise_infra and not Path(cwd).is_dir():
+            msg = f"working directory {cwd} vanished before running {command[0]}"
+            raise DriverInfraError(msg)
         if self.use_srun:
             result = self._run_with_srun(command, cwd, stdout_cap_bytes=stdout_cap_bytes)
         else:
-            result = self._run_with_multiprocessing(command, cwd, stdout_cap_bytes=stdout_cap_bytes)
+            result = self._run_with_multiprocessing(
+                command, cwd, stdout_cap_bytes=stdout_cap_bytes, measure_cpu=measure_cpu,
+            )
 
         self._log_command_result(result, effective_quiet=effective_quiet)
         return result
@@ -184,6 +215,7 @@ class SubprocessRunner:
         cwd: Path,
         *,
         stdout_cap_bytes: int | None = None,
+        measure_cpu: bool = False,
     ) -> subprocess.CompletedProcess:
         """Run command in a worker process with multiprocessing-based timeout."""
         logger.debug("Running command %s in directory %s", " ".join(command), cwd)
@@ -192,6 +224,7 @@ class SubprocessRunner:
             worker = multiprocessing.Process(
                 target=self._run_subprocess,
                 args=(command, cwd, self.env, result_dir),
+                kwargs={"measure_cpu": True} if measure_cpu else {},
                 daemon=True,
             )
             worker.start()
@@ -219,7 +252,18 @@ class SubprocessRunner:
                 result_dir, command, stdout_cap_bytes=stdout_cap_bytes,
             )
             if worker_result is not None:
+                if measure_cpu:
+                    cpu_path = result_dir / _RESULT_CPU_FILE
+                    user = sys_t = None
+                    if cpu_path.exists():
+                        user, sys_t = (float(x) for x in cpu_path.read_text().split())
+                    worker_result.cpu_user_s = user
+                    worker_result.cpu_sys_s = sys_t
                 return worker_result
+            if self.raise_infra:
+                msg = (f"command {' '.join(command)} produced no result (worker exit code "
+                       f"{worker.exitcode}; returncode.txt missing)")
+                raise DriverInfraError(msg)
             logger.error(
                 "Command %s produced no result (worker exited with code %s)",
                 " ".join(command),
@@ -258,6 +302,8 @@ class SubprocessRunner:
         cwd: Path,
         env: dict,
         result_dir: Path,
+        *,
+        measure_cpu: bool = False,
     ) -> None:
         """Run a subprocess and write results to result_dir (worker process target).
 
@@ -281,6 +327,11 @@ class SubprocessRunner:
                     stderr=err_f,
                 )
             returncode = proc.returncode
+            if measure_cpu:  # this worker's only waited-for child is the command
+                usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+                (result_dir / _RESULT_CPU_FILE).write_text(
+                    f"{usage.ru_utime} {usage.ru_stime}", encoding="utf-8",
+                )
             with returncode_path.open("w", encoding="utf-8") as f:
                 f.write(str(returncode))
         except Exception as exc:  # pylint: disable=broad-except # noqa: BLE001

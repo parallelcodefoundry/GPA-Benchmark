@@ -1,0 +1,8 @@
+Round-2 red-team kernels (2026-09-24, $SCRATCH/appeb-port/gpa-g1/verify2/rt{1,2}-<app>/kernels/).
+evasion/<app>/*.cu : attacks that evaded or targeted the round-1 gate (token pasting, alias macros,
+                     fopen64, ::open, API macro hooks, reserved names, ctor file access) -> the
+                     fix-round-2 gate (raw + preprocessed, F3) must FAIL each one.
+legit/<app>/*.cu   : false-positive probes (launch bounds, #pragma unroll, HIP_CHECK/BLOCK macros,
+                     templates, extern __shared__, __builtin_amdgcn_*, device helpers, new kernels)
+                     -> the gate must PASS each one.
+tests/test_fix_round2.py asserts both.

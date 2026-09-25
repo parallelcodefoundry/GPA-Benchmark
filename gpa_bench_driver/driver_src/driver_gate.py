@@ -18,19 +18,38 @@ c) definitions of functions or kernels whose names start with ``__`` (reserved n
 
 Comments are ignored (they are stripped before matching); string literals are checked by rule b
 only. Used by the driver (every hip swap) and by APPEB's gpa_test and runner.
+
+Fix round 2 (F3): after this raw-text pass (clear messages), the gate runs the app's own
+preprocessor (``hipcc -E --cuda-host-only`` with the yaml ``gate_preprocess`` translation unit
+and flags) on the pristine and the candidate kernel file and applies the rules to the EXPANDED
+tokens that the line markers attribute to the kernel file: forbidden call names with any
+qualification (``::open(``, ``fopen64``), definitions of ``__`` names built by token pasting or
+aliases, and new macros named like an identifier of the other sources or a name declared or
+defined in the included headers (``#define HIP_CHECK`` etc. stay allowed).
+
+Documented residual (F9, not blocked): a namespace-scope static object whose constructor runs
+host code before main. Everything such a constructor could use to cheat (file, environment,
+process, thread access, macro hooks, reserved names) is rejected by the rules above, and the
+program's inputs are unknown at static-initialization time.
 """
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from gpa_bench_driver.driver_src.driver_utils import DriverInfraError, detect_rocm_path, head_tail
+
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".cu", ".cuh", ".h", ".hh", ".hpp", ".hip"}
 
 # a) API names whose (re)definition as a macro is refused
-_API_NAME_RE = re.compile(r"^(hip|cuda|__hip|__cuda|HIP|CUDA|rocm|hsa_)")
+_API_NAME_RE = re.compile(r"^(hip|cuda|__hip|__cuda|hsa_)")
 _API_NAMES = frozenset({
     # printf family / stdio
     "printf", "fprintf", "sprintf", "snprintf", "vprintf", "vfprintf", "vsprintf", "vsnprintf",
@@ -112,6 +131,8 @@ class GateResult:
     ok: bool
     violations: list[str] = field(default_factory=list)
     kernel_file: str = ""
+    preprocessed: bool = False
+    notes: list[str] = field(default_factory=list)
 
     def message(self) -> str:
         """Agent-facing explanation ('' when the file passed)."""
@@ -260,8 +281,195 @@ def other_source_identifiers(app: dict, gpa_root: Path) -> frozenset[str]:
     return frozenset(idents)
 
 
+# ------------------------------------------------------------------ preprocessed pass (F3)
+
+# names that must not be called/used in the kernel file after macro expansion, any qualification
+_FORBIDDEN_CALLS = frozenset({
+    "fopen", "fopen64", "freopen", "freopen64", "fdopen", "open", "open64", "openat",
+    "openat64", "creat", "creat64", "read", "write", "pread", "pread64", "pwrite", "pwrite64",
+    "readv", "writev", "mmap", "mmap64", "unlink", "unlinkat", "remove", "rename", "renameat",
+    "renameat2", "system", "popen", "execl", "execlp", "execle", "execv", "execvp", "execve",
+    "execvpe", "fork", "vfork", "clone", "posix_spawn", "posix_spawnp", "getenv",
+    "secure_getenv", "setenv", "unsetenv", "putenv", "clearenv", "dlopen", "dlsym", "dlmopen",
+    "pthread_create", "atexit", "at_quick_exit", "on_exit", "syscall", "ptrace", "kill",
+    "raise", "signal", "sigaction",
+})
+_FORBIDDEN_NAMES = frozenset({"environ", "__environ", "ifstream", "ofstream", "fstream",
+                              "filebuf", "filesystem", "jthread"})
+_CALL_RE = re.compile(r"(?<![\w.])(?<!->)([A-Za-z_]\w*)\s*\(")
+_STD_THREAD_RE = re.compile(r"\bstd\s*::\s*(thread|async)\b")
+_ATTR_CTOR_RE = re.compile(r"__attribute__\s*\(\(\s*[^)]*\b(constructor|destructor)\b")
+_LINE_MARKER_RE = re.compile(r'^#\s*(\d+)\s+"((?:[^"\\]|\\.)*)"')
+_DECL_AFTER_KW_RE = re.compile(r"\b(?:struct|class|union|enum|typedef|using)\s+(?:class\s+)?([A-Za-z_]\w*)")
+_TYPEDEF_NAME_RE = re.compile(r"\btypedef\b[^;]*?\b([A-Za-z_]\w*)\s*(?:\[[^\]]*\])?\s*;")
+_DEFINE_NAME_RE = re.compile(r"^#define\s+([A-Za-z_]\w*)", re.MULTILINE)
+
+_PP_CACHE: dict[tuple, tuple] = {}
+
+
+def _hipcc(rocm_path: Path | None) -> Path:
+    hipcc = Path(rocm_path or detect_rocm_path()) / "bin" / "hipcc"
+    if not hipcc.exists():
+        found = shutil.which("hipcc")
+        if not found:
+            msg = f"the kernel gate needs hipcc (not found at {hipcc} or on PATH)"
+            raise DriverInfraError(msg)
+        hipcc = Path(found)
+    return hipcc
+
+
+def _pp_spec(app: dict) -> tuple[str, list[str]]:
+    spec = app.get("gate_preprocess") or {}
+    tu = spec.get("tu") or Path(str(app["kernel_file"])).relative_to(str(app["path"])).as_posix()
+    flags = str(spec.get("flags", "-x hip")).split()
+    return tu, flags
+
+
+def _run_pp(app: dict, gpa_root: Path, kernel_text: str | None, hipcc: Path,
+            extra: list[str]) -> subprocess.CompletedProcess:
+    """Preprocess the app's TU in a scratch copy of the app dir with the kernel file replaced."""
+    app_dir = Path(gpa_root) / str(app["path"])
+    kernel_rel = Path(str(app["kernel_file"])).relative_to(str(app["path"]))
+    tu, flags = _pp_spec(app)
+    with tempfile.TemporaryDirectory(prefix="gpa_gate_") as tmp:
+        work = Path(tmp) / "app"
+        shutil.copytree(app_dir, work, symlinks=True,
+                        ignore=shutil.ignore_patterns("*.o", ".rocprofv3", ".frontier_build.log"))
+        if kernel_text is not None:
+            (work / kernel_rel).write_text(kernel_text, encoding="utf-8")
+        cmd = [str(hipcc), "-E", "--cuda-host-only", *flags, "--offload-arch=gfx90a", *extra, tu]
+        proc = subprocess.run(cmd, cwd=work, capture_output=True, text=True,  # noqa: S603
+                              check=False, timeout=300)
+        proc.kernel_abs = os.path.realpath(work / kernel_rel)  # type: ignore[attr-defined]
+        proc.work = str(work)  # type: ignore[attr-defined]
+        if proc.returncode == 0:
+            # resolve marker paths while the scratch copy still exists
+            proc.regions = _split_regions(proc.stdout, work, proc.kernel_abs)  # type: ignore[attr-defined]
+        return proc
+
+
+def _split_regions(text: str, work: Path, kernel_abs: str) -> tuple[str, str]:
+    """(kernel-file lines, all other lines) of preprocessor output, by line markers."""
+    kernel_lines: list[str] = []
+    other_lines: list[str] = []
+    in_kernel = False
+    cache: dict[str, bool] = {}
+    for line in text.splitlines():
+        m = _LINE_MARKER_RE.match(line)
+        if m:
+            name = m.group(2)
+            if name not in cache:
+                path = name if os.path.isabs(name) else os.path.join(work, name)
+                cache[name] = os.path.realpath(path) == kernel_abs
+            in_kernel = cache[name]
+            continue
+        (kernel_lines if in_kernel else other_lines).append(line)
+    return "\n".join(kernel_lines), "\n".join(other_lines)
+
+
+def _declared_names(app: dict, gpa_root: Path, hipcc: Path) -> frozenset[str]:
+    """Names declared or #defined outside the kernel file (headers + the other TU sources)."""
+    key = ("declared", str(gpa_root), str(app["path"]), str(app["kernel_file"]), str(hipcc))
+    if key in _PP_CACHE:
+        return _PP_CACHE[key][0]
+    empty = _run_pp(app, gpa_root, "", hipcc, [])
+    macros = _run_pp(app, gpa_root, "", hipcc, ["-dM"])
+    if empty.returncode != 0 or macros.returncode != 0:
+        msg = ("the kernel gate could not preprocess the app's sources: "
+               f"{head_tail(empty.stderr or macros.stderr)}")
+        raise DriverInfraError(msg)
+    _, other = empty.regions  # type: ignore[attr-defined]
+    code, _, _ = _lex(other)
+    names = {m.group(1) for m in _CALL_RE.finditer(code)}
+    names |= {m.group(1) for m in _DECL_AFTER_KW_RE.finditer(code)}
+    names |= {m.group(1) for m in _TYPEDEF_NAME_RE.finditer(code)}
+    names |= set(_DEFINE_NAME_RE.findall(macros.stdout))
+    result = frozenset(names)
+    _PP_CACHE[key] = (result,)
+    return result
+
+
+def _expanded_features(kernel_region: str) -> Counter:
+    code, literals, _ = _lex(kernel_region)
+    feats: Counter = Counter()
+    for m in _CALL_RE.finditer(code):
+        if m.group(1) in _FORBIDDEN_CALLS:
+            feats[("xcall", m.group(1))] += 1
+    for name in _IDENT_RE.findall(code):
+        if name in _FORBIDDEN_NAMES:
+            feats[("xname", name)] += 1
+    feats[("xname", "std::thread")] += len(_STD_THREAD_RE.findall(code))
+    feats[("xname", "__attribute__((constructor/destructor))")] += len(_ATTR_CTOR_RE.findall(code))
+    for lit in literals:
+        for part in _FORBIDDEN_LITERAL_PARTS:
+            if part in lit:
+                feats[("xliteral", part)] += 1
+    for name in _reserved_definitions(code):
+        feats[("xreserved", name)] += 1
+    return +feats
+
+
+def _expanded_region(app: dict, gpa_root: Path, text: str, hipcc: Path) -> str | None:
+    proc = _run_pp(app, gpa_root, text, hipcc, [])
+    if proc.returncode != 0:
+        return None
+    return proc.regions[0]  # type: ignore[attr-defined]
+
+
+def _describe_expanded(feat: tuple, extra: int) -> str:
+    times = "" if extra == 1 else f" ({extra} more than the original)"
+    kind, name = feat
+    if kind == "xcall":
+        return (f"call of '{name}'{times} after macro expansion: file, process, environment, "
+                "thread or dynamic-loading access is not allowed in the kernel file")
+    if kind == "xname":
+        return (f"'{name}'{times} after macro expansion: file, process, environment or thread "
+                "access is not allowed in the kernel file")
+    if kind == "xliteral":
+        return (f"string literal containing '{name}'{times} after macro expansion: references "
+                "to profiler, reference-output or system paths are not allowed")
+    return (f"definition of '{name}'{times} after macro expansion (token pasting or an alias "
+            "macro): names starting with '__' are reserved and may not be defined")
+
+
+def _preprocessed_violations(app: dict, candidate: str, pristine: str, gpa_root: Path,
+                             rocm_path: Path | None, notes: list[str]) -> list[str]:
+    hipcc = _hipcc(rocm_path)
+    pkey = ("pristine", str(gpa_root), str(app["path"]), str(app["kernel_file"]), str(hipcc),
+            hash(pristine))
+    if pkey not in _PP_CACHE:
+        region = _expanded_region(app, gpa_root, pristine, hipcc)
+        if region is None:
+            msg = f"the kernel gate could not preprocess the pristine {app['kernel_file']}"
+            raise DriverInfraError(msg)
+        _PP_CACHE[pkey] = (_expanded_features(region),)
+    base = _PP_CACHE[pkey][0]
+    proc = _run_pp(app, gpa_root, candidate, hipcc, [])
+    if proc.returncode != 0:
+        return [("the kernel file could not be preprocessed with the app's compiler flags, so it "
+                 f"cannot be checked (fix the compile error first): {head_tail(proc.stderr, 600, 600)}")]
+    cand = _expanded_features(proc.regions[0])  # type: ignore[attr-defined]
+    violations = [_describe_expanded(f, n - base.get(f, 0))
+                  for f, n in sorted(cand.items(), key=lambda kv: repr(kv[0]))
+                  if n > base.get(f, 0)]
+    # (a) new macros named like a declared/defined name of the headers or other sources
+    declared = _declared_names(app, gpa_root, hipcc)
+    raw_code, _, _ = _lex(candidate)
+    pristine_code, _, _ = _lex(pristine)
+    cand_macros = Counter(m.group(2) for m in _DIRECTIVE_RE.finditer(raw_code))
+    base_macros = Counter(m.group(2) for m in _DIRECTIVE_RE.finditer(pristine_code))
+    for name, n in sorted(cand_macros.items()):
+        if n > base_macros.get(name, 0) and name in declared:
+            violations.append(
+                f"#define/#undef of '{name}': it is declared or defined by the included headers "
+                "or the app's other sources; redefining it changes code outside the kernel")
+    notes.append("preprocessed with " + " ".join([hipcc.name, *_pp_spec(app)[1], _pp_spec(app)[0]]))
+    return violations
+
+
 def check_kernel_source(app: dict, candidate: str, *, gpa_root: Path,
-                        pristine: str | None = None) -> GateResult:
+                        pristine: str | None = None, preprocess: bool = True,
+                        rocm_path: Path | None = None) -> GateResult:
     """Gate a candidate kernel file (its full text) against the app's pristine kernel file.
 
     Args:
@@ -283,11 +491,17 @@ def check_kernel_source(app: dict, candidate: str, *, gpa_root: Path,
     violations = [_describe(feat, count - base.get(feat, 0))
                   for feat, count in sorted(cand.items(), key=lambda kv: repr(kv[0]))
                   if count > base.get(feat, 0)]
+    notes: list[str] = []
+    if preprocess:
+        for v in _preprocessed_violations(app, candidate, pristine, gpa_root, rocm_path, notes):
+            if v not in violations:
+                violations.append(v)
     return GateResult(ok=not violations, violations=violations,
-                      kernel_file=Path(kernel_rel).name)
+                      kernel_file=Path(kernel_rel).name, preprocessed=preprocess, notes=notes)
 
 
-def check_kernel_file(app: dict, candidate_path: Path, *, gpa_root: Path) -> GateResult:
+def check_kernel_file(app: dict, candidate_path: Path, *, gpa_root: Path,
+                      preprocess: bool = True) -> GateResult:
     """:func:`check_kernel_source` for a file on disk."""
     text = Path(candidate_path).read_text(encoding="utf-8", errors="replace")
-    return check_kernel_source(app, text, gpa_root=gpa_root)
+    return check_kernel_source(app, text, gpa_root=gpa_root, preprocess=preprocess)
