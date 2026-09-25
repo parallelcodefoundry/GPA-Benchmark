@@ -1,0 +1,17 @@
+Kernel files that the G1 verification workflow (2026-09-24) got CREDITED, or that
+exposed validation gaps, on the pre-fix-round-1 Frontier harness. Source:
+$SCRATCH/appeb-port/gpa-g1/verify/{verify-b+tree,check-backprop,verify-backprop}/kernels/.
+Each replaces the app's kernel file (b+tree: kernel/kernel_gpu_cuda_2.cu,
+backprop: backprop_cuda_kernel.cu). tests/test_fix_round1.py asserts the fix that closes each.
+  b+tree/G1_rocclr_prefix      work in a kernel named __amd_rocclr_* + hipLaunchKernelGGL hook  -> gate (a, c), R1
+  b+tree/G2_copy_reference     empty target + destructor copying ./ref-output.txt             -> gate (b), R5
+  b+tree/G3_profiler_aware     full work only when no ROCP*/ROCPROF* env var                  -> gate (a, b), R4
+  b+tree/G4_host_offload       #undef/#define hipLaunchKernelGGL, CPU does the work             -> gate (a)
+  b+tree/V3_bug_lastquery      genuine bug in the last query (control: correctness must fail)  -> check
+  backprop/G1_host_offload_macro  #define hipDeviceSynchronize() -> CPU forward pass           -> gate (a)
+  backprop/G2_new_kernel_macro    same hook launching a new kernel                             -> gate (a)
+  backprop/G3_validated_column_only  computes only the one sum the old check read             -> R10 (all 16 sums)
+  backprop/G4_hardcoded_output    #define printf(...) printing the reference sums              -> gate (a)
+  backprop/C3b_scale_not_last     wrong sums 1..15, last one right                             -> R10
+  backprop/V3c_perturb_first_only wrong first sum only                                         -> R10
+  xsbench/R2_drop_warmup       skips the warmup launch (1 of 2 launches): half the summed time -> R2 launch count

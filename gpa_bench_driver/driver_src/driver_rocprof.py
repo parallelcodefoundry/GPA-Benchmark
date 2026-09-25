@@ -5,30 +5,37 @@ once under ``rocprofv3 --kernel-trace --output-format csv`` and reduces the kern
 dict (stored in ``DriverPassResult.nsys_data`` so existing consumers keep working):
 
     {
-        "exec_time": int,          # ns; == target_ns (scored time WITHOUT the new-kernel term)
-        "target_ns": int,          # sum of the durations of EVERY dispatch of the target kernel
-        "target_dispatches": int,  # number of dispatches of the target kernel
-        "kernels": {name: int},    # total ns per demangled kernel name, all non-runtime kernels
-        "wall_s": float,           # wall time of the profiled run (seconds)
+        "exec_time": int,           # ns; == target_ns
+        "target_ns": int,           # sum of the durations of EVERY dispatch of the target kernel
+        "target_dispatches": int,   # number of dispatches of the target kernel
+        "kernels": {name: int},     # total ns per demangled kernel name, ALL kernels
+        "kernel_dispatches": {name: int},
+        "wall_s": float,            # wall time of the profiled run (seconds)
         "backend": "rocprofv3",
+        "valid": bool | None,       # R4: this run's output passed the app's check (None: unchecked)
+        "validation_output": str | None,
     }
 
-Dispatch duration = End_Timestamp - Start_Timestamp (ns). Runtime-internal kernels (names that
-start with ``__amd_rocclr_``: copy/fill blits) are ignored everywhere. The target kernel is every
-kernel whose demangled name matches the app's ``score_regex`` (re.search, anchored in the YAML).
+Dispatch duration = End_Timestamp - Start_Timestamp (ns). No kernel is excluded by name (GPA-G1
+fix round 1, R1: runtime-looking names such as ``__amd_rocclr_*`` are ordinary kernels). The
+target kernel is every kernel whose demangled name matches the app's ``score_regex`` (re.search,
+anchored in the YAML).
 
-The Frontier scoring rule (new/renamed kernels count as target, integrity guards) needs the
-baseline pass, so consumers compute it from ``kernels``; see ``scored_time_ns`` (pass the
-app's ``score_regex``) and ``integrity_guards`` below for the reference implementation.
+The Frontier scoring rule needs the baseline pass, so consumers compute it from the samples with
+:func:`score_frontier` (R1 scored time incl. the other-kernel charge, R2 launch count, R3 G-wall,
+R11 fail-closed input checks).
 """
 
 from __future__ import annotations
 
 import csv
 import logging
+import math
 import re
 import shutil
+import subprocess
 import time
+from dataclasses import dataclass
 from collections.abc import Callable, Hashable, Iterable
 from pathlib import Path
 from typing import Any
@@ -74,7 +81,10 @@ def get_score_regex(app: dict) -> str:
 
 
 def is_runtime_kernel(name: str) -> bool:
-    """True for ROCm runtime-internal kernels (copy/fill blits), which are never scored."""
+    """True for names of ROCm runtime-internal kernels (copy/fill blits).
+
+    Informational only: since fix round 1 (R1) no kernel is excluded from scoring by its name.
+    """
     return name.startswith(RUNTIME_KERNEL_PREFIX)
 
 
@@ -121,17 +131,18 @@ def summarize_kernel_trace(
         score_regex: regex identifying the target kernel (re.search on the demangled name)
 
     Returns:
-        dict with exec_time, target_ns, target_dispatches, kernels
+        dict with exec_time, target_ns, target_dispatches, kernels, kernel_dispatches
+        (every kernel counts; nothing is dropped by name)
 
     """
     pattern = re.compile(score_regex)
     kernels: dict[str, int] = {}
+    dispatches: dict[str, int] = {}
     target_ns = 0
     target_dispatches = 0
     for name, duration in rows:
-        if is_runtime_kernel(name):
-            continue
         kernels[name] = kernels.get(name, 0) + duration
+        dispatches[name] = dispatches.get(name, 0) + 1
         if pattern.search(name):
             target_ns += duration
             target_dispatches += 1
@@ -140,6 +151,7 @@ def summarize_kernel_trace(
         "target_ns": target_ns,
         "target_dispatches": target_dispatches,
         "kernels": kernels,
+        "kernel_dispatches": dispatches,
     }
 
 
@@ -181,12 +193,18 @@ def rocprof_time_app(
     *,
     rocm_path: Path | None = None,
     retain_profiles: bool = False,
+    validate: Callable[[subprocess.CompletedProcess, Path], tuple[bool, str | None]]
+    | None = None,
 ) -> list[dict[Hashable, Any]] | None:
     """Time the app with rocprofv3 kernel tracing, one run per sample.
 
+    Before every sample the app's test_output file is deleted; after it, ``validate`` (if given)
+    checks that sample's output (R4), and the result lands in the sample's ``valid`` /
+    ``validation_output``. The full stdout is kept (the check may need it).
+
     Args:
         app: Application configuration dictionary (needs run_command and score_regex or
-            kernel_name; honours stdout_cap_bytes)
+            kernel_name)
         runner: Configured subprocess runner (its env pins the GPU)
         temp_dir: Temporary directory holding the working copy; traces go to temp_dir/profiles
         num_samples: Number of profiled runs
@@ -194,6 +212,7 @@ def rocprof_time_app(
         pbar: Progress bar callback (advanced twice per sample, like nsys profile + post)
         rocm_path: ROCm install whose bin/rocprofv3 is used (else rocprofv3 from PATH)
         retain_profiles: Keep the rocprofv3 output directories after parsing
+        validate: (completed process, run dir) -> (ok, message) for the sample's output
 
     Returns:
         One timing dict per sample, or None when the baseline pass has no dispatch of the
@@ -206,20 +225,17 @@ def rocprof_time_app(
     profile_dir = setup_profile_dir(temp_dir)
     run_path = get_run_path(app, temp_dir)
     score_regex = get_score_regex(app)
-    stdout_cap = app.get("stdout_cap_bytes")
     samples: list[dict[Hashable, Any]] = []
 
     for i in range(num_samples):
         outdir = profile_dir / _profile_dir_name(app, swap_config, i)
         if outdir.exists():
             shutil.rmtree(outdir)
+        if "test_output" in app:  # never let a previous run's output validate this one
+            (run_path / Path(str(app["test_output"])).name).unlink(missing_ok=True)
         command = rocprofv3_command(rocm_path, outdir, app["run_command"].split())
         start = time.perf_counter()
-        result = runner.run(
-            command,
-            run_path,
-            stdout_cap_bytes=int(stdout_cap) if stdout_cap is not None else None,
-        )
+        result = runner.run(command, run_path)
         wall_s = time.perf_counter() - start
 
         if result.returncode != 0:
@@ -237,6 +253,12 @@ def rocprof_time_app(
         sample = summarize_kernel_trace(read_kernel_trace(trace_files), score_regex)
         sample["wall_s"] = wall_s
         sample["backend"] = BACKEND_NAME
+        sample["valid"] = None
+        sample["validation_output"] = None
+        if validate is not None:
+            ok, message = validate(result, run_path)
+            sample["valid"] = bool(ok)
+            sample["validation_output"] = None if ok else message
 
         if not retain_profiles:
             shutil.rmtree(outdir, ignore_errors=True)
@@ -263,7 +285,209 @@ def rocprof_time_app(
 
 
 # ---------------------------------------------------------------------------------------------
-# Reference implementation of the Frontier scoring rule (consumers: gpa_test, the APPEB runner).
+# The Frontier scoring rule (GPA-G1 fix round 1: R1, R2, R3, R11). Consumers: gpa_test, runner.
+# ---------------------------------------------------------------------------------------------
+
+
+class ScoringError(ValueError):
+    """The samples cannot be scored (fail closed, R11): empty or mismatched lists, bad samples."""
+
+
+_REQUIRED_SAMPLE_KEYS = ("kernels", "target_ns", "target_dispatches", "wall_s")
+
+
+def _check_samples(samples: list[dict], label: str) -> None:
+    if not samples:
+        msg = f"no {label} samples to score"
+        raise ScoringError(msg)
+    for i, sample in enumerate(samples):
+        if not isinstance(sample, dict):
+            msg = f"{label} sample {i} is not a dict"
+            raise ScoringError(msg)
+        for key in _REQUIRED_SAMPLE_KEYS:
+            if sample.get(key) is None:
+                msg = f"{label} sample {i} has no {key!r}"
+                raise ScoringError(msg)
+        wall = float(sample["wall_s"])
+        if not math.isfinite(wall) or wall < 0:
+            msg = f"{label} sample {i} has an invalid wall_s {sample['wall_s']!r}"
+            raise ScoringError(msg)
+        if not isinstance(sample["kernels"], dict):
+            msg = f"{label} sample {i}: 'kernels' is not a dict"
+            raise ScoringError(msg)
+
+
+@dataclass(frozen=True)
+class BaselineSummary:
+    """What scoring needs from the baseline (pristine) samples."""
+
+    score_regex: str
+    known_names: frozenset[str]
+    other_names: frozenset[str]
+    other_mean_ns: float
+    target_dispatches: int | None
+    wall_mean_s: float
+
+
+def summarize_baseline(baseline_samples: list[dict], score_regex: str) -> BaselineSummary:
+    """Summarize the baseline samples (R1): known/other kernel names, mean other-kernel time.
+
+    Raises:
+        ScoringError: empty list or malformed samples
+
+    """
+    _check_samples(baseline_samples, "baseline")
+    pattern = re.compile(score_regex)
+    known = frozenset(name for s in baseline_samples for name in s["kernels"])
+    other = frozenset(name for name in known if not pattern.search(name))
+    other_sums = [sum(ns for name, ns in s["kernels"].items() if name in other)
+                  for s in baseline_samples]
+    counts = {int(s["target_dispatches"]) for s in baseline_samples}
+    return BaselineSummary(
+        score_regex=score_regex,
+        known_names=known,
+        other_names=other,
+        other_mean_ns=sum(other_sums) / len(other_sums),
+        target_dispatches=counts.pop() if len(counts) == 1 else None,
+        wall_mean_s=sum(float(s["wall_s"]) for s in baseline_samples) / len(baseline_samples),
+    )
+
+
+def score_terms(sample: dict, base: BaselineSummary) -> dict[str, Any]:
+    """R1 scored time of one run and its terms.
+
+    scored_ns = target_ns (every dispatch matching score_regex)
+              + new_ns (kernels absent from the baseline and not matching score_regex)
+              + other_charge_ns = max(0, other_ns - baseline mean other_ns), where other_ns is
+                the time of the baseline-known non-target kernels in this run.
+    """
+    pattern = re.compile(base.score_regex)
+    new_kernels = {name: int(ns) for name, ns in sample["kernels"].items()
+                   if name not in base.known_names and not pattern.search(name)}
+    other_ns = sum(int(ns) for name, ns in sample["kernels"].items() if name in base.other_names)
+    charge = max(0.0, other_ns - base.other_mean_ns)
+    new_ns = sum(new_kernels.values())
+    target_ns = int(sample["target_ns"])
+    return {
+        "target_ns": target_ns,
+        "new_ns": new_ns,
+        "other_ns": other_ns,
+        "other_charge_ns": charge,
+        "scored_ns": target_ns + new_ns + charge,
+        "new_kernels": new_kernels,
+    }
+
+
+def _mean(values: list[float]) -> float:
+    return sum(values) / len(values)
+
+
+def score_frontier(
+    baseline_samples: list[dict],
+    optimized_samples: list[dict],
+    score_regex: str,
+    *,
+    fixed_target_dispatches: bool = False,
+) -> dict[str, Any]:
+    """Apply the Frontier GPA scoring rule (fix round 1) to baseline and optimized samples.
+
+    R1 scored time per run (see :func:`score_terms`), speedup = mean(baseline scored) /
+    mean(optimized scored). Failures (no speedup credited): R2 ``launch-count`` (only with
+    fixed_target_dispatches: every optimized run must launch the target exactly as often as the
+    baseline), R3 ``G-wall`` (mean optimized wall > 1.5 x mean baseline wall + 1 s), R11
+    ``G-zero`` (a mean scored time <= 0). The other-kernel increase is charged, not guarded; its
+    numbers are reported under "other".
+
+    Raises:
+        ScoringError: empty or differently sized sample lists, malformed samples, or baseline
+            runs that disagree on the target launch count when it must stay fixed
+
+    """
+    _check_samples(baseline_samples, "baseline")
+    _check_samples(optimized_samples, "optimized")
+    if len(baseline_samples) != len(optimized_samples):
+        msg = (f"{len(baseline_samples)} baseline samples but {len(optimized_samples)} optimized "
+               "samples")
+        raise ScoringError(msg)
+    base = summarize_baseline(baseline_samples, score_regex)
+    if fixed_target_dispatches and base.target_dispatches is None:
+        msg = "the baseline runs disagree on the target launch count"
+        raise ScoringError(msg)
+
+    def side(samples: list[dict]) -> dict[str, Any]:
+        terms = [score_terms(s, base) for s in samples]
+        out: dict[str, Any] = {
+            key: [t[key] for t in terms]
+            for key in ("scored_ns", "target_ns", "new_ns", "other_ns", "other_charge_ns")
+        }
+        out["target_dispatches"] = [int(s["target_dispatches"]) for s in samples]
+        out["wall_s"] = [float(s["wall_s"]) for s in samples]
+        out["mean_scored_ns"] = _mean(out["scored_ns"])
+        out["wall_mean_s"] = _mean(out["wall_s"])
+        totals: dict[str, float] = {}
+        for t in terms:
+            for name, ns in t["new_kernels"].items():
+                totals[name] = totals.get(name, 0.0) + ns
+        out["new_kernels"] = {name: v / len(samples) for name, v in totals.items()}
+        return out
+
+    b = side(baseline_samples)
+    o = side(optimized_samples)
+    b["other_mean_ns"] = base.other_mean_ns
+    failures: list[dict[str, str]] = []
+
+    launch_ok = True
+    if fixed_target_dispatches:
+        launch_ok = all(n == base.target_dispatches for n in o["target_dispatches"])
+        if not launch_ok:
+            failures.append({"code": "launch-count", "message": (
+                f"LAUNCH COUNT CHANGED: the target kernel must be launched exactly "
+                f"{base.target_dispatches} times per run (warmup + iterations, as the original); "
+                f"your runs launched it {o['target_dispatches']} times.")})
+
+    wall_limit = G_WALL_FACTOR * base.wall_mean_s + G_WALL_SLACK_S
+    wall_ok = o["wall_mean_s"] <= wall_limit
+    if not wall_ok:
+        failures.append({"code": "G-wall", "message": (
+            f"WALL TIME: your program ran {o['wall_mean_s']:.2f} s per run on average, more than "
+            f"{G_WALL_FACTOR} x the original's {base.wall_mean_s:.2f} s + {G_WALL_SLACK_S:.0f} s "
+            f"= {wall_limit:.2f} s (work moved to the CPU or to an untimed phase).")})
+
+    raw = None
+    if b["mean_scored_ns"] > 0 and o["mean_scored_ns"] > 0:
+        raw = b["mean_scored_ns"] / o["mean_scored_ns"]
+    else:
+        side_name = "original" if b["mean_scored_ns"] <= 0 else "optimized"
+        failures.append({"code": "G-zero", "message": (
+            f"NO GPU TIME: the {side_name} program's scored GPU time is zero, so no speedup can "
+            "be computed.")})
+
+    other_opt = _mean(o["other_ns"])
+    return {
+        "ok": not failures,
+        "speedup": raw if not failures else None,
+        "raw_speedup": raw,
+        "failures": failures,
+        "baseline": b,
+        "optimized": o,
+        "other": {
+            "baseline_mean_ns": base.other_mean_ns,
+            "optimized_mean_ns": other_opt,
+            "charge_mean_ns": _mean(o["other_charge_ns"]),
+            "ratio": other_opt / base.other_mean_ns if base.other_mean_ns > 0 else None,
+        },
+        "g_wall": {"baseline_s": base.wall_mean_s, "optimized_s": o["wall_mean_s"],
+                   "limit_s": wall_limit, "ok": wall_ok},
+        "launch_count": {"required": bool(fixed_target_dispatches),
+                         "baseline": base.target_dispatches,
+                         "optimized": o["target_dispatches"], "ok": launch_ok},
+        "rule": {"g_wall_factor": G_WALL_FACTOR, "g_wall_slack_s": G_WALL_SLACK_S},
+    }
+
+
+# ---------------------------------------------------------------------------------------------
+# Pre-fix-round-1 helpers, kept importable for existing callers. They are NOT the R1 rule (no
+# other-kernel charge); score with score_frontier().
 # ---------------------------------------------------------------------------------------------
 
 
@@ -272,14 +496,9 @@ def new_kernel_ns(
     baseline_kernel_names: Iterable[str],
     score_regex: str | None = None,
 ) -> int:
-    """Sum of the durations of the kernels in ``sample`` that are new relative to the baseline.
+    """Kernels of ``sample`` absent from ``baseline_kernel_names`` (and not matching score_regex).
 
-    A kernel is new if its name is absent from ``baseline_kernel_names`` and, when
-    ``score_regex`` is given, does not match it: a new name that matches the target regex
-    (e.g. a renamed or templated variant of the target) is already part of
-    ``sample["target_ns"]`` and must not be counted a second time. Callers that omit
-    ``score_regex`` must put the target-matching names into ``baseline_kernel_names``
-    themselves.
+    Superseded by :func:`score_terms` (``new_ns``).
     """
     known = set(baseline_kernel_names)
     pattern = re.compile(score_regex) if score_regex else None
@@ -295,11 +514,7 @@ def scored_time_ns(
     baseline_kernel_names: Iterable[str],
     score_regex: str | None = None,
 ) -> int:
-    """Scored time of one run: every target dispatch + every kernel not seen in the baseline.
-
-    Pass the app's ``score_regex`` so that a new name matching the target is counted once
-    (see ``new_kernel_ns``).
-    """
+    """target_ns + new_kernel_ns (no other-kernel charge). Superseded by :func:`score_terms`."""
     return int(sample["target_ns"]) + new_kernel_ns(sample, baseline_kernel_names, score_regex)
 
 
@@ -320,20 +535,19 @@ def integrity_guards(
     optimized_samples: list[dict],
     score_regex: str,
 ) -> dict[str, Any]:
-    """Evaluate the two integrity guards on sample means.
+    """Pre-fix-round-1 guards (G-other as a pass/fail guard, G-wall); superseded by score_frontier.
 
-    G-other: mean(non-target baseline kernels, optimized) <= 1.10 * mean(baseline) + 50 us.
-    G-wall:  mean(wall, optimized) <= 1.5 * mean(wall, baseline) + 1 s.
-
-    Returns:
-        dict with the measured values, limits and pass flags (``ok`` = both pass)
+    Raises:
+        ScoringError: empty sample lists (fail closed)
 
     """
-    def _mean(values: list[float]) -> float:
-        return sum(values) / len(values) if values else 0.0
+    _check_samples(baseline_samples, "baseline")
+    _check_samples(optimized_samples, "optimized")
 
-    base_other = _mean([baseline_other_ns(s, baseline_samples, score_regex) for s in baseline_samples])
-    opt_other = _mean([baseline_other_ns(s, baseline_samples, score_regex) for s in optimized_samples])
+    base_other = _mean([baseline_other_ns(s, baseline_samples, score_regex)
+                        for s in baseline_samples])
+    opt_other = _mean([baseline_other_ns(s, baseline_samples, score_regex)
+                       for s in optimized_samples])
     other_limit = G_OTHER_FACTOR * base_other + G_OTHER_SLACK_NS
     base_wall = _mean([float(s["wall_s"]) for s in baseline_samples])
     opt_wall = _mean([float(s["wall_s"]) for s in optimized_samples])

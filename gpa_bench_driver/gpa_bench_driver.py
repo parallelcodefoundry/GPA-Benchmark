@@ -70,12 +70,20 @@ from gpa_bench_driver.driver_src.driver_profiling import (
     nsys_profile_app,
     postprocess_nsys_app,
 )
+from gpa_bench_driver.driver_src.driver_check import (
+    check_output,
+    load_reference,
+    produced_output,
+    reference_from_output,
+)
+from gpa_bench_driver.driver_src.driver_gate import check_kernel_source
 from gpa_bench_driver.driver_src.driver_reporting import print_report_table, save_results
 from gpa_bench_driver.driver_src.driver_rocprof import rocprof_time_app
 from gpa_bench_driver.driver_src.driver_utils import (
     SubprocessRunner,
     SubprocessRunnerConfig,
     get_bin_path,
+    get_run_path,
 )
 from gpa_bench_driver.driver_src.driver_validation import validate_app
 
@@ -100,6 +108,7 @@ class DriverPassContext:
     temp_dir: Path
     swap_config: SwapConfig | None
     pbar: Callable[[], None] | None
+    hip_state: dict | None = None  # hip only: {"gpa_root": Path, "ref": Reference | None}
 
 
 logger = logging.getLogger("GPA-Benchmark")
@@ -413,6 +422,13 @@ def _run_rocprof_phase(
         logger.warning("Nsight Compute is not available on the hip backend; skipping it.")
     if not ctx.config.nsys:
         return
+    state = ctx.hip_state or {}
+
+    def _validate_sample(run_result: CompletedProcess, run_dir: Path) -> tuple[bool, str | None]:
+        return check_output(
+            ctx.app, produced_output(ctx.app, run_result.stdout, run_dir), state["ref"],
+        )
+
     data = rocprof_time_app(
         ctx.app,
         runner,
@@ -422,10 +438,25 @@ def _run_rocprof_phase(
         pbar=ctx.pbar,
         rocm_path=getattr(ctx.config, "rocm_path", None),
         retain_profiles=ctx.config.retain_nsys_profiles,
+        validate=_validate_sample if state.get("ref") is not None else None,
     )
     result.nsys_profile = data is not None
     result.nsys_post = data is not None
     result.nsys_data = data
+    # R4: every timed run's output is checked; one failing run fails the pass
+    bad = [(i, s) for i, s in enumerate(data or []) if s.get("valid") is False]
+    if bad:
+        i, sample = bad[0]
+        result.validate = False
+        result.validation_output = (
+            f"TIMED RUN {i}: {sample.get('validation_output')}"
+            + (f" ({len(bad)} of {len(data)} timed runs failed)" if len(bad) > 1 else "")
+        )
+        if ctx.swap_config is None:
+            msg = f"Validate failed for baseline timed run ({ctx.app['name']}): " + (
+                result.validation_output
+            )
+            raise BaselineError(msg)
 
 
 def _run_profiling_phase(
@@ -485,6 +516,61 @@ def _run_nsys_post_phase(
         )
 
 
+def _run_hip_validate_phase(
+    ctx: DriverPassContext,
+    result: DriverPassResult,
+    run_result: CompletedProcess,
+) -> bool:
+    """hip: check the run's output against the harness-side reference (driver_check).
+
+    With reference_from_baseline the baseline pass's output defines the reference instead.
+    """
+    state = ctx.hip_state if ctx.hip_state is not None else {}
+    produced = produced_output(ctx.app, run_result.stdout, get_run_path(ctx.app, ctx.temp_dir))
+    if ctx.swap_config is None and getattr(ctx.config, "reference_from_baseline", False):
+        try:
+            state["ref"] = reference_from_output(ctx.app, produced)
+            ok, message = True, None
+        except ValueError as exc:
+            ok, message = False, str(exc)
+    else:
+        if state.get("ref") is None:
+            state["ref"] = load_reference(ctx.app, state["gpa_root"])
+        ok, message = check_output(ctx.app, produced, state["ref"])
+    result.validate = ok
+    if not ok:
+        result.validation_output = message
+    if ctx.pbar is not None:
+        ctx.pbar()
+    return ok
+
+
+def _gate_swap(ctx: DriverPassContext, result: DriverPassResult) -> bool:
+    """hip: run the kernel-file gate on every swapped file (after swap-in, before building)."""
+    state = ctx.hip_state or {}
+    gpa_root = state.get("gpa_root")
+    if ctx.swap_config is None or gpa_root is None:
+        return True
+    violations: list[str] = []
+    messages: list[str] = []
+    for file_swap in ctx.swap_config.file_swaps:
+        rel = str(file_swap.swap_file_dest_name)
+        candidate = (ctx.temp_dir / rel).read_text(encoding="utf-8", errors="replace")
+        gate = check_kernel_source({**ctx.app, "kernel_file": rel}, candidate, gpa_root=gpa_root)
+        if not gate.ok:
+            violations.extend(gate.violations)
+            messages.append(gate.message())
+    if not violations:
+        return True
+    result.gate_violations = violations
+    result.build = False
+    result.build_stdout = ""
+    result.build_stderr = "\n".join(messages)
+    if ctx.pbar is not None:
+        ctx.pbar()
+    return False
+
+
 def run_driver_pass(ctx: DriverPassContext) -> DriverPassResult:
     """Run a single driver pass for an application.
 
@@ -510,6 +596,9 @@ def run_driver_pass(ctx: DriverPassContext) -> DriverPassResult:
         suppress_command_stdout=ctx.config.suppress_command_stdout,
         use_srun=ctx.config.srun,
     )
+    hip = _backend(ctx.config) == "hip"
+    if hip:
+        runner_config.stdin_devnull = True  # R4: apps never read the driver's stdin
     runner = SubprocessRunner(env=ctx.env, config=runner_config)
 
     if not ctx.config.postprocess_nsys:
@@ -520,6 +609,8 @@ def run_driver_pass(ctx: DriverPassContext) -> DriverPassResult:
                 detect_regions=ctx.config.detect_regions,
             )
         try:
+            if hip and getattr(ctx.config, "kernel_gate", True) and not _gate_swap(ctx, result):
+                return _handle_early_exit(ctx, result, "build")
             if not _run_build_phase(ctx, result, runner):
                 return _handle_early_exit(ctx, result, "build")
             if ctx.config.build_only:
@@ -529,7 +620,8 @@ def run_driver_pass(ctx: DriverPassContext) -> DriverPassResult:
             run_ok, run_result = _run_run_phase(ctx, result, runner)
             if not run_ok:
                 return _handle_early_exit(ctx, result, "run")
-            if not _run_validate_phase(ctx, result, run_result):
+            validate_phase = _run_hip_validate_phase if hip else _run_validate_phase
+            if not validate_phase(ctx, result, run_result):
                 return _handle_early_exit(ctx, result, "validate")
             _run_profiling_phase(ctx, result, runner)
         finally:
@@ -627,6 +719,13 @@ def run_all(
 
                 logger.debug("Driver is running %d passes for %s", len(driver_passes), app_name)
 
+                # hip: per-app state shared by the passes (the reference to check against)
+                hip_state = (
+                    {"gpa_root": Path(__file__).parent.parent, "ref": None}
+                    if _backend(config) == "hip"
+                    else None
+                )
+
                 # Run each pass
                 for pass_num, driver_pass in enumerate(driver_passes):
                     pass_ctx = DriverPassContext(
@@ -636,6 +735,7 @@ def run_all(
                         temp_dir=temp_dir,
                         swap_config=driver_pass,
                         pbar=pbar,
+                        hip_state=hip_state,
                     )
                     pass_results = run_driver_pass(pass_ctx)
                     is_swap = driver_pass is not None

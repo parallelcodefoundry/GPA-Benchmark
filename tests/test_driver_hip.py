@@ -75,15 +75,18 @@ def test_read_kernel_trace_rejects_non_trace(tmp_path):
         read_kernel_trace([bad])
 
 
-def test_summarize_anchored_regex_sums_every_dispatch_and_excludes_runtime():
+def test_summarize_anchored_regex_sums_every_dispatch_keeps_runtime_kernels():
     rows = read_kernel_trace([FIXTURES / "rocm7_bfs_kernel_trace.csv"])
     s = summarize_kernel_trace(rows, _frontier_apps()["bfs"]["score_regex"])
     # ^Kernel\( must not match Kernel2 (the substring-match bug seen in G0)
     assert s["target_ns"] == 11520 + 12160 + 15841
     assert s["exec_time"] == s["target_ns"]
     assert s["target_dispatches"] == 3
-    assert s["kernels"] == {BFS_KERNEL: 39521, BFS_KERNEL2: 13600}
-    assert not any(k.startswith("__amd_rocclr_") for k in s["kernels"])
+    # fix round 1 (R1): __amd_rocclr_* kernels are ordinary kernels
+    copy = [d for n, d in rows if n == "__amd_rocclr_copyBuffer"]
+    assert s["kernels"] == {BFS_KERNEL: 39521, BFS_KERNEL2: 13600,
+                            "__amd_rocclr_copyBuffer": sum(copy)}
+    assert s["kernel_dispatches"] == {BFS_KERNEL: 3, BFS_KERNEL2: 3, "__amd_rocclr_copyBuffer": 6}
 
 
 def test_summarize_extern_c_name_btree():
@@ -92,6 +95,7 @@ def test_summarize_extern_c_name_btree():
     assert s["target_ns"] == 62880
     assert s["target_dispatches"] == 1
     assert s["kernels"] == {"findRangeK": 62880, "findK": 66720}
+    assert s["kernel_dispatches"] == {"findRangeK": 1, "findK": 1}
 
 
 def test_summarize_xsbench_counts_warmup_dispatch():
@@ -216,9 +220,10 @@ def test_rocprof_time_app_per_sample_dict(tmp_path):
     data = rocprof_time_app(_bfs_app(), runner, tmp_path, 3, rocm_path=Path("/nonexistent"))
     assert len(data) == 3
     for d in data:
-        assert set(d) == {"exec_time", "target_ns", "target_dispatches", "kernels", "wall_s",
-                          "backend"}
+        assert set(d) == {"exec_time", "target_ns", "target_dispatches", "kernels",
+                          "kernel_dispatches", "wall_s", "backend", "valid", "validation_output"}
         assert d["exec_time"] == d["target_ns"] == 39521
+        assert d["valid"] is None  # no validate callback given
         assert d["backend"] == "rocprofv3"
         assert isinstance(d["wall_s"], float)
     cmd, cwd, cap = runner.calls[0]
@@ -230,11 +235,30 @@ def test_rocprof_time_app_per_sample_dict(tmp_path):
     assert not list((tmp_path / "profiles").glob("rocprof_*"))
 
 
-def test_rocprof_time_app_passes_stdout_cap_and_retains(tmp_path):
+def test_rocprof_time_app_keeps_full_stdout_and_retains(tmp_path):
     runner = _FakeRocprofRunner(FIXTURES / "rocm7_bfs_kernel_trace.csv")
     rocprof_time_app(_bfs_app(stdout_cap_bytes=1024), runner, tmp_path, 1, retain_profiles=True)
-    assert runner.calls[0][2] == 1024
+    assert runner.calls[0][2] is None  # timed runs are validated (R4): no cap
     assert list((tmp_path / "profiles").glob("rocprof_bfs_sample_0/*kernel_trace.csv"))
+
+
+def test_rocprof_time_app_validates_each_sample_and_removes_old_output(tmp_path):
+    run_dir = tmp_path / "rodinia" / "bfs-hip"
+    run_dir.mkdir(parents=True)
+    runner = _FakeRocprofRunner(FIXTURES / "rocm7_bfs_kernel_trace.csv")
+    seen = []
+
+    def validate(result, rd):
+        seen.append((rd, (rd / "result.txt").exists()))
+        return (len(seen) != 2, None if len(seen) != 2 else "wrong")
+
+    for _ in range(3):
+        (run_dir / "result.txt").write_text("stale")  # must be deleted before each timed run
+        break
+    data = rocprof_time_app(_bfs_app(), runner, tmp_path, 3, validate=validate)
+    assert [d["valid"] for d in data] == [True, False, True]
+    assert data[1]["validation_output"] == "wrong"
+    assert seen[0] == (run_dir, False)
 
 
 def test_rocprof_time_app_baseline_without_target_returns_none(tmp_path):
@@ -487,7 +511,7 @@ def test_frontier_yaml_apps_and_fields():
         "nw": 127, "streamcluster": 300, "xsbench": 0}
 
 
-def test_frontier_refs_manifest_covers_every_reference():
+def test_frontier_refs_manifest_covers_every_reference():  # noqa: D103
     manifest = GPA_ROOT / "frontier_refs.md5"
     listed = {line.split()[1] for line in manifest.read_text().splitlines() if line.strip()}
     for app in _frontier_apps().values():
@@ -531,7 +555,7 @@ out = {}
 for kw in ({"app": "bfs", "nsys": True}, {"app": "xsbench", "ncu": True, "no_sanitize": True},
            {"app": "all"}, {"app": "backprop", "swaps_override": {Path("backprop_cuda_kernel.cu"): "// backprop_cuda_kernel.cu\nX"}, "nsys": True}):
     cfg = DriverConfig(sm_version=80, cuda_home=Path("/fake/cuda"), temp_dir=Path("/tmp"), **kw)
-    old_keys = sorted(k for k in vars(cfg) if k not in ("gpu_backend", "offload_arch", "rocm_path", "app_overrides", "gpu_device"))
+    old_keys = sorted(k for k in vars(cfg) if k not in ("gpu_backend", "offload_arch", "rocm_path", "app_overrides", "gpu_device", "reference_from_baseline", "kernel_gate"))
     app_config, swaps, env = setup_app_config(cfg)
     key = repr(sorted((k, repr(v)) for k, v in kw.items()))
     out[key] = {

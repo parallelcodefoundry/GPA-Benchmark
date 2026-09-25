@@ -39,6 +39,8 @@ class SubprocessRunnerConfig:
         output_char_limit: Max characters logged for stdout/stderr; <= 0 to disable truncation.
         suppress_command_stdout: When True, never log stdout/stderr from commands.
         use_srun: When True, prepend srun and use srun --time for timeout.
+        stdin_devnull: When True, every command gets stdin=/dev/null (hip backend) instead of
+            inheriting the driver's stdin.
 
     """
 
@@ -48,6 +50,7 @@ class SubprocessRunnerConfig:
     output_char_limit: int = MAX_OUTPUT_CHAR_LIMIT
     suppress_command_stdout: bool = False
     use_srun: bool = False
+    stdin_devnull: bool = False
 
 
 class SubprocessRunner:
@@ -88,6 +91,7 @@ class SubprocessRunner:
         self.output_char_limit = config.output_char_limit
         self.suppress_command_stdout = config.suppress_command_stdout
         self.use_srun = config.use_srun
+        self.stdin = subprocess.DEVNULL if config.stdin_devnull else None
 
     def run(
         self,
@@ -157,6 +161,7 @@ class SubprocessRunner:
                     cwd=cwd,
                     env=self.env,
                     check=False,
+                    stdin=self.stdin,
                     stdout=out_f,
                     stderr=err_f,
                 )
@@ -271,6 +276,7 @@ class SubprocessRunner:
                     cwd=cwd,
                     env=env,
                     check=False,
+                    stdin=self.stdin,
                     stdout=out_f,
                     stderr=err_f,
                 )

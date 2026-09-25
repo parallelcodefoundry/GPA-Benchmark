@@ -78,6 +78,11 @@ class DriverConfig:
             different run_command + expected_checksum); requires a single app (default: None)
         gpu_device: Run the app on this GPU only: ROCR_VISIBLE_DEVICES=<n> (hip) or
             CUDA_VISIBLE_DEVICES=<n> (cuda) (default: None = leave the environment alone)
+        reference_from_baseline: hip only. The baseline (pristine) pass's output is the reference
+            the swap passes are checked against, instead of the stored yaml reference/checksum
+            (input variants, driver_variants) (default: False)
+        kernel_gate: hip only. Gate every swapped file with driver_gate before building; a
+            violation fails the pass without building it (default: True)
 
     """
 
@@ -110,6 +115,8 @@ class DriverConfig:
     rocm_path: Path | None
     app_overrides: dict | None
     gpu_device: int | None
+    reference_from_baseline: bool
+    kernel_gate: bool
 
     def __init__(
         self,
@@ -143,6 +150,8 @@ class DriverConfig:
         rocm_path: Path | None = None,
         app_overrides: dict | None = None,
         gpu_device: int | None = None,
+        reference_from_baseline: bool = False,
+        kernel_gate: bool = True,
     ) -> None:
         """Initialize a DriverConfig object."""
         logger.debug("Entering DriverConfig")
@@ -161,6 +170,8 @@ class DriverConfig:
             self.offload_arch = offload_arch
         self.app_overrides = app_overrides
         self.gpu_device = gpu_device
+        self.reference_from_baseline = reference_from_baseline
+        self.kernel_gate = kernel_gate
         self.no_clean = no_clean
         self.build_only = build_only
         self.nsys = nsys
@@ -349,6 +360,7 @@ class DriverPassResult:
     sanitize_stderrs: dict[SanitizeTool, str] | None = None
     run_stdout: str | None = None
     run_stderr: str | None = None
+    gate_violations: list[str] | None = None  # hip: kernel-file gate (driver_gate) violations
 
     def to_dict(
         self,
@@ -372,7 +384,7 @@ class DriverPassResult:
         exec_times = None
         if self.nsys_data is not None:
             exec_times = [data["exec_time"] for data in self.nsys_data]
-        return {
+        result = {
             "app_name": self.app_name,
             "run_num": self.run_num,
             "metadata": self.metadata,
@@ -405,6 +417,9 @@ class DriverPassResult:
             "run_stdout": self.run_stdout,
             "run_stderr": self.run_stderr,
         }
+        if self.gate_violations is not None:  # hip only; cuda output unchanged
+            result["gate_violations"] = self.gate_violations
+        return result
 
 
 class AppResults:
