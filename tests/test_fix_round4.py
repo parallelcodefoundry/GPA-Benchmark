@@ -285,3 +285,27 @@ def test_J2_original_j0_failure_is_infra_not_agent(toy):
     out = _drive(toy, "good", env={"FAIL_FIRST": "1"})
     assert "infra" in out, out
     assert "j=0" in out["infra"] or "original" in out["infra"].lower()
+
+
+# =========================================================================== J3 recorded evidence
+
+EVIDENCE = FIX / "evidence"
+
+
+@pytest.mark.parametrize(("name", "expect_fail"), [
+    ("round4_hs_offload", "G-cpu"),        # profitable full host offload (4.0x) -> G-cpu
+    ("round4_xs_offload", "G-cpu"),        # profitable partial offload (grid shrinks) -> G-cpu
+    ("round4_r2_drop_warmup", "launch-count"),  # drop the warmup launch (2.0x) -> R2
+])
+def test_J3_recorded_compute_evidence(name, expect_fail):
+    """The round-3/4 gaming fixtures, run on MI250X (frontier10244, fix round 4), are NOT
+    credited. This pins the recorded verdicts; re-run with RUN_GPA_COMPUTE via val4.py."""
+    d = json.loads((EVIDENCE / f"{name}.json").read_text())
+    assert d["ok"] is False
+    assert expect_fail in d["failures"], d
+    if name == "round4_hs_offload":
+        assert d["raw_speedup"] > 3.0  # a profitable full host offload, still not credited
+    if name == "round4_r2_drop_warmup":
+        assert d["raw_speedup"] > 1.5  # dropping the warmup would nearly double the score
+    if expect_fail == "G-cpu":
+        assert d["cpu_delta_s"] > d["cpu_slack_s"]  # the offload's CPU cost exceeds the slack
