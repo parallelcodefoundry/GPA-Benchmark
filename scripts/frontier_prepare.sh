@@ -176,8 +176,12 @@ phase_build() {
     log "build: 9 baselines built"
     # J0 protocol T0: the VRAM reset tool, run by the driver before every timed process.
     mkdir -p frontier_tools
+    matches_manifest scripts/vram_reset.cpp || die "scripts/vram_reset.cpp does not match frontier_refs.md5"
     "$HIPCC" -O2 --offload-arch="$OFFLOAD_ARCH" -o frontier_tools/vram_reset scripts/vram_reset.cpp \
         >frontier_tools/.vram_reset_build.log 2>&1 || die "build of frontier_tools/vram_reset failed"
+    # hipcc output is not byte-identical across build paths, so the SOURCE is md5-pinned in
+    # frontier_refs.md5 and the built binary's md5 is recorded here; the driver checks it.
+    md5sum frontier_tools/vram_reset | awk '{print $1}' > frontier_tools/vram_reset.md5
     log "build: frontier_tools/vram_reset built"
 }
 

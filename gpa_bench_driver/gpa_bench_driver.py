@@ -815,6 +815,15 @@ def _vram_reset_tool() -> Path:
         msg = (f"VRAM reset failed: {tool} is missing (run scripts/frontier_prepare.sh build); "
                "the J0 protocol needs it before every timed process")
         raise DriverInfraError(msg)
+    recorded = tool.with_name("vram_reset.md5")
+    if recorded.is_file():  # the build records the binary's md5 (the source is md5-pinned)
+        import hashlib
+
+        want = recorded.read_text().split()[0] if recorded.read_text().split() else ""
+        got = hashlib.md5(tool.read_bytes()).hexdigest()  # noqa: S324 - integrity pin
+        if want and got != want:
+            msg = f"VRAM reset failed: {tool} md5 {got} does not match its build record {want}"
+            raise DriverInfraError(msg)
     return tool
 
 

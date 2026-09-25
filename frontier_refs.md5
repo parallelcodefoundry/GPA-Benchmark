@@ -15,3 +15,4 @@ d316b03baf93e62f369436bd753553cf  frontier_refs/streamcluster/ref-output.txt
 f2d946a06b14b81440e4e5349edbe7d5  frontier_refs/bfs_variants/graph8M_v922.txt
 2d28af25d46805fb1fc881481ef632a6  frontier_refs/bfs_variants/graph8M_v933.txt
 d1070e928cce640519c732a6f97f37d8  frontier_refs/bfs_variants/graph8M_v944.txt
+8d4fed607199b7bdca8fbca35cd50d1f  scripts/vram_reset.cpp
