@@ -13,12 +13,20 @@
 #   profile_run_command       run_command for the profilers when it differs from the scored one.
 #   expected_checksum         {regex, value}: exactly one stdout line must match regex and its
 #                             group 1 must equal value (replaces pass_check_text "(Valid)").
-#   stdout_cap_bytes          max bytes of app stdout kept by runs whose stdout is not validated
-#                             (driver rocprofv3 timing runs, profiler wrappers).
+#   stdout_cap_bytes          max bytes of app stdout kept by the profiler wrappers (every driver
+#                             run keeps and validates the full output).
+#   fixed_target_dispatches   the optimized run must launch the target exactly as often as the
+#                             baseline (xsbench: warmup + iterations), else the run fails.
+#   float_grep_all            float_grep compares EVERY occurrence (same count), not only the last.
+#
+# References (reference_output) are GPA-root-relative files under frontier_refs/, outside every
+# directory an app runs in; each is md5-verified against frontier_refs.md5 before use.
 #
 # Timing (hip): rocprofv3 --kernel-trace; per sample the driver reports the summed duration of
-# every target dispatch (exec_time/target_ns), the per-kernel totals and the wall time; the
-# Frontier scoring rule (new kernels count as target, integrity guards) is applied by consumers.
+# every target dispatch (exec_time/target_ns), the per-kernel totals (all kernels, none excluded
+# by name), the wall time and whether that run's output passed the check (every timed run is
+# validated). Scoring (driver_rocprof.score_frontier) needs the baseline pass: scored time =
+# target + kernels new relative to the baseline + any increase of the baseline's other kernels.
 
 apps:
 
@@ -34,6 +42,8 @@ apps:
   run_command: ./XSBench -m event -s large -l 100000000
   # Profilers run XSBench's default large lookup count (17M; checksum 952131).
   profile_run_command: ./XSBench -m event -s large
+  # warmup + timed launch: removing the warmup would halve the summed target time
+  fixed_target_dispatches: true
   kernel_file: XSBench-hip/Simulation.cu
   # Checksums verified on MI250X (GPA-G1 report A.md): -s large -l 100000000 -> 711949,
   # -s large -> 952131, -s large -l 1000000 -> 995778, -s small -> 945990.
@@ -50,11 +60,14 @@ apps:
   rocprof_compute_dispatch: 0
   path: rodinia/b+tree-hip
   # command_frontier.txt = GPA's command.txt with j 60000 (was 6000): findRangeK >= 500 us.
+  # Real semantics (main.cu's parser does not advance past the space): "j 60000 3000" runs
+  # findRangeK with count=60000 queries AND rSize=60000 (the second number is ignored), exactly
+  # like GPA's "j 6000 3000" ran count=6000, rSize=6000; "k 10000" runs findK with 10000 queries.
   run_command: ./b+tree.out file ../data/b+tree/mil.txt command ./command_frontier.txt
   kernel_file: rodinia/b+tree-hip/kernel/kernel_gpu_cuda_2.cu
   extra_files:
   - rodinia/b+tree-hip/kernel/kernel_gpu_cuda_wrapper_2.cu
-  reference_output: rodinia/b+tree-hip/ref-output.txt
+  reference_output: frontier_refs/b+tree/ref-output.txt
   test_output: rodinia/b+tree-hip/output.txt
 
 - name: backprop
@@ -66,8 +79,9 @@ apps:
   kernel_file: rodinia/backprop-hip/backprop_cuda_kernel.cu
   extra_files:
   - rodinia/backprop-hip/backprop_cuda.cu
-  reference_output: rodinia/backprop-hip/ref-output.txt
+  reference_output: frontier_refs/backprop/ref-output.txt
   float_grep: "sum:"
+  float_grep_all: true  # all 16 hidden-unit sums (GPA checked only the last one)
   float_tolerance: 0.01
 
 - name: bfs
@@ -79,7 +93,7 @@ apps:
   kernel_file: rodinia/bfs-hip/kernel.cu
   extra_files:
   - rodinia/bfs-hip/bfs.cu
-  reference_output: rodinia/bfs-hip/ref-result.txt
+  reference_output: frontier_refs/bfs/ref-result.txt
   test_output: rodinia/bfs-hip/result.txt
   build_command: make -B -j8
 
@@ -92,7 +106,7 @@ apps:
   kernel_file: rodinia/heartwall-hip/kernel.cu
   extra_files:
   - rodinia/heartwall-hip/main.cu
-  reference_output: rodinia/heartwall-hip/ref-result.txt
+  reference_output: frontier_refs/heartwall/ref-result.txt
   test_output: rodinia/heartwall-hip/result.txt
 
 - name: hotspot
@@ -102,7 +116,7 @@ apps:
   path: rodinia/hotspot-hip
   run_command: ./hotspot 1024 5 100 ../data/hotspot/temp_1024 ../data/hotspot/power_1024 output.out
   kernel_file: rodinia/hotspot-hip/hotspot.cu
-  reference_output: rodinia/hotspot-hip/ref-output.out
+  reference_output: frontier_refs/hotspot/ref-output.out
   test_output: rodinia/hotspot-hip/output.out
   numeric_tolerance: 0.01
 
@@ -115,7 +129,7 @@ apps:
   kernel_file: rodinia/nw-hip/needle_kernel.cu
   extra_files:
   - rodinia/nw-hip/needle.cu
-  reference_output: rodinia/nw-hip/ref-result.txt
+  reference_output: frontier_refs/nw/ref-result.txt
   test_output: rodinia/nw-hip/result.txt
 
 - name: pathfinder
@@ -129,7 +143,7 @@ apps:
   # -DBENCH_PRINT prints the whole 300 x 300000 wall (~180 MB); validated runs keep all of it.
   stdout_cap_bytes: 1048576
   kernel_file: rodinia/pathfinder-hip/pathfinder.cu
-  reference_output: rodinia/pathfinder-hip/ref-result.txt
+  reference_output: frontier_refs/pathfinder/ref-result.txt
 
 - name: streamcluster
   kernel_name: kernel_compute_cost
@@ -138,5 +152,5 @@ apps:
   path: rodinia/streamcluster-hip
   run_command: ./sc_gpu 10 20 256 131072 131072 16000 none output.txt 1
   kernel_file: rodinia/streamcluster-hip/streamcluster_cuda.cu
-  reference_output: rodinia/streamcluster-hip/ref-output.txt
+  reference_output: frontier_refs/streamcluster/ref-output.txt
   test_output: rodinia/streamcluster-hip/output.txt

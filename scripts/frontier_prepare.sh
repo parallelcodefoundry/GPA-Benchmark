@@ -9,8 +9,9 @@
 #           unless it already matches frontier_refs.md5. CPU only.
 #   build   clean-build the 9 Frontier baselines (driver_apps.frontier.yaml) in place with hipcc.
 #   refs    generate the references that are not tracked (bfs, pathfinder, b+tree with the
-#           Frontier command file) from the pristine -hip baselines, unless they already match
-#           frontier_refs.md5. Needs a GPU (compute node).
+#           Frontier command file) from the pristine -hip baselines into frontier_refs/<app>/
+#           (outside every app run dir), unless they already match frontier_refs.md5. Needs a
+#           GPU (compute node).
 #   verify  md5-check every tracked and generated reference and input (frontier_refs.md5).
 #
 # Usage: bash scripts/frontier_prepare.sh [data|graph|build|refs|verify ...]
@@ -169,11 +170,12 @@ gen_ref() {
     require_gpu refs
     [[ -x "$dir/$bin" ]] || die "refs: $dir/$bin not built (run the build phase)"
     log "refs: generating $ref"
+    mkdir -p "$(dirname "$ref")"
     if [[ "$produced" == "-stdout" ]]; then
-        (cd "$dir" && "./$bin" "$@" >"$GPA_ROOT/$ref.tmp")
+        (cd "$dir" && "./$bin" "$@" </dev/null >"$GPA_ROOT/$ref.tmp")
     else
         rm -f "$dir/$produced"
-        (cd "$dir" && "./$bin" "$@" >/dev/null)
+        (cd "$dir" && "./$bin" "$@" </dev/null >/dev/null)
         mv "$dir/$produced" "$ref.tmp"
     fi
     mv "$ref.tmp" "$ref"
@@ -185,11 +187,12 @@ gen_ref() {
 
 phase_refs() {
     setup_toolchain
-    gen_ref rodinia/bfs-hip/ref-result.txt rodinia/bfs-hip bfs result.txt \
+    # References live in frontier_refs/<app>/, never inside a directory an app runs in (R5).
+    gen_ref frontier_refs/bfs/ref-result.txt rodinia/bfs-hip bfs result.txt \
         ../data/bfs/graph8M.txt
-    gen_ref rodinia/pathfinder-hip/ref-result.txt rodinia/pathfinder-hip pathfinder -stdout \
+    gen_ref frontier_refs/pathfinder/ref-result.txt rodinia/pathfinder-hip pathfinder -stdout \
         300000 300 20
-    gen_ref rodinia/b+tree-hip/ref-output.txt rodinia/b+tree-hip b+tree.out output.txt \
+    gen_ref frontier_refs/b+tree/ref-output.txt rodinia/b+tree-hip b+tree.out output.txt \
         file ../data/b+tree/mil.txt command ./command_frontier.txt
     log "refs: generated references verified"
 }

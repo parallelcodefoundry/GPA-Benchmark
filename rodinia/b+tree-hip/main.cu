@@ -1926,12 +1926,16 @@ main(	int argc,
      rewind (commandFile);
 
      // allocate memory to contain the whole file:
-     commandBuffer = (char*) malloc (sizeof(char)*lSize);
+     // APPEB/Frontier: +1 and NUL-terminate. The buffer is parsed with sscanf/printf("%s") up to a
+     // NUL; without one the parser ran into heap garbage after the file's bytes and could hit an
+     // interactive command that waits on stdin (getchar), hanging or spinning forever.
+     commandBuffer = (char*) malloc (sizeof(char)*lSize + 1);
      if (commandBuffer == NULL) {fputs ("Command Buffer memory error",stderr); exit (2);}
      
      // copy the file into the buffer:
      result = fread (commandBuffer,1,lSize,commandFile);
      if (result != lSize) {fputs ("Command file reading error",stderr); exit (3);}
+     commandBuffer[lSize] = '\0';
 
      /* the whole file is now loaded in the memory buffer. */
 

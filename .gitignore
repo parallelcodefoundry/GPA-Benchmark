@@ -119,9 +119,11 @@ rodinia/streamcluster-opt-hip/sc_gpu
 XSBench-hip/XSBench
 rodinia/*-hip/result.txt
 rodinia/*-hip/output.txt
-rodinia/bfs-hip/ref-result.txt
-rodinia/pathfinder-hip/ref-result.txt
-rodinia/b+tree-hip/ref-output.txt
+frontier_refs/bfs/ref-result.txt
+frontier_refs/pathfinder/ref-result.txt
+frontier_refs/b+tree/ref-output.txt
+frontier_refs/*/*.bad
+frontier_refs/*/*.tmp
 rodinia/*-hip/*.bad
 rodinia/*-hip/*.tmp
 rodinia/data/bfs/graph8M.txt.bad
