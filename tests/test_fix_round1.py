@@ -494,6 +494,7 @@ def test_R7_host_seed_arguments_default_to_the_public_behaviour():
         "XSBench-hip/Materials.cu")}
     assert "seed = (argc == 3) ? atoi(argv[2]) : 7;" in src["rodinia/backprop-hip/facetrain.c"]
     assert "srand ( argc > 3 ? atoi(argv[3]) : 7 );" in src["rodinia/nw-hip/needle.cu"]
+    assert "if (argc == 3 || argc == 4)" in src["rodinia/nw-hip/needle.cu"]
     assert "srand48(argc > 10 ? atol(argv[10]) : SEED);" in src[
         "rodinia/streamcluster-hip/streamcluster_cuda_cpu.cpp"]
     assert "int first_frame = (argc == 4) ? atoi(argv[3]) : 0;" in src["rodinia/heartwall-hip/main.cu"]

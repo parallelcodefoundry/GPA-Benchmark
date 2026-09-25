@@ -80,7 +80,7 @@ void runTest( int argc, char** argv)
     
     // the lengths of the two sequences should be able to divided by 16.
 	// And at current stage  max_rows needs to equal max_cols
-	if (argc == 3)
+	if (argc == 3 || argc == 4)  /* APPEB/Frontier: optional 3rd argument = input seed */
 	{
 		max_rows = atoi(argv[1]);
 		max_cols = atoi(argv[1]);
