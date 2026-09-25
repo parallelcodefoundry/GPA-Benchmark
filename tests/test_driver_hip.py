@@ -225,7 +225,8 @@ def test_rocprof_time_app_per_sample_dict(tmp_path):
     assert len(data) == 3
     for d in data:
         assert set(d) == {"exec_time", "target_ns", "target_dispatches", "kernels",
-                          "kernel_dispatches", "wall_s", "backend", "valid", "validation_output"}
+                          "kernel_dispatches", "wall_s", "cpu_s", "backend", "valid",
+                          "validation_output"}
         assert d["exec_time"] == d["target_ns"] == 39521
         assert d["valid"] is None  # no validate callback given
         assert d["backend"] == "rocprofv3"
@@ -287,12 +288,12 @@ def test_rocprof_time_app_failure_raises(tmp_path):
         rocprof_time_app(_bfs_app(), runner, tmp_path, 1)
 
 
-def test_profiler_failure_with_working_binary_is_infra(tmp_path):
-    from gpa_bench_driver.driver_src.driver_utils import DriverInfraError
-
+def test_profiler_crash_after_app_started_is_agent(tmp_path):
+    # H3: rocprofv3 exited non-zero but its output dir exists (the app started) -> agent failure,
+    # never laundered by a clean plain rerun.
     runner = _FakeRocprofRunner(FIXTURES / "rocm7_bfs_kernel_trace.csv", returncode=139,
                                 plain_returncode=0)
-    with pytest.raises(DriverInfraError, match="runs fine without the profiler"):
+    with pytest.raises(RocprofError, match="failed under the profiler"):
         rocprof_time_app(_bfs_app(), runner, tmp_path, 1)
 
 
@@ -568,7 +569,7 @@ out = {}
 for kw in ({"app": "bfs", "nsys": True}, {"app": "xsbench", "ncu": True, "no_sanitize": True},
            {"app": "all"}, {"app": "backprop", "swaps_override": {Path("backprop_cuda_kernel.cu"): "// backprop_cuda_kernel.cu\nX"}, "nsys": True}):
     cfg = DriverConfig(sm_version=80, cuda_home=Path("/fake/cuda"), temp_dir=Path("/tmp"), **kw)
-    old_keys = sorted(k for k in vars(cfg) if k not in ("gpu_backend", "offload_arch", "rocm_path", "app_overrides", "gpu_device", "reference_from_baseline", "kernel_gate", "interleave", "cpu_pairs"))
+    old_keys = sorted(k for k in vars(cfg) if k not in ("gpu_backend", "offload_arch", "rocm_path", "app_overrides", "gpu_device", "reference_from_baseline", "kernel_gate", "interleave", "final_samples"))
     app_config, swaps, env = setup_app_config(cfg)
     key = repr(sorted((k, repr(v)) for k, v in kw.items()))
     out[key] = {

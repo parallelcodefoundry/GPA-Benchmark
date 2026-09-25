@@ -114,21 +114,37 @@ on a login node first, or set GPA_DATA_TARBALL=<local data.tar.gz>."
 phase_graph() {
     local out="rodinia/data/bfs/graph8M.txt"
     [[ -d rodinia/data/bfs ]] || die "rodinia/data/bfs missing: run the data phase first"
-    if matches_manifest "$out"; then
-        log "graph: $out matches frontier_refs.md5"
-        return 0
-    fi
-    [[ -f "$out" ]] && log "graph: $out exists but does not match frontier_refs.md5; regenerating"
     local tmp; tmp="$(mktemp -d "$GPA_ROOT/.graphgen.XXXXXX")"; _TMPDIRS+=("$tmp")
     g++ -O2 -std=c++11 -o "$tmp/graphgen_seeded" scripts/graphgen_seeded.cpp
-    log "graph: generating 8388608-node graph (seeded)"
-    (cd "$tmp" && ./graphgen_seeded 8388608 8M ${GPA_GRAPH_SEED:+"$GPA_GRAPH_SEED"} >/dev/null)
-    mv "$tmp/graph8M.txt" "$out"
-    if ! matches_manifest "$out"; then
-        mv "$out" "$out.bad"
-        die "graph: generated graph does not match frontier_refs.md5 (moved to $out.bad)"
+    if matches_manifest "$out"; then
+        log "graph: $out matches frontier_refs.md5"
+    else
+        [[ -f "$out" ]] && log "graph: $out exists but does not match; regenerating"
+        log "graph: generating 8388608-node graph (seeded)"
+        (cd "$tmp" && ./graphgen_seeded 8388608 8M ${GPA_GRAPH_SEED:+"$GPA_GRAPH_SEED"} >/dev/null)
+        mv "$tmp/graph8M.txt" "$out"
+        if ! matches_manifest "$out"; then
+            mv "$out" "$out.bad"
+            die "graph: generated graph does not match frontier_refs.md5 (moved to $out.bad)"
+        fi
+        log "graph: $out generated and verified"
     fi
-    log "graph: $out generated and verified"
+    # H7: a pool of seeded variant graphs for gpa_test's per-call random-input check (always).
+    local pooldir="frontier_refs/bfs_variants"
+    mkdir -p "$pooldir"
+    for seed in 911 922 933 944; do
+        local pout="$pooldir/graph8M_v${seed}.txt"
+        matches_manifest "$pout" && { log "graph: $pout matches"; continue; }
+        [[ -f "$pout" && ! -s "$MANIFEST" ]] && { log "graph: $pout exists (no manifest yet)"; continue; }
+        log "graph: generating pooled variant graph (seed $seed)"
+        (cd "$tmp" && ./graphgen_seeded 8388608 "8M_v${seed}" "$seed" >/dev/null)
+        mv "$tmp/graph8M_v${seed}.txt" "$pout"
+        if grep -q "graph8M_v${seed}.txt" "$MANIFEST" 2>/dev/null && ! matches_manifest "$pout"; then
+            mv "$pout" "$pout.bad"
+            die "graph: pooled graph $pout does not match frontier_refs.md5 (moved to $pout.bad)"
+        fi
+    done
+    log "graph: bfs variant pool ready"
 }
 
 # name|dir|binary  (the 9 Frontier baselines; paths as in driver_apps.frontier.yaml)

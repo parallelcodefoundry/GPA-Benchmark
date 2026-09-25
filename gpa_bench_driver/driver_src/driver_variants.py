@@ -113,7 +113,14 @@ def _hotspot_inputs(rng: random.Random, gpa_root: Path, workdir: Path, tag: str)
     return temp_out, power_out
 
 
-def draw_variant(app: str, seed: int, *, workdir: Path, gpa_root: Path | None = None) -> Variant:
+# H7: bfs generating an 8M-node graph costs ~15 s, too slow for gpa_test's per-call variant check.
+# frontier_prepare.sh pre-generates a pool of POOL_SEEDS graphs under frontier_refs/bfs_variants/;
+# gpa_test's check (pool=True) picks one, the runner's final variant always uses a fresh seed.
+BFS_POOL_SEEDS = (911, 922, 933, 944)
+
+
+def draw_variant(app: str, seed: int, *, workdir: Path, gpa_root: Path | None = None,
+                 pool: bool = False) -> Variant:
     """Draw a random input variant of ``app`` (same shape as the public input, other data).
 
     Args:
@@ -121,6 +128,8 @@ def draw_variant(app: str, seed: int, *, workdir: Path, gpa_root: Path | None = 
         seed: variant seed (record it)
         workdir: directory for generated inputs (created; must be outside the app's run dir)
         gpa_root: GPA-Benchmark root (default: this checkout)
+        pool: bfs only. Use a pre-generated pooled graph (H7) chosen by ``seed`` instead of
+            generating one (for gpa_test's fast per-call check); ignored by other apps.
 
     Returns:
         the Variant; pass ``variant.overrides`` as DriverConfig.app_overrides
@@ -137,16 +146,22 @@ def draw_variant(app: str, seed: int, *, workdir: Path, gpa_root: Path | None = 
     tag = f"v{int(seed)}"
 
     if app == "bfs":
-        graph_seed = _seed(rng, _PUBLIC_GRAPH_SEED)
-        params = {"nodes": 8388608, "graph_seed": graph_seed}
-        workdir.mkdir(parents=True, exist_ok=True)
-        graph = workdir / f"graph8M_{tag}.txt"
-        if not graph.exists():
-            exe = _graphgen(workdir, root)
-            subprocess.run([str(exe), "8388608", f"8M_{tag}", str(graph_seed)],  # noqa: S603
-                           cwd=workdir, check=True, capture_output=True)
-        files.append(str(graph))
-        run_command = f"./bfs {graph}"
+        if pool:
+            pool_seed = BFS_POOL_SEEDS[seed % len(BFS_POOL_SEEDS)]
+            graph = root / "frontier_refs" / "bfs_variants" / f"graph8M_v{pool_seed}.txt"
+            params = {"nodes": 8388608, "graph_seed": pool_seed, "pool": True}
+            run_command = f"./bfs {graph}"
+        else:
+            graph_seed = _seed(rng, _PUBLIC_GRAPH_SEED)
+            params = {"nodes": 8388608, "graph_seed": graph_seed}
+            workdir.mkdir(parents=True, exist_ok=True)
+            graph = workdir / f"graph8M_{tag}.txt"
+            if not graph.exists():
+                exe = _graphgen(workdir, root)
+                subprocess.run([str(exe), "8388608", f"8M_{tag}", str(graph_seed)],  # noqa: S603
+                               cwd=workdir, check=True, capture_output=True)
+            files.append(str(graph))
+            run_command = f"./bfs {graph}"
     elif app == "backprop":
         weight_seed = _seed(rng, 7)
         params = {"layer_size": 1048560, "weight_seed": weight_seed}

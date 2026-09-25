@@ -108,8 +108,19 @@ _FORBIDDEN_CODE = [
     (r"\bat_quick_exit\b", "at_quick_exit"),
     (r"__attribute__\s*\(\(\s*[^)]*\b(constructor|destructor)\b", "__attribute__((constructor/destructor))"),
     (r"\[\[\s*gnu\s*::\s*(constructor|destructor)", "[[gnu::constructor/destructor]]"),
-    (r"\bsyscall\s*\(", "syscall("),
+    (r"\bsyscall\b", "syscall"),
+    (r"\b__syscall\b", "__syscall"),
     (r"\bptrace\b", "ptrace"),
+    (r"\b__secure_getenv\b", "__secure_getenv"),
+    (r"\b__environ\b", "__environ"),
+    (r"\b_environ\b", "_environ"),
+    (r"\bdl_iterate_phdr\b", "dl_iterate_phdr"),
+    (r"\bgetauxval\b", "getauxval"),
+    (r"\bdladdr\b", "dladdr"),
+    (r"\bdlinfo\b", "dlinfo"),
+    (r"\bprctl\b", "prctl"),
+    # inline assembly (incl. asm labels asm("name")) reaches libc symbols the gate cannot see
+    (r"\b(?:asm|__asm__|__asm)\b", "inline asm"),
 ]
 _FORBIDDEN_CODE_RE = [(re.compile(rx), label) for rx, label in _FORBIDDEN_CODE]
 
@@ -122,6 +133,11 @@ _DIRECTIVE_RE = re.compile(r"^[ \t]*#[ \t]*(define|undef)[ \t]+([A-Za-z_]\w*)", 
 _PRAGMA_MACRO_RE = re.compile(r"\b(push_macro|pop_macro)\s*\(\s*\\?\"([A-Za-z_]\w*)\\?\"")
 _RESERVED_DEF_RE = re.compile(r"\b(__[A-Za-z_]\w*)\s*\(")
 _NOT_A_DEFINITION_PREFIX = re.compile(r"(\bif|\bwhile|\bfor|\bswitch|\breturn|[=,(!&|?:+\-*/<>])\s*$")
+# H2 directives
+_LINE_DIR_RE = re.compile(r"^[ \t]*#[ \t]*(?:line[ \t]+\d+|\d+[ \t]+\")", re.MULTILINE)
+_INCLUDE_RE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*([<"])([^>"]*)[>"]', re.MULTILINE)
+# a C/C++ main definition: main ( <params> ) {  -> capture the parameter list
+_MAIN_DEF_RE = re.compile(r"\bmain\s*\(([^)]*)\)\s*\{")
 
 
 @dataclass
@@ -229,9 +245,45 @@ def _is_api_name(name: str) -> bool:
     return bool(_API_NAME_RE.match(name)) or name in _API_NAMES
 
 
-def _features(text: str, other_idents: frozenset[str]) -> Counter:
+def _param_count(param_text: str) -> int:
+    inner = param_text.strip()
+    if not inner or inner == "void":
+        return 0
+    depth = 0
+    n = 1
+    for ch in inner:
+        if ch in "(<[":
+            depth += 1
+        elif ch in ")>]":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            n += 1
+    return n
+
+
+def _features(text: str, other_idents: frozenset[str],
+              pristine_includes: frozenset[str] | None = None,
+              pristine_main_params: int | None = None) -> Counter:
     code, literals, raw = _lex(text)
     feats: Counter = Counter()
+    for m in _LINE_DIR_RE.finditer(raw):
+        feats[("line_directive",)] += 1
+    if pristine_includes is not None:
+        # raw pass: only clear-cut bad includes (absolute path or '..'). #ifdef-guarded includes
+        # are handled by the preprocessed pass (which respects the preprocessor), and a brand-new
+        # file that does not exist fails to compile -> gate fails closed. New <system>/app-dir
+        # headers are allowed (H2). The regex cannot evaluate #ifdef, so a non-absolute name is
+        # not flagged here.
+        for m in _INCLUDE_RE.finditer(raw):
+            bracket, name = m.group(1), m.group(2)
+            if bracket == "<":
+                continue
+            if name.startswith("/") or ".." in name.split("/"):
+                feats[("bad_include", name)] += 1
+    if pristine_main_params is not None:
+        for m in _MAIN_DEF_RE.finditer(code):
+            if _param_count(m.group(1)) > pristine_main_params:
+                feats[("main_params",)] += 1
     for kind, name in _macro_targets(code, raw):
         if name in other_idents:
             feats[("macro", kind, name, "an identifier of the app's other source files")] += 1
@@ -250,7 +302,20 @@ def _features(text: str, other_idents: frozenset[str]) -> Counter:
     return feats
 
 
-def _describe(feat: tuple, extra: int) -> str:
+def _describe(feat: tuple, extra: int) -> str:  # noqa: PLR0911
+    if feat[0] == "line_directive":
+        return ("a #line / '# N \"file\"' directive: rewriting line markers to make kernel-file "
+                "code look like another file is not allowed")
+    if feat[0] == "bad_include":
+        return (f"#include \"{feat[1]}\": an absolute or '..' include path is not allowed "
+                "(only <system/HIP> headers and headers in the app directory)")
+    if feat[0] == "main_params":
+        return ("a main() with more parameters than the original: reading argv/envp to detect the "
+                "profiler or the inputs is not allowed")
+    return _describe_orig(feat, extra)
+
+
+def _describe_orig(feat: tuple, extra: int) -> str:
     times = "" if extra == 1 else f" ({extra} more than the original)"
     if feat[0] == "macro":
         _, kind, name, why = feat
@@ -291,11 +356,16 @@ _FORBIDDEN_CALLS = frozenset({
     "renameat2", "system", "popen", "execl", "execlp", "execle", "execv", "execvp", "execve",
     "execvpe", "fork", "vfork", "clone", "posix_spawn", "posix_spawnp", "getenv",
     "secure_getenv", "setenv", "unsetenv", "putenv", "clearenv", "dlopen", "dlsym", "dlmopen",
-    "pthread_create", "atexit", "at_quick_exit", "on_exit", "syscall", "ptrace", "kill",
-    "raise", "signal", "sigaction",
+    "pthread_create", "atexit", "at_quick_exit", "on_exit", "syscall", "__syscall", "ptrace",
+    "kill", "raise", "signal", "sigaction", "secure_getenv", "__secure_getenv",
+    "dl_iterate_phdr", "getauxval", "dladdr", "dlinfo", "prctl",
 })
-_FORBIDDEN_NAMES = frozenset({"environ", "__environ", "ifstream", "ofstream", "fstream",
-                              "filebuf", "filesystem", "jthread"})
+# H2: an asm label (extern "C" T f(...) asm("getenv")) reaches a forbidden symbol under any
+# local name, so treat a call of a symbol whose asm-label is forbidden as that call; and forbid
+# these names anywhere in the expanded kernel region.
+_FORBIDDEN_NAMES = frozenset({"environ", "__environ", "_environ", "ifstream", "ofstream",
+                              "fstream", "filebuf", "filesystem", "jthread"})
+_ASM_RE = re.compile(r"\b(?:asm|__asm__|__asm)\b")
 _CALL_RE = re.compile(r"(?<![\w.])(?<!->)([A-Za-z_]\w*)\s*\(")
 _STD_THREAD_RE = re.compile(r"\bstd\s*::\s*(thread|async)\b")
 _ATTR_CTOR_RE = re.compile(r"__attribute__\s*\(\(\s*[^)]*\b(constructor|destructor)\b")
@@ -326,7 +396,7 @@ def _pp_spec(app: dict) -> tuple[str, list[str]]:
 
 
 def _run_pp(app: dict, gpa_root: Path, kernel_text: str | None, hipcc: Path,
-            extra: list[str]) -> subprocess.CompletedProcess:
+            extra: list[str], allowed_other: frozenset[str] | None = None) -> subprocess.CompletedProcess:
     """Preprocess the app's TU in a scratch copy of the app dir with the kernel file replaced."""
     app_dir = Path(gpa_root) / str(app["path"])
     kernel_rel = Path(str(app["kernel_file"])).relative_to(str(app["path"]))
@@ -344,27 +414,55 @@ def _run_pp(app: dict, gpa_root: Path, kernel_text: str | None, hipcc: Path,
         proc.work = str(work)  # type: ignore[attr-defined]
         if proc.returncode == 0:
             # resolve marker paths while the scratch copy still exists
-            proc.regions = _split_regions(proc.stdout, work, proc.kernel_abs)  # type: ignore[attr-defined]
+            kern, other, ids = _split_regions(proc.stdout, work, proc.kernel_abs, allowed_other)
+            proc.regions = (kern, other)  # type: ignore[attr-defined]
+            proc.marker_ids = ids  # type: ignore[attr-defined]
         return proc
 
 
-def _split_regions(text: str, work: Path, kernel_abs: str) -> tuple[str, str]:
-    """(kernel-file lines, all other lines) of preprocessor output, by line markers."""
+def _marker_id(name: str, work: Path, kernel_abs: str) -> str:
+    """A file identity that is stable across scratch dirs: 'K' for the kernel file, a path
+    relative to the work dir for app files, or the absolute realpath for system/HIP headers."""
+    if name.startswith("<"):
+        return "<builtin>"
+    path = name if os.path.isabs(name) else os.path.join(work, name)
+    real = os.path.realpath(path)
+    if real == kernel_abs:
+        return "K"
+    try:
+        return "app:" + os.path.relpath(real, work)
+    except ValueError:
+        return "sys:" + real
+
+
+def _split_regions(text: str, work: Path, kernel_abs: str,
+                   allowed_other: frozenset[str] | None = None) -> tuple[str, str, frozenset[str]]:
+    """(kernel-file lines, all other lines) of preprocessor output, by line markers.
+
+    H2 fail-closed attribution: a token is treated as the kernel file's own unless its line
+    marker names one of the pristine include files (or the kernel file). A #line spoof or a new
+    include therefore lands in the kernel region and is analysed, never hidden as "other".
+    """
     kernel_lines: list[str] = []
     other_lines: list[str] = []
-    in_kernel = False
-    cache: dict[str, bool] = {}
+    in_kernel = True  # before the first marker, and (fail closed) for any unknown file
+    seen: set[str] = set()
     for line in text.splitlines():
         m = _LINE_MARKER_RE.match(line)
         if m:
-            name = m.group(2)
-            if name not in cache:
-                path = name if os.path.isabs(name) else os.path.join(work, name)
-                cache[name] = os.path.realpath(path) == kernel_abs
-            in_kernel = cache[name]
+            mid = _marker_id(m.group(2), work, kernel_abs)
+            seen.add(mid)
+            if mid == "K":
+                in_kernel = True
+            elif mid == "<builtin>":
+                in_kernel = False
+            elif allowed_other is None:
+                in_kernel = False  # first (pristine) pass: everything but the kernel is "other"
+            else:  # fail closed: a file the pristine TU did not include is the kernel's own
+                in_kernel = mid not in allowed_other
             continue
         (kernel_lines if in_kernel else other_lines).append(line)
-    return "\n".join(kernel_lines), "\n".join(other_lines)
+    return "\n".join(kernel_lines), "\n".join(other_lines), frozenset(seen)
 
 
 def _declared_names(app: dict, gpa_root: Path, hipcc: Path) -> frozenset[str]:
@@ -400,6 +498,7 @@ def _expanded_features(kernel_region: str) -> Counter:
             feats[("xname", name)] += 1
     feats[("xname", "std::thread")] += len(_STD_THREAD_RE.findall(code))
     feats[("xname", "__attribute__((constructor/destructor))")] += len(_ATTR_CTOR_RE.findall(code))
+    feats[("xasm",)] += len(_ASM_RE.findall(code))
     for lit in literals:
         for part in _FORBIDDEN_LITERAL_PARTS:
             if part in lit:
@@ -409,15 +508,19 @@ def _expanded_features(kernel_region: str) -> Counter:
     return +feats
 
 
-def _expanded_region(app: dict, gpa_root: Path, text: str, hipcc: Path) -> str | None:
-    proc = _run_pp(app, gpa_root, text, hipcc, [])
+def _expanded_region(app: dict, gpa_root: Path, text: str, hipcc: Path,
+                     allowed_other: frozenset[str] | None = None):
+    proc = _run_pp(app, gpa_root, text, hipcc, [], allowed_other)
     if proc.returncode != 0:
         return None
-    return proc.regions[0]  # type: ignore[attr-defined]
+    return proc.regions[0], proc.marker_ids  # type: ignore[attr-defined]
 
 
 def _describe_expanded(feat: tuple, extra: int) -> str:
     times = "" if extra == 1 else f" ({extra} more than the original)"
+    if feat[0] == "xasm":
+        return ("inline assembly after macro expansion: raw asm (incl. asm labels) can reach "
+                "syscalls or libc symbols the gate cannot see, and is not allowed in the kernel file")
     kind, name = feat
     if kind == "xcall":
         return (f"call of '{name}'{times} after macro expansion: file, process, environment, "
@@ -438,13 +541,17 @@ def _preprocessed_violations(app: dict, candidate: str, pristine: str, gpa_root:
     pkey = ("pristine", str(gpa_root), str(app["path"]), str(app["kernel_file"]), str(hipcc),
             hash(pristine))
     if pkey not in _PP_CACHE:
-        region = _expanded_region(app, gpa_root, pristine, hipcc)
-        if region is None:
+        pr = _expanded_region(app, gpa_root, pristine, hipcc)
+        if pr is None:
             msg = f"the kernel gate could not preprocess the pristine {app['kernel_file']}"
             raise DriverInfraError(msg)
-        _PP_CACHE[pkey] = (_expanded_features(region),)
-    base = _PP_CACHE[pkey][0]
-    proc = _run_pp(app, gpa_root, candidate, hipcc, [])
+        region, allowed = pr
+        # the files the pristine TU legitimately includes; anything else in the candidate is
+        # attributed to the kernel file (fail closed, H2)
+        allowed = frozenset(m for m in allowed if m not in ("K", "<builtin>"))
+        _PP_CACHE[pkey] = (_expanded_features(region), allowed)
+    base, allowed_other = _PP_CACHE[pkey]
+    proc = _run_pp(app, gpa_root, candidate, hipcc, [], allowed_other)
     if proc.returncode != 0:
         return [("the kernel file could not be preprocessed with the app's compiler flags, so it "
                  f"cannot be checked (fix the compile error first): {head_tail(proc.stderr, 600, 600)}")]
@@ -467,6 +574,23 @@ def _preprocessed_violations(app: dict, candidate: str, pristine: str, gpa_root:
     return violations
 
 
+def _app_dir_headers(app: dict, gpa_root: Path) -> frozenset[str]:
+    """Header/source names that exist in the app dir (allowed #include targets, by basename)."""
+    app_dir = Path(gpa_root) / str(app["path"])
+    names: set[str] = set()
+    for path in app_dir.rglob("*"):
+        if path.is_file() and path.suffix in SOURCE_SUFFIXES:
+            names.add(path.name)
+            names.add(path.relative_to(app_dir).as_posix())
+    return frozenset(names)
+
+
+def _pristine_main_params(pristine: str) -> int:
+    code, _, _ = _lex(pristine)
+    counts = [_param_count(m.group(1)) for m in _MAIN_DEF_RE.finditer(code)]
+    return max(counts) if counts else 0  # a kernel file with no main() must not gain one with params
+
+
 def check_kernel_source(app: dict, candidate: str, *, gpa_root: Path,
                         pristine: str | None = None, preprocess: bool = True,
                         rocm_path: Path | None = None) -> GateResult:
@@ -486,8 +610,10 @@ def check_kernel_source(app: dict, candidate: str, *, gpa_root: Path,
     if pristine is None:
         pristine = (Path(gpa_root) / kernel_rel).read_text(encoding="utf-8", errors="replace")
     others = other_source_identifiers(app, gpa_root)
-    base = _features(pristine, others)
-    cand = _features(candidate, others)
+    inc = _app_dir_headers(app, gpa_root)
+    main_params = _pristine_main_params(pristine)
+    base = _features(pristine, others, inc, main_params)
+    cand = _features(candidate, others, inc, main_params)
     violations = [_describe(feat, count - base.get(feat, 0))
                   for feat, count in sorted(cand.items(), key=lambda kv: repr(kv[0]))
                   if count > base.get(feat, 0)]

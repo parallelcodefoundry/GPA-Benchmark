@@ -9,7 +9,8 @@
 #   score_regex               anchored regex (Python re.search / ERE) on the demangled rocprofv3
 #                             kernel name: every dispatch it matches is target work. It accepts
 #                             a return-type prefix ("void "), a namespace and template arguments
-#                             ("void xs_lookup_kernel<0>(Inputs, SimulationData)"), fix round 2 F2.
+#                             ("void xs_lookup_kernel<0>(Inputs, SimulationData)", F2), and a
+#                             namespace incl. "(anonymous namespace)::" (fix round 3 H5).
 #   rocprof_compute_dispatch  0-based dispatch of the target kernel that rocprof-compute profiles
 #                             (GPA's ncu --launch-skip, 0 where GPA has none).
 #   profile_run_command       run_command for the profilers when it differs from the scored one.
@@ -41,7 +42,7 @@ apps:
   aliases:
   - XSBench
   kernel_name: xs_lookup_kernel
-  score_regex: '^(?:\S+ )?(?:[\w:]+::)?xs_lookup_kernel(?:<.*>)?\('
+  score_regex: '^(?:\S+ )?(?:(?:\(anonymous namespace\)|[\w]+)::)*xs_lookup_kernel(?:<.*>)?\('
   rocprof_compute_dispatch: 0
   path: XSBench-hip
   clean_command: make clean
@@ -54,8 +55,10 @@ apps:
   kernel_file: XSBench-hip/Simulation.cu
   # kernel gate (F3): the app's translation unit that compiles the kernel file, and its flags
   gate_preprocess: {tu: Simulation.cu, flags: '-x hip -std=c++17'}
-  # G-cpu (F4): measured std 0.0683 s over 12 pristine unprofiled pairs (MI250X, 2026-09-24), rounded up
-  cpu_sigma_s: 0.07
+  # G-cpu (H1): std 0.0637 s over 12 pristine PROFILED pairs (MI250X, 2026-09-25), rounded up
+  cpu_sigma_s: 0.073
+  # final-score profiled samples per side (H6): short targets need more to keep a 5-replay spread <= 1.5%
+  final_samples: 5
   # Checksums verified on MI250X (GPA-G1 report A.md): -s large -l 100000000 -> 711949,
   # -s large -> 952131, -s large -l 1000000 -> 995778, -s small -> 945990.
   expected_checksum:
@@ -67,7 +70,7 @@ apps:
   - b_tree
   - btree
   kernel_name: findRangeK
-  score_regex: '^(?:\S+ )?(?:[\w:]+::)?findRangeK(?:<.*>)?(?:\(|$)'
+  score_regex: '^(?:\S+ )?(?:(?:\(anonymous namespace\)|[\w]+)::)*findRangeK(?:<.*>)?(?:\(|$)'
   rocprof_compute_dispatch: 0
   path: rodinia/b+tree-hip
   # command_frontier.txt = GPA's command.txt with j 60000 (was 6000): findRangeK >= 500 us.
@@ -78,8 +81,10 @@ apps:
   kernel_file: rodinia/b+tree-hip/kernel/kernel_gpu_cuda_2.cu
   # kernel gate (F3): the app's translation unit that compiles the kernel file, and its flags
   gate_preprocess: {tu: kernel/kernel_gpu_cuda_wrapper_2.cu, flags: '-x hip'}
-  # G-cpu (F4): measured std 0.0148 s over 12 pristine unprofiled pairs (MI250X, 2026-09-24), rounded up
-  cpu_sigma_s: 0.016
+  # G-cpu (H1): std 0.0690 s over 12 pristine PROFILED pairs (MI250X, 2026-09-25), rounded up
+  cpu_sigma_s: 0.079
+  # final-score profiled samples per side (H6): short targets need more to keep a 5-replay spread <= 1.5%
+  final_samples: 10
   extra_files:
   - rodinia/b+tree-hip/kernel/kernel_gpu_cuda_wrapper_2.cu
   reference_output: frontier_refs/b+tree/ref-output.txt
@@ -87,15 +92,17 @@ apps:
 
 - name: backprop
   kernel_name: bpnn_layerforward_CUDA
-  score_regex: '^(?:\S+ )?(?:[\w:]+::)?bpnn_layerforward_CUDA(?:<.*>)?\('
+  score_regex: '^(?:\S+ )?(?:(?:\(anonymous namespace\)|[\w]+)::)*bpnn_layerforward_CUDA(?:<.*>)?\('
   rocprof_compute_dispatch: 0
   path: rodinia/backprop-hip
   run_command: ./backprop 1048560
   kernel_file: rodinia/backprop-hip/backprop_cuda_kernel.cu
   # kernel gate (F3): the app's translation unit that compiles the kernel file, and its flags
   gate_preprocess: {tu: backprop_cuda.cu, flags: '-x hip'}
-  # G-cpu (F4): measured std 0.0666 s over 12 pristine unprofiled pairs (MI250X, 2026-09-24), rounded up
-  cpu_sigma_s: 0.07
+  # G-cpu (H1): std 0.0899 s over 12 pristine PROFILED pairs (MI250X, 2026-09-25), rounded up
+  cpu_sigma_s: 0.103
+  # final-score profiled samples per side (H6): short targets need more to keep a 5-replay spread <= 1.5%
+  final_samples: 10
   extra_files:
   - rodinia/backprop-hip/backprop_cuda.cu
   reference_output: frontier_refs/backprop/ref-output.txt
@@ -105,15 +112,17 @@ apps:
 
 - name: bfs
   kernel_name: Kernel
-  score_regex: '^(?:\S+ )?(?:[\w:]+::)?Kernel(?:<.*>)?\('
+  score_regex: '^(?:\S+ )?(?:(?:\(anonymous namespace\)|[\w]+)::)*Kernel(?:<.*>)?\('
   rocprof_compute_dispatch: 8
   path: rodinia/bfs-hip
   run_command: ./bfs ../data/bfs/graph8M.txt
   kernel_file: rodinia/bfs-hip/kernel.cu
   # kernel gate (F3): the app's translation unit that compiles the kernel file, and its flags
   gate_preprocess: {tu: bfs.cu, flags: '-x hip'}
-  # G-cpu (F4): measured std 0.1015 s over 12 pristine unprofiled pairs (MI250X, 2026-09-24), rounded up
-  cpu_sigma_s: 0.11
+  # G-cpu (H1): std 0.0803 s over 12 pristine PROFILED pairs (MI250X, 2026-09-25), rounded up
+  cpu_sigma_s: 0.092
+  # final-score profiled samples per side (H6): short targets need more to keep a 5-replay spread <= 1.5%
+  final_samples: 5
   extra_files:
   - rodinia/bfs-hip/bfs.cu
   reference_output: frontier_refs/bfs/ref-result.txt
@@ -122,15 +131,17 @@ apps:
 
 - name: heartwall
   kernel_name: kernel
-  score_regex: '^(?:\S+ )?(?:[\w:]+::)?kernel(?:<.*>)?\('
+  score_regex: '^(?:\S+ )?(?:(?:\(anonymous namespace\)|[\w]+)::)*kernel(?:<.*>)?\('
   rocprof_compute_dispatch: 4
   path: rodinia/heartwall-hip
   run_command: ./heartwall ../data/heartwall/test.avi 10
   kernel_file: rodinia/heartwall-hip/kernel.cu
   # kernel gate (F3): the app's translation unit that compiles the kernel file, and its flags
   gate_preprocess: {tu: main.cu, flags: '-x hip -I./AVI -DOUTPUT'}
-  # G-cpu (F4): measured std 0.0152 s over 12 pristine unprofiled pairs (MI250X, 2026-09-24), rounded up
-  cpu_sigma_s: 0.016
+  # G-cpu (H1): std 0.0549 s over 12 pristine PROFILED pairs (MI250X, 2026-09-25), rounded up
+  cpu_sigma_s: 0.063
+  # final-score profiled samples per side (H6): short targets need more to keep a 5-replay spread <= 1.5%
+  final_samples: 5
   extra_files:
   - rodinia/heartwall-hip/main.cu
   reference_output: frontier_refs/heartwall/ref-result.txt
@@ -138,30 +149,34 @@ apps:
 
 - name: hotspot
   kernel_name: calculate_temp
-  score_regex: '^(?:\S+ )?(?:[\w:]+::)?calculate_temp(?:<.*>)?\('
+  score_regex: '^(?:\S+ )?(?:(?:\(anonymous namespace\)|[\w]+)::)*calculate_temp(?:<.*>)?\('
   rocprof_compute_dispatch: 0
   path: rodinia/hotspot-hip
   run_command: ./hotspot 1024 5 100 ../data/hotspot/temp_1024 ../data/hotspot/power_1024 output.out
   kernel_file: rodinia/hotspot-hip/hotspot.cu
   # kernel gate (F3): the app's translation unit that compiles the kernel file, and its flags
   gate_preprocess: {tu: hotspot.cu, flags: '-x hip'}
-  # G-cpu (F4): measured std 0.021 s over 12 pristine unprofiled pairs (MI250X, 2026-09-24), rounded up
-  cpu_sigma_s: 0.022
+  # G-cpu (H1): std 0.0350 s over 12 pristine PROFILED pairs (MI250X, 2026-09-25), rounded up
+  cpu_sigma_s: 0.04
+  # final-score profiled samples per side (H6): short targets need more to keep a 5-replay spread <= 1.5%
+  final_samples: 5
   reference_output: frontier_refs/hotspot/ref-output.out
   test_output: rodinia/hotspot-hip/output.out
   numeric_tolerance: 0.01
 
 - name: nw
   kernel_name: needle_cuda_shared_1
-  score_regex: '^(?:\S+ )?(?:[\w:]+::)?needle_cuda_shared_1(?:<.*>)?\('
+  score_regex: '^(?:\S+ )?(?:(?:\(anonymous namespace\)|[\w]+)::)*needle_cuda_shared_1(?:<.*>)?\('
   rocprof_compute_dispatch: 127
   path: rodinia/nw-hip
   run_command: ./needle 32768 10
   kernel_file: rodinia/nw-hip/needle_kernel.cu
   # kernel gate (F3): the app's translation unit that compiles the kernel file, and its flags
   gate_preprocess: {tu: needle.cu, flags: '-x hip -DTRACEBACK'}
-  # G-cpu (F4): measured std 0.0639 s over 12 pristine unprofiled pairs (MI250X, 2026-09-24), rounded up
-  cpu_sigma_s: 0.065
+  # G-cpu (H1): std 0.1038 s over 12 pristine PROFILED pairs (MI250X, 2026-09-25), rounded up
+  cpu_sigma_s: 0.119
+  # final-score profiled samples per side (H6): short targets need more to keep a 5-replay spread <= 1.5%
+  final_samples: 5
   extra_files:
   - rodinia/nw-hip/needle.cu
   reference_output: frontier_refs/nw/ref-result.txt
@@ -169,7 +184,7 @@ apps:
 
 - name: pathfinder
   kernel_name: dynproc_kernel
-  score_regex: '^(?:\S+ )?(?:[\w:]+::)?dynproc_kernel(?:<.*>)?\('
+  score_regex: '^(?:\S+ )?(?:(?:\(anonymous namespace\)|[\w]+)::)*dynproc_kernel(?:<.*>)?\('
   rocprof_compute_dispatch: 2
   path: rodinia/pathfinder-hip
   clean_command: make clean
@@ -180,20 +195,24 @@ apps:
   kernel_file: rodinia/pathfinder-hip/pathfinder.cu
   # kernel gate (F3): the app's translation unit that compiles the kernel file, and its flags
   gate_preprocess: {tu: pathfinder.cu, flags: '-x hip -DBENCH_PRINT'}
-  # G-cpu (F4): measured std 0.077 s over 12 pristine unprofiled pairs (MI250X, 2026-09-24), rounded up
-  cpu_sigma_s: 0.08
+  # G-cpu (H1): std 0.0545 s over 12 pristine PROFILED pairs (MI250X, 2026-09-25), rounded up
+  cpu_sigma_s: 0.063
+  # final-score profiled samples per side (H6): short targets need more to keep a 5-replay spread <= 1.5%
+  final_samples: 10
   reference_output: frontier_refs/pathfinder/ref-result.txt
 
 - name: streamcluster
   kernel_name: kernel_compute_cost
-  score_regex: '^(?:\S+ )?(?:[\w:]+::)?kernel_compute_cost(?:<.*>)?\('
+  score_regex: '^(?:\S+ )?(?:(?:\(anonymous namespace\)|[\w]+)::)*kernel_compute_cost(?:<.*>)?\('
   rocprof_compute_dispatch: 300
   path: rodinia/streamcluster-hip
   run_command: ./sc_gpu 10 20 256 131072 131072 16000 none output.txt 1
   kernel_file: rodinia/streamcluster-hip/streamcluster_cuda.cu
   # kernel gate (F3): the app's translation unit that compiles the kernel file, and its flags
   gate_preprocess: {tu: streamcluster_cuda.cu, flags: '-x hip'}
-  # G-cpu (F4): measured std 0.1408 s over 12 pristine unprofiled pairs (MI250X, 2026-09-24), rounded up
-  cpu_sigma_s: 0.15
+  # G-cpu (H1): std 0.1091 s over 12 pristine PROFILED pairs (MI250X, 2026-09-25), rounded up
+  cpu_sigma_s: 0.126
+  # final-score profiled samples per side (H6): short targets need more to keep a 5-replay spread <= 1.5%
+  final_samples: 5
   reference_output: frontier_refs/streamcluster/ref-output.txt
   test_output: rodinia/streamcluster-hip/output.txt

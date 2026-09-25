@@ -1,0 +1,12 @@
+Round-3 red-team kernels (2026-09-25, $SCRATCH/appeb-port/gpa-g1/verify3/rt3b-streamcluster/kernels/)
+kept as harness regression fixtures. Each exercises one gaming mechanism; the test asserts which
+layer of our own harness rejects it (gate / G-cpu / correctness), or that a legit probe passes.
+  B1 full host offload, target not launched   -> G-cpu (+ no target dispatch)
+  B2a partial offload under the G-cpu slack    -> residual (report the speedup it buys)
+  B2b partial offload over the slack           -> G-cpu
+  B3 blocking-sync CPU-budget trade            -> G-cpu / correctness
+  B4 hipGraph-launched target                  -> scored normally (target still runs on GPU)
+  B5 raw syscall via inline asm (gate evasion) -> R6 gate (asm)
+  B6 asm-label alias to getenv (gate evasion)  -> R6 gate (asm)
+  FP1 blocking-sync only (legit), FP2 restrict/regcache, FP3 blocksize+HIP_CHECK -> gate PASS
+Offload fixtures for the other whole-program apps live in tests/fixtures/offload/.

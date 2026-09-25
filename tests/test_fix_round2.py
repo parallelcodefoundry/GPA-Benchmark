@@ -122,23 +122,22 @@ def test_F1_charge_on_means_no_op_not_biased():
 
 def test_F4_cpu_guard_math_and_failure():
     g = cpu_guard([1.0, 1.02], [1.01, 1.03], 0.02)
-    assert g["ok"] and g["slack_s"] == pytest.approx(max(5 * 0.02 / 2 ** 0.5, 0.05))
+    assert g["ok"] and g["slack_s"] == pytest.approx(max(5 * 0.02 / 2 ** 0.5, 0.10))
     g = cpu_guard([1.0, 1.0], [1.5, 1.5], 0.02)
     assert not g["ok"] and g["delta_s"] == pytest.approx(0.5)
-    assert cpu_guard([1.0], [1.04], 0.001)["ok"]  # the 50 ms floor
-    assert not cpu_guard([1.0], [1.06], 0.001)["ok"]
-    base = [_s(100, {"k": 100})] * 2
-    opt = [_s(25, {"k": 25})] * 2  # "4x" ... because the stencil ran on the CPU
-    r = score_frontier(base, opt, r"^k$", baseline_cpu=[{"cpu_s": 1.0}, {"cpu_s": 1.01}],
-                       optimized_cpu=[{"cpu_s": 1.4}, {"cpu_s": 1.41}], cpu_sigma_s=0.01)
+    assert cpu_guard([1.0], [1.09], 0.001)["ok"]  # the 100 ms floor (H1)
+    assert not cpu_guard([1.0], [1.2], 0.001)["ok"]
+    base = [{**_s(100, {"k": 100}), "cpu_s": 1.0}, {**_s(100, {"k": 100}), "cpu_s": 1.01}]
+    opt = [{**_s(25, {"k": 25}), "cpu_s": 1.4}, {**_s(25, {"k": 25}), "cpu_s": 1.41}]  # "4x" on the CPU
+    r = score_frontier(base, opt, r"^k$", cpu_sigma_s=0.01)
     assert not r["ok"] and [f["code"] for f in r["failures"]] == ["G-cpu"]
     assert "CPU TIME" in r["failures"][0]["message"] and r["raw_speedup"] == pytest.approx(4)
-    assert score_frontier(base, opt, r"^k$")["cpu"] == {"checked": False}
+    assert score_frontier(base, opt, r"^k$")["cpu"] == {"checked": False}  # no sigma -> not checked
 
 
 @pytest.mark.parametrize(("b", "o", "sigma", "match"), [
     ([], [1.0], 0.1, "at least one"), ([1.0], [], 0.1, "at least one"),
-    ([1.0, 1.0], [1.0], 0.1, "2 baseline CPU samples but 1"), ([1.0], [1.0], None, "cpu_sigma_s"),
+    ([1.0, 1.0], [1.0], 0.1, "2 baseline samples but 1"), ([1.0], [1.0], None, "cpu_sigma_s"),
     ([{"cpu_s": None}], [1.0], 0.1, "no cpu_s"),
 ])
 def test_F4_cpu_guard_fails_closed(b, o, sigma, match):
@@ -310,7 +309,7 @@ _DRIVE = textwrap.dedent('''\
     from gpa_bench_driver.driver_src.driver_utils import DriverInfraError
     mode = sys.argv[2]
     cfg = DriverConfig(app="toy", gpu_backend="hip", rocm_path=root / "rocm", offload_arch="gfx90a",
-                       config=root / "apps.yaml", nsys=True, num_samples=3, cpu_pairs=2,
+                       config=root / "apps.yaml", nsys=True, num_samples=3,
                        swaps_override={Path("kernel.cu"): "// kernel.cu\\nMODE=" + mode},
                        temp_dir=root / "tmp", kernel_gate=False)
     try:
@@ -320,8 +319,8 @@ _DRIVE = textwrap.dedent('''\
     b, s = long["toy"]
     print(json.dumps({"validate": s.validate, "order_b": [x["order"] for x in s.baseline_nsys_data],
                       "order_o": [x["order"] for x in s.nsys_data],
-                      "cpu_b": [x["cpu_s"] for x in s.baseline_cpu_data],
-                      "cpu_o": [x["cpu_s"] for x in s.cpu_data],
+                      "cpu_b": [x["cpu_s"] for x in s.baseline_nsys_data],
+                      "cpu_o": [x["cpu_s"] for x in s.nsys_data],
                       "base_same": b.nsys_data == s.baseline_nsys_data}))
     ''')
 
@@ -367,13 +366,15 @@ def test_F1_driver_interleaves_and_discards_warmup(toy2):
     out = _drive2(toy2, "good")
     assert out["validate"] is True
     assert out["order_b"] == [0, 2, 4] and out["order_o"] == [1, 3, 5]  # B,O,B,O,B,O
-    assert len(out["cpu_b"]) == len(out["cpu_o"]) == 2 and out["base_same"]
+    # H1: CPU rides in every profiled sample (no separate pairs)
+    assert len(out["cpu_b"]) == len(out["cpu_o"]) == 3 and out["base_same"]
 
 
-def test_F4_driver_cpu_pairs_expose_host_work(toy2):
+def test_H1_driver_measures_cpu_in_profiled_runs(toy2):
     out = _drive2(toy2, "cpuhog")
     assert out["validate"] is True
-    delta = sum(out["cpu_o"]) / 2 - sum(out["cpu_b"]) / 2
+    assert len(out["cpu_o"]) == 3 and all(c is not None for c in out["cpu_o"])
+    delta = sum(out["cpu_o"]) / len(out["cpu_o"]) - sum(out["cpu_b"]) / len(out["cpu_b"])
     assert delta > 0.2, out
     assert not cpu_guard(out["cpu_b"], out["cpu_o"], 0.01)["ok"]
 

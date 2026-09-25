@@ -11,6 +11,7 @@ dict (stored in ``DriverPassResult.nsys_data`` so existing consumers keep workin
         "kernels": {name: int},     # total ns per demangled kernel name, ALL kernels
         "kernel_dispatches": {name: int},
         "wall_s": float,            # wall time of the profiled run (seconds)
+        "cpu_s": float | None,      # user+sys CPU of the app process tree during THIS profiled run
         "backend": "rocprofv3",
         "valid": bool | None,       # R4: this run's output passed the app's check (None: unchecked)
         "validation_output": str | None,
@@ -220,24 +221,31 @@ def profile_once(
         out_file.unlink(missing_ok=True)
     command = rocprofv3_command(rocm_path, outdir, app["run_command"].split())
     start = time.perf_counter()
-    result = runner.run(command, run_path)
+    result = runner.run(command, run_path, measure_cpu=True)
     wall_s = time.perf_counter() - start
     trace_files = find_kernel_trace_files(outdir) if result.returncode == 0 else []
     if result.returncode != 0 or not trace_files:
         what = (f"rocprofv3 timing run failed with return code {result.returncode}"
                 if result.returncode != 0 else f"rocprofv3 wrote no kernel trace under {outdir}")
-        plain = runner.run(app["run_command"].split(), run_path)
         stderr = head_tail(result.stderr)
-        if plain.returncode == 0:
-            msg = (f"{what}, but the same binary runs fine without the profiler (harness/profiler "
-                   f"failure, not the program's): {stderr}")
-            raise DriverInfraError(msg)
-        msg = f"{what}; the program also fails without the profiler (rc {plain.returncode})"
+        # H3: infra ONLY when the profiler never started the app (its output dir was not even
+        # created) AND the plain binary is fine. Otherwise a non-zero exit is the AGENT's program
+        # (a lucky plain rerun must not launder an intermittent kernel crash).
+        if not outdir.exists():
+            plain = runner.run(app["run_command"].split(), run_path)
+            if plain.returncode == 0:
+                msg = (f"{what} before the app started (output dir never created), but the same "
+                       f"binary runs fine without the profiler (profiler/harness failure): {stderr}")
+                raise DriverInfraError(msg)
+        msg = f"the program failed under the profiler (return code {result.returncode})"
         if stderr:
             msg += f": {stderr}"
         raise RocprofError(msg)
     sample = summarize_kernel_trace(read_kernel_trace(trace_files), score_regex)
     sample["wall_s"] = wall_s
+    user = getattr(result, "cpu_user_s", None)
+    sys_t = getattr(result, "cpu_sys_s", None)
+    sample["cpu_s"] = (user + sys_t) if (user is not None and sys_t is not None) else None
     sample["backend"] = BACKEND_NAME
     sample["valid"] = None
     sample["validation_output"] = None
@@ -458,42 +466,45 @@ def _mean(values: list[float]) -> float:
     return sum(values) / len(values)
 
 
-def _cpu_values(values: list, label: str) -> list[float]:
+def _cpu_values(samples: list, label: str) -> list[float]:
     out = []
-    for i, v in enumerate(values):
+    for i, v in enumerate(samples):
         cpu = v.get("cpu_s") if isinstance(v, dict) else v
         if cpu is None:
-            msg = f"{label} CPU sample {i} has no cpu_s"
+            msg = f"{label} sample {i} has no cpu_s (G-cpu is measured in the profiled runs, H1)"
             raise ScoringError(msg)
         out.append(float(cpu))
     return out
 
 
 def cpu_guard(
-    baseline_cpu: list,
-    optimized_cpu: list,
+    baseline_samples: list,
+    optimized_samples: list,
     cpu_sigma_s: float | None,
     *,
     cpu_k: float = 5.0,
-    cpu_floor_s: float = 0.05,
+    cpu_floor_s: float = 0.10,
 ) -> dict[str, Any]:
-    """G-cpu (fix round 2 F4): the program's own CPU time must not grow beyond the noise.
+    """G-cpu (fix round 3 H1): the program's own CPU time (measured in the profiled, scored runs)
+    must not grow beyond the noise, so in-process profiler detection cannot separate a scored run
+    from a measured one.
 
-    slack = max(cpu_k * cpu_sigma_s / sqrt(n_pairs), cpu_floor_s); FAIL when
-    mean(optimized CPU) - mean(baseline CPU) > slack. cpu_sigma_s is the app's calibrated std
-    of the CPU-time difference of a pristine unprofiled pair.
+    ``cpu_s`` is read from each sample dict (user+sys of the app process tree during that
+    profiled run). slack = max(cpu_k * cpu_sigma_s / sqrt(n), cpu_floor_s); FAIL when
+    mean(optimized) - mean(baseline) > slack. ``marginal`` is True when it fails by < 2*slack
+    (the caller re-measures on a pooled series before deciding, H1).
 
     Raises:
-        ScoringError: empty or differently sized lists, missing values, or no cpu_sigma_s
+        ScoringError: empty or differently sized lists, a sample without cpu_s, or no cpu_sigma_s
 
     """
-    base = _cpu_values(list(baseline_cpu or []), "baseline")
-    opt = _cpu_values(list(optimized_cpu or []), "optimized")
+    base = _cpu_values(list(baseline_samples or []), "baseline")
+    opt = _cpu_values(list(optimized_samples or []), "optimized")
     if not base or not opt:
-        msg = "G-cpu needs at least one baseline and one optimized unprofiled run"
+        msg = "G-cpu needs at least one baseline and one optimized profiled sample"
         raise ScoringError(msg)
     if len(base) != len(opt):
-        msg = f"{len(base)} baseline CPU samples but {len(opt)} optimized CPU samples"
+        msg = f"{len(base)} baseline samples but {len(opt)} optimized samples for G-cpu"
         raise ScoringError(msg)
     if cpu_sigma_s is None:
         msg = "G-cpu needs the app's calibrated cpu_sigma_s"
@@ -501,10 +512,19 @@ def cpu_guard(
     n = len(opt)
     slack = max(cpu_k * float(cpu_sigma_s) / math.sqrt(n), cpu_floor_s)
     delta = _mean(opt) - _mean(base)
+    ok = delta <= slack
     return {"checked": True, "baseline_mean_s": _mean(base), "optimized_mean_s": _mean(opt),
             "delta_s": delta, "sigma_s": float(cpu_sigma_s), "n_pairs": n, "k": cpu_k,
-            "floor_s": cpu_floor_s, "slack_s": slack, "ok": delta <= slack,
+            "floor_s": cpu_floor_s, "slack_s": slack, "ok": ok,
+            "marginal": (not ok) and delta <= slack + 2.0 * slack,
             "baseline_s": base, "optimized_s": opt}
+
+
+def pooled_cpu_ok(baseline_samples: list, optimized_samples: list, cpu_sigma_s: float | None,
+                  *, cpu_k: float = 5.0, cpu_floor_s: float = 0.10) -> dict[str, Any]:
+    """G-cpu on a pooled (re-measured) series; same return shape as :func:`cpu_guard`."""
+    return cpu_guard(baseline_samples, optimized_samples, cpu_sigma_s, cpu_k=cpu_k,
+                     cpu_floor_s=cpu_floor_s)
 
 
 def score_frontier(
@@ -513,11 +533,9 @@ def score_frontier(
     score_regex: str,
     *,
     fixed_target_dispatches: bool = False,
-    baseline_cpu: list | None = None,
-    optimized_cpu: list | None = None,
     cpu_sigma_s: float | None = None,
     cpu_k: float = 5.0,
-    cpu_floor_s: float = 0.05,
+    cpu_floor_s: float = 0.10,
 ) -> dict[str, Any]:
     """Apply the Frontier GPA scoring rule (fix rounds 1 and 2) to baseline and optimized samples.
 
@@ -526,7 +544,7 @@ def score_frontier(
     mean(other_base)) is added to the optimized mean. speedup = mean(baseline scored) /
     mean(optimized scored + charge). Failures (no speedup credited): R2 ``launch-count`` (only
     with fixed_target_dispatches), R3 ``G-wall`` (mean optimized wall > 1.5 x baseline + 1 s),
-    F4 ``G-cpu`` (with CPU samples: see :func:`cpu_guard`), R11 ``G-zero`` (a mean <= 0).
+    F4/H1 ``G-cpu`` (CPU read from the profiled samples; see :func:`cpu_guard`), R11 ``G-zero``.
 
     Raises:
         ScoringError: empty or differently sized sample lists, malformed samples, baseline runs
@@ -586,16 +604,18 @@ def score_frontier(
             f"{G_WALL_FACTOR} x the original's {base.wall_mean_s:.2f} s + {G_WALL_SLACK_S:.0f} s "
             f"= {wall_limit:.2f} s (work moved to the CPU or to an untimed phase).")})
 
+    # G-cpu (H1): CPU is read from the profiled samples themselves. It is checked whenever the
+    # app has a calibrated cpu_sigma_s; a sample missing cpu_s FAILS closed (H4).
     cpu: dict[str, Any] = {"checked": False}
-    if baseline_cpu is not None or optimized_cpu is not None:
-        cpu = cpu_guard(baseline_cpu or [], optimized_cpu or [], cpu_sigma_s, cpu_k=cpu_k,
+    if cpu_sigma_s is not None:
+        cpu = cpu_guard(baseline_samples, optimized_samples, cpu_sigma_s, cpu_k=cpu_k,
                         cpu_floor_s=cpu_floor_s)
         if not cpu["ok"]:
             failures.append({"code": "G-cpu", "message": (
                 f"CPU TIME: your program used {cpu['optimized_mean_s']:.3f} s of CPU per run, "
                 f"{cpu['delta_s']:.3f} s more than the original's {cpu['baseline_mean_s']:.3f} s "
                 f"(allowed: {cpu['slack_s']:.3f} s of noise); work moved from the GPU to the CPU "
-                "is not credited.")})
+                "is not credited." + (" [marginal: re-measure]" if cpu["marginal"] else ""))})
 
     raw = None
     if b["mean_scored_ns"] > 0 and o["mean_scored_ns"] > 0:

@@ -79,7 +79,7 @@ from gpa_bench_driver.driver_src.driver_check import (
 from gpa_bench_driver.driver_src.driver_gate import check_kernel_source
 from gpa_bench_driver.driver_src.driver_reporting import print_report_table, save_results
 from gpa_bench_driver.driver_src.driver_rocprof import (
-    cpu_run_once,
+    RocprofError,
     get_score_regex,
     profile_once,
     rocprof_time_app,
@@ -806,13 +806,13 @@ def _interleaved_series(
     config: DriverConfig,
     hip_state: dict,
     roots: list[Path],
-) -> tuple[list[list[dict]], list[list[dict]], list[str | None]]:
-    """F1/F4 timing: 1 discarded profiled warm-up per side, then num_samples alternating
-    profiled samples (side 0, side 1, ...), then cpu_pairs alternating UNPROFILED runs with CPU
-    time. Every run's output is checked against hip_state["ref"] (R4).
+) -> tuple[list[list[dict]], list[str | None]]:
+    """F1 timing (H1): 1 discarded profiled warm-up per side, then n_samples alternating profiled
+    samples (side 0, side 1, ...). Each profiled sample carries cpu_s (G-cpu is measured in the
+    same scored runs). Every run's output is checked against hip_state["ref"] (R4).
 
     Returns:
-        (profiled samples per side, cpu samples per side, warm-up failure message per side)
+        (profiled samples per side, warm-up failure message per side)
 
     """
     ref = hip_state.get("ref")
@@ -829,16 +829,16 @@ def _interleaved_series(
     for d in profile_dirs:
         d.mkdir(parents=True, exist_ok=True)
     samples: list[list[dict]] = [[] for _ in roots]
-    cpu: list[list[dict]] = [[] for _ in roots]
     warm_fail: list[str | None] = [None for _ in roots]
     retain = config.retain_nsys_profiles
+    n_samples = getattr(config, "final_samples", None) or config.num_samples
     for j, path in enumerate(paths):  # warm-up, discarded
         w = profile_once(app, runner, path, profile_dirs[j] / "rocprof_warmup",
                          score_regex=score_regex, rocm_path=rocm, validate=validate)
         if w.get("valid") is False:
             warm_fail[j] = w.get("validation_output")
     order = 0
-    for i in range(config.num_samples):
+    for i in range(n_samples):
         for j, path in enumerate(paths):
             s = profile_once(app, runner, path, profile_dirs[j] / f"rocprof_sample_{i}",
                              score_regex=score_regex, rocm_path=rocm, validate=validate,
@@ -847,13 +847,7 @@ def _interleaved_series(
             s["warmup"] = False
             order += 1
             samples[j].append(s)
-    for _ in range(int(getattr(config, "cpu_pairs", 2) or 0)):
-        for j, path in enumerate(paths):
-            c = cpu_run_once(app, runner, path, validate=validate)
-            c["order"] = order
-            order += 1
-            cpu[j].append(c)
-    return samples, cpu, warm_fail
+    return samples, warm_fail
 
 
 def _first_invalid(label: str, samples: list[dict], warm: str | None) -> str | None:
@@ -902,7 +896,15 @@ def _run_app_hip_interleaved(
         pairs = ready or [(None, None)]
         for k, (root, res) in enumerate(pairs):
             roots = [temp_dir] if root is None else [temp_dir, root]
-            samples, cpu, warm = _interleaved_series(app, runner, config, hip_state, roots)
+            try:  # H3: a swap's own crash under the profiler is an agent failure on that pass
+                samples, warm = _interleaved_series(app, runner, config, hip_state, roots)
+            except RocprofError as exc:
+                if res is None:  # a baseline-only timing run failing is infra/baseline
+                    raise
+                res.run = False
+                res.validate = False
+                res.validation_output = f"the program failed during timing: {exc}"
+                continue
             base_problem = _first_invalid("baseline timed", samples[0], warm[0])
             if base_problem is not None:
                 msg = f"Validate failed for baseline timed run ({app['name']}): {base_problem}"
@@ -914,15 +916,14 @@ def _run_app_hip_interleaved(
             else:
                 b_nsys = samples[0]
             if k == 0:
-                base.nsys_data, base.cpu_data = b_nsys, cpu[0]
+                base.nsys_data = b_nsys
                 base.nsys_profile = base.nsys_post = b_nsys is not None
             if res is None:
                 continue
-            res.nsys_data, res.cpu_data = samples[1], cpu[1]
-            res.baseline_nsys_data, res.baseline_cpu_data = b_nsys, cpu[0]
+            res.nsys_data = samples[1]
+            res.baseline_nsys_data = b_nsys
             res.nsys_profile = res.nsys_post = True
-            problem = _first_invalid("timed", samples[1], warm[1]) or _first_invalid(
-                "unprofiled", cpu[1], None)
+            problem = _first_invalid("timed", samples[1], warm[1])
             if problem is not None:
                 res.validate = False
                 res.validation_output = problem

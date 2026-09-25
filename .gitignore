@@ -120,6 +120,7 @@ XSBench-hip/XSBench
 rodinia/*-hip/result.txt
 rodinia/*-hip/output.txt
 frontier_refs/bfs/ref-result.txt
+frontier_refs/bfs_variants/
 frontier_refs/pathfinder/ref-result.txt
 frontier_refs/b+tree/ref-output.txt
 frontier_refs/*/*.bad

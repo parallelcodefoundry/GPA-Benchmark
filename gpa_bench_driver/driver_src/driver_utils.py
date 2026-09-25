@@ -142,11 +142,12 @@ class SubprocessRunner:
                 -level quiet setting.  Useful for suppressing output on a single call (e.g. the
                 clean step) without changing the runner.
             stdout_cap_bytes: If set, only the first stdout_cap_bytes bytes of the command's stdout
-                are read back into the CompletedProcess (the rest is discarded).  Used for runs whose
-                stdout is not validated (e.g. rocprofv3 timing runs of pathfinder, ~180 MB each).
+                are read back into the CompletedProcess (the rest is discarded). NOT used by the
+                hip driver's timing runs: those keep and validate the full stdout (R4). It is only
+                for the profiler wrappers, whose reduced-size runs are not output-validated.
             measure_cpu: If True (multiprocessing mode only), the command's CPU time (rusage of the
-                child: user and sys, all threads) is attached as ``result.cpu_user_s`` /
-                ``result.cpu_sys_s`` (None when unavailable).
+                child: user and sys, all threads, incl. any in-process profiler) is attached as
+                ``result.cpu_user_s`` / ``result.cpu_sys_s`` (None when unavailable).
 
         Returns:
             CompletedProcess object with returncode, stdout, and stderr attributes.
