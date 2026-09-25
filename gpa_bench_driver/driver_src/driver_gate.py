@@ -135,18 +135,31 @@ _FORBIDDEN_LITERAL_PARTS = ("/proc", "/tmp", "/dev/shm", "ROCP", "ROCPROF", "HSA
                             "ref-", "ref_")
 
 _IDENT_RE = re.compile(r"\b[A-Za-z_]\w*\b")
-_DIRECTIVE_RE = re.compile(r"^[ \t]*#[ \t]*(define|undef)[ \t]+([A-Za-z_]\w*)", re.MULTILINE)
+_DIRECTIVE_RE = re.compile(r"^[ \t\f\v]*#[ \t\f\v]*(define|undef)[ \t\f\v]+([A-Za-z_]\w*)",
+                           re.MULTILINE)
 _PRAGMA_MACRO_RE = re.compile(r"\b(push_macro|pop_macro)\s*\(\s*\\?\"([A-Za-z_]\w*)\\?\"")
 _RESERVED_DEF_RE = re.compile(r"\b(__[A-Za-z_]\w*)\s*\(")
 _NOT_A_DEFINITION_PREFIX = re.compile(r"(\bif|\bwhile|\bfor|\bswitch|\breturn|[=,(!&|?:+\-*/<>])\s*$")
-# H2 directives
+# H2 directives (matched on text normalised by _phase12/_lex: splices, digraphs, comments)
 # any #line (even macro-computed: "#line LN ...") and any GNU line marker "# 1 ..." (J1a)
-_LINE_DIR_RE = re.compile(r"^[ \t]*#[ \t]*line\b", re.MULTILINE)
-_GNU_MARKER_RE = re.compile(r"^[ \t]*#[ \t]*\d", re.MULTILINE)
+_LINE_DIR_RE = re.compile(r"^[ \t\f\v]*#[ \t\f\v]*line\b", re.MULTILINE)
+_GNU_MARKER_RE = re.compile(r"^[ \t\f\v]*#[ \t\f\v]*\d", re.MULTILINE)
 # the whole #include operand (a literal <...>/"..." or anything else, e.g. a macro)
-_INCLUDE_RE = re.compile(r'^[ \t]*#[ \t]*include[ \t]*(\S.*?)[ \t]*$', re.MULTILINE)
-# a C/C++ main definition: main ( <params> ) {  -> capture the parameter list
-_MAIN_DEF_RE = re.compile(r"\bmain\s*\(([^)]*)\)\s*\{")
+_INCLUDE_RE = re.compile(r'^[ \t\f\v]*#[ \t\f\v]*include[ \t\f\v]*(\S.*?)[ \t\f\v]*$',
+                         re.MULTILINE)
+# K1 siblings: #import / #include_next / #embed have no honest use in a kernel file
+_OTHER_INCLUDE_RE = re.compile(r"^[ \t\f\v]*#[ \t\f\v]*(import|include_next|embed)\b",
+                               re.MULTILINE)
+# a C/C++ main definition: main ( <params> ) {  -> capture the parameter list; also the
+# parenthesized declarator int (main)(...) (fix round 5 minor)
+_MAIN_DEF_RE = re.compile(r"\bmain(?:\s*\))*\s*\(([^)]*)\)\s*\{")
+_TRIGRAPHS = {"=": "#", "/": "\\", "'": "^", "(": "[", ")": "]", "!": "|", "<": "{", ">": "}",
+              "-": "~"}
+_TRIGRAPH_RE = re.compile(r"\?\?([=/'()!<>-])")
+# phase 2: a backslash, optional horizontal whitespace (clang accepts it with a warning), newline
+_SPLICE_RE = re.compile(r"\\[ \t\f\v]*(?:\r\n|\n|\r)")
+_STRICT_STD_RE = re.compile(r"^-std=(c\+\+(98|03|0x|11|1y|14)|c(89|90|99|9x|11|1x|17|18)|"
+                            r"iso9899:\S+)$")
 
 
 @dataclass
@@ -178,9 +191,30 @@ def split_source(text: str) -> tuple[str, list[str]]:
     return code, literals
 
 
-def _lex(text: str) -> tuple[str, list[str], str]:
-    """(code with literals blanked, string literals, code with comments stripped only)."""
-    text = text.replace("\\\r\n", "").replace("\\\n", "")
+def _phase12(text: str, trigraphs: bool = False) -> str:
+    """Translation phases 1-2 as clang does them (K1a): trigraphs (only when the app's flags enable
+    them) and line splices, incl. backslash + horizontal whitespace + newline."""
+    if trigraphs:
+        text = _TRIGRAPH_RE.sub(lambda m: _TRIGRAPHS[m.group(1)], text)
+    return _SPLICE_RE.sub("", text)
+
+
+def _trigraphs_enabled(app: dict) -> bool:
+    """clang maps trigraphs only with -trigraphs or a strict ISO -std before C++17 / C23."""
+    spec = app.get("gate_preprocess") or {}
+    flags = str(spec.get("flags", "")).split()
+    return "-trigraphs" in flags or any(_STRICT_STD_RE.match(f) for f in flags)
+
+
+def _lex(text: str, trigraphs: bool = False) -> tuple[str, list[str], str]:
+    """(code with literals blanked, string literals, code with comments stripped only).
+
+    K1a: runs on the text after phases 1-2 (:func:`_phase12`) and, like clang's phase 3, replaces
+    each comment by ONE space (a block comment spanning lines joins them) and reads the digraphs
+    %: %:%: <: :> <% %> as # ## [ ] { } (with C++11's '<::' exception), so no directive spelling
+    or splice hides a directive from the regexes that run on the result.
+    """
+    text = _phase12(text, trigraphs)
     code: list[str] = []
     raw: list[str] = []
     literals: list[str] = []
@@ -195,10 +229,15 @@ def _lex(text: str) -> tuple[str, list[str], str]:
         if c == "/" and nxt == "*":
             j = text.find("*/", i + 2)
             end = n if j < 0 else j + 2
-            blank = " " + "\n" * text.count("\n", i, end)
-            code.append(blank)
-            raw.append(blank)
+            code.append(" ")
+            raw.append(" ")
             i = end
+            continue
+        dig = _digraph(text, i)
+        if dig is not None:
+            code.append(dig)
+            raw.append(dig)
+            i += 2
             continue
         if c in "\"'":
             j = i + 1
@@ -216,6 +255,19 @@ def _lex(text: str) -> tuple[str, list[str], str]:
         raw.append(c)
         i += 1
     return "".join(code), literals, "".join(raw)
+
+
+_DIGRAPHS = {"%:": "#", "<:": "[", ":>": "]", "<%": "{", "%>": "}"}
+
+
+def _digraph(text: str, i: int) -> str | None:
+    pair = text[i:i + 2]
+    rep = _DIGRAPHS.get(pair)
+    if rep is None:
+        return None
+    if pair == "<:" and text[i + 2:i + 3] == ":" and text[i + 3:i + 4] not in (":", ">"):
+        return None  # C++11: '<::' not followed by ':' or '>' is '<' '::'
+    return rep
 
 
 def _balanced_close(code: str, open_idx: int) -> int:
@@ -272,13 +324,15 @@ def _param_count(param_text: str) -> int:
 
 def _features(text: str, other_idents: frozenset[str],
               pristine_includes: frozenset[str] | None = None,
-              pristine_main_params: int | None = None) -> Counter:
-    code, literals, raw = _lex(text)
+              pristine_main_params: int | None = None, trigraphs: bool = False) -> Counter:
+    code, literals, raw = _lex(text, trigraphs)
     feats: Counter = Counter()
     for _ in _LINE_DIR_RE.finditer(raw):
         feats[("line_directive",)] += 1
     for _ in _GNU_MARKER_RE.finditer(raw):
         feats[("gnu_marker",)] += 1
+    for m in _OTHER_INCLUDE_RE.finditer(raw):
+        feats[("other_include", m.group(1))] += 1
     if pristine_includes is not None:
         # J1a: the operand must be a literal <...> or "..."; a macro (#include MACRO) is rejected.
         # Absolute paths and '..' are rejected for both bracket forms. A new plain <system>/app
@@ -320,7 +374,14 @@ def _describe(feat: tuple, extra: int) -> str:  # noqa: PLR0911
         return ("a #line directive: rewriting line markers to make kernel-file code look like "
                 "another file is not allowed (even via a macro operand)")
     if feat[0] == "gnu_marker":
-        return ("a '# N \"file\"' GNU line marker: rewriting line markers is not allowed")
+        return ("a '# N \"file\"' GNU line marker (a #line in another spelling): rewriting line "
+                "markers is not allowed")
+    if feat[0] == "other_include":
+        if feat[1] == "embed":
+            return ("#embed: reading a file's bytes at compile time is not allowed in the kernel "
+                    "file")
+        return (f"#{feat[1]}: only plain #include of a literal <system/HIP> header or a header in "
+                "the app directory is allowed")
     if feat[0] == "macro_include":
         return (f"#include {feat[1]}: the include operand must be a literal <...> or \"...\" "
                 "header name (a macro-computed include is not allowed)")
@@ -432,7 +493,13 @@ def _run_pp(app: dict, gpa_root: Path, kernel_text: str | None, hipcc: Path,
                         ignore=shutil.ignore_patterns("*.o", ".rocprofv3", ".frontier_build.log"))
         if kernel_text is not None:
             (work / kernel_rel).write_text(kernel_text, encoding="utf-8")
-        cmd = [str(hipcc), "-E", "--cuda-host-only", *flags, "--offload-arch=gfx90a", *extra, tu]
+        # K1b: -dI makes the compiler echo every include directive it executes, -MD lists every
+        # file it read (an #embed'ed file too); both feed _marker_events
+        deps = Path(tmp) / "deps.d"
+        track = ([] if ("-dM" in extra or _KEEP_SYS in extra)
+                 else ["-dI", "-MD", "-MF", str(deps)])
+        cmd = [str(hipcc), "-E", "--cuda-host-only", *flags, "--offload-arch=gfx90a", *track,
+               *extra, tu]
         proc = subprocess.run(cmd, cwd=work, capture_output=True, text=True,  # noqa: S603
                               check=False, timeout=300)
         proc.kernel_abs = os.path.realpath(work / kernel_rel)  # type: ignore[attr-defined]
@@ -442,6 +509,10 @@ def _run_pp(app: dict, gpa_root: Path, kernel_text: str | None, hipcc: Path,
             kern, other, ids = _split_regions(proc.stdout, work, proc.kernel_abs, system_dirs)
             proc.regions = (kern, other)  # type: ignore[attr-defined]
             proc.marker_ids = ids  # type: ignore[attr-defined]
+            if track:
+                dep_files = _read_deps(deps, work) if deps.is_file() else None
+                proc.marker_events = _marker_events(  # type: ignore[attr-defined]
+                    proc.stdout, work, system_dirs, dep_files, tu)
         return proc
 
 
@@ -515,6 +586,8 @@ def _split_regions(text: str, work: Path, kernel_abs: str,
     in_kernel = True  # before the first marker, and (fail closed) for any unknown file
     seen: set[str] = set()
     for line in text.splitlines():
+        if _ECHO_RE.match(line):
+            continue  # -dI include echo (K1b), not program text
         m = _LINE_MARKER_RE.match(line)
         if m:
             name = m.group(2)
@@ -528,6 +601,151 @@ def _split_regions(text: str, work: Path, kernel_abs: str,
             continue
         (kernel_lines if in_kernel else other_lines).append(line)
     return "\n".join(kernel_lines), "\n".join(other_lines), frozenset(seen)
+
+
+# ---- K1b: #line spoofs from the compiler's OWN output (immune to lexer tricks)
+# a line marker the compiler printed (column 0; a macro-produced '#' is printed indented)
+_MARKER_FULL_RE = re.compile(r'^# (\d+) "((?:[^"\\]|\\.)*)"((?: \d+)*)\s*$')
+# -dI echo of an include directive the compiler executed
+_ECHO_RE = re.compile(r'^#(include|include_next|import|__include_macros) ([<"])(.*)[>"] '
+                      r'/\* clang -E -dI \*/\s*$')
+
+
+def _unescape(name: str) -> str:
+    return re.sub(r"\\(.)", r"\1", name)
+
+
+def _real(name: str, work: Path) -> str:
+    if name.startswith("<"):
+        return name
+    return os.path.realpath(name if os.path.isabs(name) else os.path.join(work, name))
+
+
+def _read_deps(deps: Path, work: Path) -> set[str]:
+    """Real paths of every file the compiler read (make-style -MD output)."""
+    text = deps.read_text(encoding="utf-8", errors="replace").replace("\\\n", " ")
+    body = text.split(":", 1)[1] if ":" in text else ""
+    names = re.findall(r"(?:\\ |\S)+", body)
+    return {_real(n.replace("\\ ", " "), work) for n in names}
+
+
+def _short(name: str) -> str:
+    return name if len(name) <= 80 else "..." + name[-77:]
+
+
+def _marker_events(text: str, work: Path, system_dirs: tuple[str, ...],
+                   dep_files: set[str] | None, tu: str) -> Counter:
+    """K1b: replay the compiler's own line markers (-E) against an include stack.
+
+    - a marker without flag 1/2 that names another file than the current one is a #line-style
+      switch (``#line N "f"`` / ``# N "f"`` in any spelling);
+    - a flag-2 marker must return to the parent file;
+    - a flag-1 push must directly follow the compiler's -dI echo of that header and the includer's
+      own renumber marker (clang always prints ``# L "includer"`` between the two, because the
+      echo line moves its line count one ahead) -- a flagged GNU marker spoofing an include;
+    - flag 3 (system header) on a marker of a NON-system file (``#pragma clang system_header`` or
+      a flag-3 marker) is an event: it would hide the rest of the file from -fkeep-system-includes;
+    - an include echoed from non-system code must be a plain #include of a relative path without
+      '..'; any file the compiler read (-MD) but never entered (#embed) is an event.
+    """
+    ev: Counter = Counter()
+    stack: list[str] = []
+    pending: str | None = None  # operand of the last -dI echo, not yet consumed
+    ready = False  # the includer's renumber marker followed that echo
+    entered: set[str] = set()
+
+    def is_sys(name: str) -> bool:
+        return name.startswith("<") or _is_system_file(_real(name, work), system_dirs)
+
+    for line in text.splitlines():
+        m = _MARKER_FULL_RE.match(line)
+        if m:
+            name = _unescape(m.group(2))
+            flags = set(m.group(3).split())
+            if not stack:
+                stack.append(name)
+                entered.add(_real(name, work))
+                continue
+            cur = stack[-1]
+            if "3" in flags and not is_sys(name):
+                ev[("line_switch", "system-header marking of a non-system file",
+                    _short(name))] += 1
+            if "1" in flags:
+                real = _real(name, work)
+                if not name.startswith("<") and (
+                        pending is None or not ready
+                        or os.path.basename(pending) != os.path.basename(name)):
+                    ev[("line_switch", "enter without an #include", _short(name))] += 1
+                entered.add(real)
+                stack.append(name)
+                pending, ready = None, False
+            elif "2" in flags:
+                if len(stack) < 2:
+                    ev[("line_switch", "return past the main file", _short(name))] += 1
+                    stack = [name]
+                else:
+                    stack.pop()
+                    if stack[-1] != name and _real(stack[-1], work) != _real(name, work):
+                        ev[("line_switch", "return to a file that did not include it",
+                            _short(name))] += 1
+                        stack[-1] = name
+                pending, ready = None, False
+            elif cur != name and _real(cur, work) != _real(name, work):
+                ev[("line_switch", f"switch from {_short(cur)}", _short(name))] += 1
+                stack[-1] = name
+                pending, ready = None, False
+            elif pending is not None:
+                ready = True  # the includer's renumber after the echo
+            continue
+        e = _ECHO_RE.match(line)
+        if e:
+            directive, operand = e.group(1), e.group(3)
+            if stack and not is_sys(stack[-1]):
+                if directive in ("import", "include_next"):
+                    ev[("pp_directive", directive, "")] += 1
+                if operand.startswith("/") or ".." in operand.split("/"):
+                    ev[("pp_include_path", operand, "")] += 1
+            pending, ready = operand, False
+            continue
+        if line.strip():
+            pending, ready = None, False
+    if dep_files is not None:
+        tu_real = _real(tu, work)
+        for f in sorted(dep_files - entered - {tu_real}):
+            if not _is_system_file(f, system_dirs):  # e.g. #embed of a non-system file
+                ev[("pp_unentered_read", _short(f), "")] += 1
+    return ev
+
+
+_KEEP_SYS = "-fkeep-system-includes"
+_KEPT_RE = re.compile(r"^#(include|include_next|import|__include_macros) .*/\* clang -E "
+                      r"-fkeep-system-includes \*/\s*$")
+
+
+def _all_program_text(text: str) -> str:
+    """K1b: every line of -fkeep-system-includes output except markers and kept includes. The
+    compiler leaves system headers out itself, so no line marker (spoofed or not) can move
+    kernel-file tokens out of this text."""
+    return "\n".join(ln for ln in text.splitlines()
+                     if not _LINE_MARKER_RE.match(ln) and not _KEPT_RE.match(ln)
+                     and not _ECHO_RE.match(ln))
+
+
+def _describe_marker_event(feat: tuple, extra: int) -> str:
+    times = "" if extra == 1 else f" ({extra} more than the original)"
+    kind, what, name = feat
+    if kind == "line_switch":
+        return (f"a #line-style file switch in the compiler's own line markers ({what}: "
+                f"'{name}'){times}: rewriting line markers (#line or '# N \"file\"' in any "
+                "spelling, digraph or line splice) is not allowed")
+    if kind == "pp_directive":
+        return (f"#{what}{times} (as the compiler read it): only plain #include of a literal "
+                "<system/HIP> header or a header in the app directory is allowed")
+    if kind == "pp_include_path":
+        return (f"#include of '{what}'{times} (as the compiler read it): an absolute or '..' "
+                "include path is not allowed")
+    return (f"the compiler read '{what}' without entering it as an #include{times} (#embed or "
+            "similar): reading files at compile time is not allowed in the kernel file")
 
 
 def _declared_names(app: dict, gpa_root: Path, hipcc: Path) -> frozenset[str]:
@@ -553,7 +771,8 @@ def _declared_names(app: dict, gpa_root: Path, hipcc: Path) -> frozenset[str]:
     return result
 
 
-_MAIN_NAME_RE = re.compile(r"(?<![\w:])main\s*\(")
+# main, also as a parenthesized declarator: int (main)(...) (fix round 5 minor)
+_MAIN_NAME_RE = re.compile(r"(?<![\w:])main(?:\s*\))*\s*\(")
 
 
 def _max_main_params(code: str) -> int:
@@ -621,12 +840,13 @@ def _preprocessed_violations(app: dict, candidate: str, pristine: str, gpa_root:
             hash(pristine))
     sysdirs = _system_include_dirs(hipcc)
     if pkey not in _PP_CACHE:
-        region = _expanded_region(app, gpa_root, pristine, hipcc, sysdirs)
-        if region is None:
+        pproc = _run_pp(app, gpa_root, pristine, hipcc, [], sysdirs)
+        if pproc.returncode != 0:
             msg = f"the kernel gate could not preprocess the pristine {app['kernel_file']}"
             raise DriverInfraError(msg)
-        _PP_CACHE[pkey] = (_expanded_features(region),)
-    base = _PP_CACHE[pkey][0]
+        _PP_CACHE[pkey] = (_expanded_features(pproc.regions[0]),  # type: ignore[attr-defined]
+                           getattr(pproc, "marker_events", Counter()))
+    base, base_events = _PP_CACHE[pkey]
     proc = _run_pp(app, gpa_root, candidate, hipcc, [], sysdirs)
     if proc.returncode != 0:
         return [("the kernel file could not be preprocessed with the app's compiler flags, so it "
@@ -636,10 +856,35 @@ def _preprocessed_violations(app: dict, candidate: str, pristine: str, gpa_root:
     violations = [_describe_expanded(f, n - base.get(f, 0))
                   for f, n in sorted(cand.items(), key=lambda kv: repr(kv[0]))
                   if n > base.get(f, 0)]
+    # K1b: line-marker / include-echo / read-file events of the compiler's own output
+    events = getattr(proc, "marker_events", Counter())
+    violations += [_describe_marker_event(f, n - base_events.get(f, 0))
+                   for f, n in sorted(events.items(), key=lambda kv: repr(kv[0]))
+                   if n > base_events.get(f, 0)]
+    # K1b: the same rules on ALL program text of -fkeep-system-includes output (attribution by the
+    # compiler, not by line markers): catches what a marker spoof moved out of the kernel region
+    kkey = ("keep", str(gpa_root), str(app["path"]), str(app["kernel_file"]), str(hipcc),
+            hash(pristine))
+    if kkey not in _PP_CACHE:
+        kproc = _run_pp(app, gpa_root, pristine, hipcc, [_KEEP_SYS], sysdirs)
+        if kproc.returncode != 0:
+            msg = f"the kernel gate could not preprocess the pristine {app['kernel_file']}"
+            raise DriverInfraError(msg)
+        _PP_CACHE[kkey] = (_expanded_features(_all_program_text(kproc.stdout)),)
+    kbase = _PP_CACHE[kkey][0]
+    kproc = _run_pp(app, gpa_root, candidate, hipcc, [_KEEP_SYS], sysdirs)
+    if kproc.returncode == 0:
+        kcand = _expanded_features(_all_program_text(kproc.stdout))
+        for f, n in sorted(kcand.items(), key=lambda kv: repr(kv[0])):
+            if n > kbase.get(f, 0) and not cand.get(f, 0) > base.get(f, 0):
+                violations.append(_describe_expanded(f, n - kbase.get(f, 0))
+                                  + " (found in the whole program text, although the line "
+                                  "markers attribute it elsewhere)")
     # (a) new macros named like a declared/defined name of the headers or other sources
     declared = _declared_names(app, gpa_root, hipcc)
-    raw_code, _, _ = _lex(candidate)
-    pristine_code, _, _ = _lex(pristine)
+    trig = _trigraphs_enabled(app)
+    raw_code, _, _ = _lex(candidate, trig)
+    pristine_code, _, _ = _lex(pristine, trig)
     cand_macros = Counter(m.group(2) for m in _DIRECTIVE_RE.finditer(raw_code))
     base_macros = Counter(m.group(2) for m in _DIRECTIVE_RE.finditer(pristine_code))
     for name, n in sorted(cand_macros.items()):
@@ -674,8 +919,8 @@ def _app_dir_headers(app: dict, gpa_root: Path) -> frozenset[str]:
     return frozenset(names)
 
 
-def _pristine_main_params(pristine: str) -> int:
-    code, _, _ = _lex(pristine)
+def _pristine_main_params(pristine: str, trigraphs: bool = False) -> int:
+    code, _, _ = _lex(pristine, trigraphs)
     counts = [_param_count(m.group(1)) for m in _MAIN_DEF_RE.finditer(code)]
     return max(counts) if counts else 0  # a kernel file with no main() must not gain one with params
 
@@ -700,9 +945,10 @@ def check_kernel_source(app: dict, candidate: str, *, gpa_root: Path,
         pristine = (Path(gpa_root) / kernel_rel).read_text(encoding="utf-8", errors="replace")
     others = other_source_identifiers(app, gpa_root)
     inc = _app_dir_headers(app, gpa_root)
-    main_params = _pristine_main_params(pristine)
-    base = _features(pristine, others, inc, main_params)
-    cand = _features(candidate, others, inc, main_params)
+    trig = _trigraphs_enabled(app)
+    main_params = _pristine_main_params(pristine, trig)
+    base = _features(pristine, others, inc, main_params, trig)
+    cand = _features(candidate, others, inc, main_params, trig)
     violations = [_describe(feat, count - base.get(feat, 0))
                   for feat, count in sorted(cand.items(), key=lambda kv: repr(kv[0]))
                   if count > base.get(feat, 0)]
