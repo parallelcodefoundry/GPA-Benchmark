@@ -180,8 +180,10 @@ phase_build() {
     "$HIPCC" -O2 --offload-arch="$OFFLOAD_ARCH" -o frontier_tools/vram_reset scripts/vram_reset.cpp \
         >frontier_tools/.vram_reset_build.log 2>&1 || die "build of frontier_tools/vram_reset failed"
     # hipcc output is not byte-identical across build paths, so the SOURCE is md5-pinned in
-    # frontier_refs.md5 and the built binary's md5 is recorded here; the driver checks it.
-    md5sum frontier_tools/vram_reset | awk '{print $1}' > frontier_tools/vram_reset.md5
+    # frontier_refs.md5 and the built binary's sha256 is recorded here (K3): the runner snapshots
+    # it pre-agent and passes it to the driver, which checks the binary before every use.
+    rm -f frontier_tools/vram_reset.md5
+    (cd frontier_tools && sha256sum vram_reset > vram_reset.sha256)
     log "build: frontier_tools/vram_reset built"
 }
 
@@ -228,6 +230,14 @@ phase_verify() {
         die "verify: some references/inputs do not match frontier_refs.md5"
     fi
     log "verify: all $(grep -c . "$MANIFEST") entries of frontier_refs.md5 match"
+    # K3: the J0 VRAM reset binary must exist and match its build record
+    [[ -x frontier_tools/vram_reset ]] \
+        || die "verify: frontier_tools/vram_reset is missing (run: scripts/frontier_prepare.sh build)"
+    [[ -s frontier_tools/vram_reset.sha256 ]] \
+        || die "verify: frontier_tools/vram_reset.sha256 is missing (run: scripts/frontier_prepare.sh build)"
+    (cd frontier_tools && sha256sum --quiet -c vram_reset.sha256) \
+        || die "verify: frontier_tools/vram_reset does not match its build record vram_reset.sha256"
+    log "verify: frontier_tools/vram_reset matches its build record"
 }
 
 phases=("$@")

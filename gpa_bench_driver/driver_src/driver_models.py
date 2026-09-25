@@ -89,6 +89,10 @@ class DriverConfig:
         pairs: hip only (J0 protocol T1). Number of ABBA pairs (even) per phase: None = the app's
             yaml test_pairs (6); the runner's final score passes the yaml final_pairs (10)
             (default: None)
+        vram_reset_sha256: hip only (fix round 5 K3). The sha256 of frontier_tools/vram_reset
+            that the runner snapshotted BEFORE the agent ran; the driver checks the binary
+            against it before use and runs a sealed in-memory copy. None = check against the
+            build record frontier_tools/vram_reset.sha256 (gpa_test) (default: None)
 
     """
 
@@ -125,6 +129,7 @@ class DriverConfig:
     kernel_gate: bool
     interleave: bool
     pairs: int | None
+    vram_reset_sha256: str | None
 
     def __init__(
         self,
@@ -162,6 +167,7 @@ class DriverConfig:
         kernel_gate: bool = True,
         interleave: bool = True,
         pairs: int | None = None,
+        vram_reset_sha256: str | None = None,
     ) -> None:
         """Initialize a DriverConfig object."""
         logger.debug("Entering DriverConfig")
@@ -184,6 +190,7 @@ class DriverConfig:
         self.kernel_gate = kernel_gate
         self.interleave = interleave
         self.pairs = pairs
+        self.vram_reset_sha256 = vram_reset_sha256
         self.no_clean = no_clean
         self.build_only = build_only
         self.nsys = nsys

@@ -237,6 +237,8 @@ def toy(tmp_path):
     reset = tools / "vram_reset"
     reset.write_text("#!/bin/bash\necho 'vram_reset allocs=1 GiB=0.00'\n")
     reset.chmod(0o755)
+    (tools / "vram_reset.sha256").write_text(  # K3 build record
+        __import__("hashlib").sha256(reset.read_bytes()).hexdigest() + "  vram_reset\n")
     app = root / "rodinia" / "toy-hip"
     app.mkdir(parents=True)
     (app / "kernel.cu").write_text("MODE=good\n")
@@ -289,7 +291,7 @@ def test_J2_original_j0_failure_is_infra_not_agent(toy):
     # (j=0). J2: that is a DriverInfraError, not the agent's failure.
     out = _drive(toy, "good", env={"FAIL_FIRST": "1"})
     assert "infra" in out, out
-    assert "j=0" in out["infra"] or "original" in out["infra"].lower()
+    assert out["infra"].startswith("the original toy (j=0)"), out  # (the tmp path says "original")
 
 
 # =========================================================================== J3 recorded evidence

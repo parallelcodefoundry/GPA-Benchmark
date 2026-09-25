@@ -27,8 +27,11 @@
 #   test_pairs / final_pairs  J0 protocol: ABBA pairs for gpa_test (6) and the runner's final score (10).
 #   level_tol                 J0: per-arm robust spread above which the series is "unstable" (0.025).
 #   placement_levels_ms       J0 T5 (bfs, nw): the discrete VRAM-placement levels (ms) of the target.
-#   cpu_sigma_s               calibrated std (s) of the CPU-time difference of a pristine pair of
-#                             unprofiled runs; G-cpu slack = max(5 sigma / sqrt(pairs), 0.05 s) (F4).
+#   cpu_sigma_s               calibrated std (s) of the CPU time of a pristine PROFILED run (H1);
+#                             G-cpu slack = max(5 sigma / sqrt(pairs), cpu_floor_s).
+#   cpu_floor_s               G-cpu slack floor (s); default 0.10. pathfinder 0.25: its honest
+#                             reference opt sits at the 0.10 s edge, and G-cpu cannot catch a
+#                             pathfinder host offload anyway; that is audit_required's job (K minor).
 #
 # References (reference_output) are GPA-root-relative files under frontier_refs/, outside every
 # directory an app runs in; each is md5-verified against frontier_refs.md5 before use.
@@ -225,6 +228,9 @@ apps:
   gate_preprocess: {tu: pathfinder.cu, flags: '-x hip -DBENCH_PRINT'}
   # G-cpu (H1): std 0.0545 s over 12 pristine PROFILED pairs (MI250X, 2026-09-25), rounded up
   cpu_sigma_s: 0.063
+  # G-cpu slack floor (fix round 5): the honest reference opt reads +0.098 s against the default
+  # 0.10 s; pathfinder host offload is covered by audit_required, not by G-cpu
+  cpu_floor_s: 0.25
   # J0 protocol (M.md T1/T3): ABBA pairs for gpa_test / the runner's final score, and
   # the per-arm robust-spread tolerance above which a series counts as unstable
   test_pairs: 6

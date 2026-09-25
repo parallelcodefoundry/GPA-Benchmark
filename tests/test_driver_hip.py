@@ -569,7 +569,7 @@ out = {}
 for kw in ({"app": "bfs", "nsys": True}, {"app": "xsbench", "ncu": True, "no_sanitize": True},
            {"app": "all"}, {"app": "backprop", "swaps_override": {Path("backprop_cuda_kernel.cu"): "// backprop_cuda_kernel.cu\nX"}, "nsys": True}):
     cfg = DriverConfig(sm_version=80, cuda_home=Path("/fake/cuda"), temp_dir=Path("/tmp"), **kw)
-    old_keys = sorted(k for k in vars(cfg) if k not in ("gpu_backend", "offload_arch", "rocm_path", "app_overrides", "gpu_device", "reference_from_baseline", "kernel_gate", "interleave", "pairs"))
+    old_keys = sorted(k for k in vars(cfg) if k not in ("gpu_backend", "offload_arch", "rocm_path", "app_overrides", "gpu_device", "reference_from_baseline", "kernel_gate", "interleave", "pairs", "vram_reset_sha256"))
     app_config, swaps, env = setup_app_config(cfg)
     key = repr(sorted((k, repr(v)) for k, v in kw.items()))
     out[key] = {

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import os
 import random
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +18,7 @@ import yaml
 
 from gpa_bench_driver.driver_src.driver_models import DriverConfig
 from gpa_bench_driver.driver_src.driver_rocprof import score_frontier, score_frontier_pooled
+from gpa_bench_driver.driver_src.driver_t0 import VramResetTool, snapshot
 from gpa_bench_driver.driver_src.driver_utils import DriverInfraError
 
 _GPA_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -39,36 +39,40 @@ def score_kwargs(entry: dict) -> dict[str, Any]:
     return {
         "fixed_target_dispatches": bool(entry.get("fixed_target_dispatches")),
         "cpu_sigma_s": entry.get("cpu_sigma_s"),
+        "cpu_floor_s": float(entry.get("cpu_floor_s", 0.10)),
         "protocol": "j0",
         "level_tol": float(entry.get("level_tol", 0.025)),
         "placement_levels_ms": entry.get("placement_levels_ms"),
     }
 
 
-def _perturb(gpu_device: int, gib: float, gpa_root: Path, env: dict | None = None) -> None:
-    tool = gpa_root / "frontier_tools" / "vram_reset"
-    if not tool.is_file():
-        msg = f"{tool} is missing (run scripts/frontier_prepare.sh build)"
-        raise DriverInfraError(msg)
+def vram_reset_snapshot(gpa_root: Path | None = None) -> dict:
+    """K3: {"path", "sha256", "record_sha256"} of frontier_tools/vram_reset. The runner takes it
+    BEFORE the agent runs, passes ``sha256`` as DriverConfig.vram_reset_sha256 and re-checks it
+    after the agent (R9). Raises DriverInfraError when the binary or its record is missing, or they differ."""
+    return snapshot(gpa_root)
+
+
+def _perturb(gpu_device: int, gib: float, gpa_root: Path, env: dict | None = None,
+             expected_sha256: str | None = None) -> None:
     run_env = dict(env or os.environ)
     for var in ("HIP_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES", "GPU_DEVICE_ORDINAL"):
         run_env.pop(var, None)
     run_env["ROCR_VISIBLE_DEVICES"] = str(gpu_device)
-    proc = subprocess.run([str(tool), f"{gib:.3f}"], env=run_env, capture_output=True,  # noqa: S603
-                          text=True, timeout=60, stdin=subprocess.DEVNULL, check=False)
-    if proc.returncode != 0:
-        msg = f"VRAM perturb failed (exit {proc.returncode}): {proc.stderr[-300:]}"
-        raise DriverInfraError(msg)
+    with VramResetTool(expected_sha256, gpa_root) as tool:
+        tool.run(run_env, gpa_root, (f"{gib:.3f}",), timeout=60)
 
 
 def _one_series(app: str, kernel_name: str, kernel_text: str, gcd: int, pairs: int,
-                temp_dir: Path, overrides: dict | None, reference_from_baseline: bool):
+                temp_dir: Path, overrides: dict | None, reference_from_baseline: bool,
+                vram_reset_sha256: str | None = None):
     from gpa_bench_driver.gpa_bench_driver import run_driver
 
     cfg = DriverConfig(app=app, gpu_backend="hip", nsys=True, pairs=pairs,
                        swaps_override={Path(kernel_name): f"// {kernel_name}\n" + kernel_text},
                        temp_dir=temp_dir, gpu_device=gcd, timeout=1500,
-                       app_overrides=overrides, reference_from_baseline=reference_from_baseline)
+                       app_overrides=overrides, reference_from_baseline=reference_from_baseline,
+                       vram_reset_sha256=vram_reset_sha256)
     _, _, long = run_driver(cfg)
     passes = long[app]
     if len(passes) < 2:
@@ -108,6 +112,7 @@ def rescore_kernel(
     overrides: dict | None = None,
     reference_from_baseline: bool = False,
     seed: int | None = None,
+    vram_reset_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Score one kernel file against the pristine baseline on one GCD with the J0 protocol.
 
@@ -122,6 +127,8 @@ def rescore_kernel(
             series (T6 decorrelation); if None and ``seed`` is given, a random 0-8 GiB is drawn
         overrides / reference_from_baseline: for an input variant (R7), as in DriverConfig
         seed: seed for the random perturb size
+        vram_reset_sha256: the pre-batch sha256 of frontier_tools/vram_reset (K3); None = its
+            build record
 
     Returns:
         the score_frontier result, plus "gcd", "perturb_gib", "pairs", "remeasured", the pass
@@ -137,10 +144,10 @@ def rescore_kernel(
     if perturb_gib is None and seed is not None:
         perturb_gib = random.Random(seed).uniform(0.0, 8.0)  # noqa: S311
     if perturb_gib:
-        _perturb(gcd, perturb_gib, root)
+        _perturb(gcd, perturb_gib, root, expected_sha256=vram_reset_sha256)
     kw = score_kwargs(entry)
     base, swap = _one_series(entry["name"], kernel_name, kernel_text, gcd, m, Path(temp_dir),
-                             overrides, reference_from_baseline)
+                             overrides, reference_from_baseline, vram_reset_sha256)
     out: dict[str, Any] = {"gcd": gcd, "perturb_gib": perturb_gib, "pairs": m,
                            "validate": swap.validate,
                            "validation_output": swap.validation_output}
@@ -153,7 +160,8 @@ def rescore_kernel(
     if needs_remeasure(result):  # T4 / H1: one pooled re-measure
         out["first"] = _summary(result)
         base2, swap2 = _one_series(entry["name"], kernel_name, kernel_text, gcd, m,
-                                   Path(temp_dir), overrides, reference_from_baseline)
+                                   Path(temp_dir), overrides, reference_from_baseline,
+                                   vram_reset_sha256)
         if not swap2.validate:  # R4: every timed run is validated, the re-measure too
             out.update({"ok": False, "speedup": None, "remeasured": True,
                         "failures": [{"code": "correctness",

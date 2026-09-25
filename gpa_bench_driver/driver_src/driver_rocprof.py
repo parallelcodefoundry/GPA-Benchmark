@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Any
 
 from gpa_bench_driver.driver_src.driver_models import SwapConfig
+from gpa_bench_driver.driver_src import driver_j0_rule as _rule
 from gpa_bench_driver.driver_src.driver_utils import (
     DriverInfraError,
     SubprocessRunner,
@@ -69,6 +70,12 @@ class RocprofError(Exception):
         """Initialize a RocprofError."""
         self.message = message
         super().__init__(self.message)
+
+
+class ProfilerOnlyError(DriverInfraError):
+    """The profiler never started the app although the same binary runs fine without it (F5/H3).
+    Infra on the original's side; on the swap side the driver retries the run once and a repeat
+    is the program's own failure (fix round 5 K4)."""
 
 
 def default_score_regex(kernel_name: str) -> str:
@@ -236,7 +243,7 @@ def profile_once(
             if plain.returncode == 0:
                 msg = (f"{what} before the app started (output dir never created), but the same "
                        f"binary runs fine without the profiler (profiler/harness failure): {stderr}")
-                raise DriverInfraError(msg)
+                raise ProfilerOnlyError(msg)
         msg = f"the program failed under the profiler (return code {result.returncode})"
         if stderr:
             msg += f": {stderr}"
@@ -467,79 +474,52 @@ def _mean(values: list[float]) -> float:
 
 
 # J0 protocol (M.md T3): level tolerance for the instability flag and the credit floor
-J0_LEVEL_TOL = 0.025
-J0_CREDIT_FLOOR = 1.005
+# J0 (M.md T2-T5): the credit rule and estimator live in driver_j0_rule (one rule everywhere, K2)
+J0_LEVEL_TOL = _rule.J0_LEVEL_TOL
+J0_CREDIT_FLOOR = _rule.J0_CREDIT_FLOOR
 
 
 def _median(values: list[float]) -> float:
-    v = sorted(values)
-    n = len(v)
-    if n == 0:
-        msg = "median of an empty series"
-        raise ScoringError(msg)
-    mid = n // 2
-    return float(v[mid]) if n % 2 else (v[mid - 1] + v[mid]) / 2.0
+    try:
+        return _rule.median(values)
+    except ValueError as exc:
+        raise ScoringError(str(exc)) from exc
 
 
 def _robust_spread(values: list[float]) -> float:
     """(2nd largest - 2nd smallest) / median; 0 for fewer than 4 values (M.md T3)."""
-    if len(values) < 4:
-        return 0.0
-    v = sorted(values)
-    med = _median(v)
-    return (v[-2] - v[1]) / med if med > 0 else 0.0
+    return _rule.robust_spread(values)
 
 
 def _lower_bound_index(m: int) -> int:
-    """Order statistic of the pair ratios that bounds their median from below (M.md T3)."""
-    if m < 8:
-        return 0
-    if m < 12:
-        return 1
-    if m < 16:
-        return 2
-    return 4
-
-
-def _pair_ratios(b_samples: list[dict], o_samples: list[dict], b_scored: list[float],
-                 o_scored: list[float], charge: float) -> list[float]:
-    """r_k = scored_B[k] / (scored_O[k] + charge), paired by the samples' ABBA ``pair`` index
-    (by position when the samples carry no pair index)."""
-    def idx(samples: list[dict]) -> list:
-        return [s.get("pair", i) for i, s in enumerate(samples)]
-
-    bmap = dict(zip(idx(b_samples), b_scored))
-    omap = dict(zip(idx(o_samples), o_scored))
-    keys = [k for k in idx(b_samples) if k in omap]
-    if not keys:
-        msg = "no ABBA pairs in common between the baseline and optimized series"
-        raise ScoringError(msg)
-    return [bmap[k] / (omap[k] + charge) for k in keys]
+    """Order statistic of the pair ratios that bounds their median from below (binomial, K2)."""
+    return _rule.lower_bound_index(m)
 
 
 def _j0_estimate(b_samples: list[dict], o_samples: list[dict], b_scored: list[float],
                  o_scored: list[float], charge: float, level_tol: float,
                  placement_levels_ms: dict | None) -> dict[str, Any]:
-    """M.md T3/T5: min(ratio of medians, median pair ratio), instability flag, lower bound."""
-    s_med = _median(b_scored) / (_median(o_scored) + charge)
-    r = _pair_ratios(b_samples, o_samples, b_scored, o_scored, charge)
-    s_pair = _median(r)
-    spread_b = _robust_spread(b_scored)
-    spread_o = _robust_spread(o_scored)
-    unstable = spread_b > level_tol or spread_o > level_tol
-    speedup = s_pair if unstable else min(s_med, s_pair)
-    lower = sorted(r)[_lower_bound_index(len(r))]
-    credited = speedup > J0_CREDIT_FLOOR and (not unstable or lower > J0_CREDIT_FLOOR)
-    level_ms = _median(b_scored) / 1e6
-    regime = None
-    if placement_levels_ms:
-        regime = min(placement_levels_ms, key=lambda n: abs(float(placement_levels_ms[n]) - level_ms))
-    return {"protocol": "j0", "speedup": speedup, "speedup_median_ratio": s_med,
-            "speedup_pair_median": s_pair, "pair_ratios": r, "spread_b": spread_b,
-            "spread_o": spread_o, "level_tol": level_tol, "unstable": unstable,
-            "lower_bound": lower, "credit_floor": J0_CREDIT_FLOOR, "credited": credited,
-            "n_pairs": len(r), "baseline_level_ms": level_ms, "regime": regime,
-            "remeasured": False}
+    """M.md T3/T5 via :func:`driver_j0_rule.j0_estimate`, paired by the samples' ABBA ``pair``
+    index (by position when the samples carry none)."""
+    try:
+        return _rule.j0_estimate(
+            b_scored, o_scored, charge_ns=charge,
+            pairs_b=[s.get("pair", i) for i, s in enumerate(b_samples)],
+            pairs_o=[s.get("pair", i) for i, s in enumerate(o_samples)],
+            level_tol=level_tol, placement_levels_ms=placement_levels_ms)
+    except ValueError as exc:
+        raise ScoringError(str(exc)) from exc
+
+
+def _t0_record(baseline_samples: list[dict], optimized_samples: list[dict]) -> dict[str, Any]:
+    """T0 evidence for the sidecar: the per-sample VRAM reset wall times (s)."""
+    rb = [s.get("vram_reset_s") for s in baseline_samples]
+    ro = [s.get("vram_reset_s") for s in optimized_samples]
+    vals = [float(x) for x in rb + ro if x is not None]
+    return {"vram_reset_s": {"baseline": rb, "optimized": ro}, "n_resets": len(vals),
+            "median_s": _rule.median(vals) if vals else None,
+            "max_s": max(vals) if vals else None,
+            "all_samples_reset": bool(vals) and len(vals) == len(rb) + len(ro)}
 
 
 def score_frontier_pooled(
@@ -693,8 +673,13 @@ def score_frontier(
     o = side(optimized_samples)
     b["other_mean_ns"] = base.other_mean_ns
     other_opt = _mean(o["other_ns"])
-    if protocol == "j0":  # T2: the other-kernel charge moves to medians
-        charge = max(0.0, _median(o["other_ns"]) - _median(b["other_ns"]))
+    other_j0: dict[str, float] = {}
+    if protocol == "j0":  # T2 on medians, minus a noise tolerance (fix round 5)
+        other_j0 = _rule.other_charge(b["other_ns"], o["other_ns"])
+        charge = other_j0["charge_ns"]
+        # the per-sample lists hold the charge actually applied (not legacy per-run values)
+        b["other_charge_ns"] = [0.0] * len(b["other_ns"])
+        o["other_charge_ns"] = [charge] * len(o["other_ns"])
     else:
         charge = max(0.0, other_opt - base.other_mean_ns)
     o["mean_scored_ns"] = _mean(o["scored_ns"]) + charge
@@ -740,6 +725,7 @@ def score_frontier(
             j0 = _j0_estimate(baseline_samples, optimized_samples, b["scored_ns"], o["scored_ns"],
                               charge, level_tol, placement_levels_ms)
             raw = j0["speedup"]
+            # unstable: only the lower bound can carry credit (j0_credited); below it -> failure
             if j0["unstable"] and not j0["lower_bound"] > J0_CREDIT_FLOOR:
                 failures.append({"code": "unstable", "message": (
                     f"TIMING UNSTABLE on this GCD (the VRAM placement changed between runs): "
@@ -767,7 +753,9 @@ def score_frontier(
             "charge_ns": charge,
             "charge_mean_ns": charge,  # alias (fix round 1 name)
             "ratio": other_opt / base.other_mean_ns if base.other_mean_ns > 0 else None,
+            **{k: v for k, v in other_j0.items() if k != "charge_ns"},
         },
+        "t0": _t0_record(baseline_samples, optimized_samples),
         "cpu": cpu,
         "g_wall": {"baseline_s": base.wall_mean_s, "optimized_s": o["wall_mean_s"],
                    "limit_s": wall_limit, "ok": wall_ok},

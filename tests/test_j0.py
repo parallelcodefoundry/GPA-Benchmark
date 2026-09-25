@@ -131,10 +131,15 @@ def test_real_speedup_on_quiet_gcd_credited_at_right_size():
 
 # ---------------------------------------------------------------- T3 details, T4, T5
 
-@pytest.mark.parametrize(("m", "j"), [(4, 0), (6, 0), (7, 0), (8, 1), (10, 1), (11, 1), (12, 2),
-                                      (15, 2), (16, 4), (20, 4)])
+# K2 (fix round 5): binomial quantile, coverage >= 98% for any m >= 6; M.md's j at 6/10/12/20
+@pytest.mark.parametrize(("m", "j"), [(4, 0), (6, 0), (7, 0), (8, 0), (10, 1), (11, 1), (12, 2),
+                                      (15, 3), (16, 3), (20, 4), (22, 5), (40, 13)])
 def test_lower_bound_order_statistic(m, j):
+    from gpa_bench_driver.driver_src.driver_j0_rule import lower_bound_coverage
+
     assert _lower_bound_index(m) == j
+    if m >= 6:
+        assert lower_bound_coverage(m) >= 0.98
 
 
 def test_other_kernel_charge_on_medians():
@@ -144,7 +149,50 @@ def test_other_kernel_charge_on_medians():
     for i, s in enumerate(o):  # the optimized run's other kernel is 50 us slower (median)
         s["kernels"]["other(int)"] = 150_000 if i != 0 else 900_000  # one spike
     r = score_frontier(b, o, RX, protocol="j0")
-    assert r["other"]["charge_ns"] == pytest.approx(50_000)  # median, not pulled by the spike
+    # median, not pulled by the spike; minus the 1 us tolerance floor (no noise: MADs are 0)
+    assert r["other"]["charge_ns"] == pytest.approx(50_000 - 1_000)
+    assert r["other"]["tol_ns"] == 1_000
+    assert r["optimized"]["other_charge_ns"] == [r["other"]["charge_ns"]] * 6
+    assert r["baseline"]["other_charge_ns"] == [0.0] * 6
+
+
+def _noisy_other(seed, n, shift_ns=0.0, rel=0.02, base_ns=440_000):
+    import random
+
+    rng = random.Random(seed)
+    return [base_ns * (1 + rng.uniform(-rel, rel)) + shift_ns for _ in range(n)]
+
+
+def test_other_kernel_charge_is_noise_tolerant_on_a_noop():
+    """fix round 5: backprop's other kernel (~440 us, +-2% per run) no longer charges a no-op."""
+    charged_old = charged_new = 0
+    sum_old = sum_new = 0.0
+    for seed in range(200):
+        b, o = _series(lambda pos: 0.44, 10, "abba")
+        for s, v in zip(b, _noisy_other(seed, 10)):
+            s["kernels"]["other(int)"] = int(v)
+        for s, v in zip(o, _noisy_other(seed + 1000, 10)):
+            s["kernels"]["other(int)"] = int(v)
+        r = score_frontier(b, o, RX, protocol="j0")
+        med = r["other"]["optimized_median_ns"] - r["other"]["baseline_median_ns"]
+        charged_old += med > 0
+        charged_new += r["other"]["charge_ns"] > 0
+        sum_old += max(0.0, med)
+        sum_new += r["other"]["charge_ns"]
+    assert charged_old > 60            # the old one-sided median charge hit about half the no-ops
+    assert charged_new <= 20           # the tolerant one: rarely (tol ~ 2 sigma of the median gap)
+    assert sum_new < 0.15 * sum_old    # and the bias it leaves is ~10% of the old one
+
+
+def test_other_kernel_charge_still_charges_a_real_increase_under_noise():
+    b, o = _series(lambda pos: 0.44, 10, "abba")
+    for s, v in zip(b, _noisy_other(1, 10)):
+        s["kernels"]["other(int)"] = int(v)
+    for s, v in zip(o, _noisy_other(2, 10, shift_ns=60_000)):  # +60 us per run, moved work
+        s["kernels"]["other(int)"] = int(v)
+    r = score_frontier(b, o, RX, protocol="j0")
+    assert 60_000 - 2 * r["other"]["tol_ns"] < r["other"]["charge_ns"] < 60_000 + r["other"]["tol_ns"]
+    assert r["other"]["tol_ns"] < 15_000
 
 
 def test_T4_pooled_series_uses_pooled_lower_bound():
@@ -223,7 +271,7 @@ _DRIVE = textwrap.dedent('''\
     ''')
 
 
-def _toy(tmp_path: Path, reset_body: str | None) -> Path:
+def _toy(tmp_path: Path, reset_body: str | None, record: bool = True) -> Path:
     import hashlib
 
     root = tmp_path / "gpa"
@@ -234,6 +282,9 @@ def _toy(tmp_path: Path, reset_body: str | None) -> Path:
         r = root / "frontier_tools" / "vram_reset"
         r.write_text(reset_body)
         r.chmod(0o755)
+        if record:
+            (root / "frontier_tools" / "vram_reset.sha256").write_text(
+                hashlib.sha256(r.read_bytes()).hexdigest() + "  vram_reset\n")
     app = root / "rodinia" / "toy-hip"
     app.mkdir(parents=True)
     (app / "kernel.cu").write_text("MODE=good\n")
@@ -289,7 +340,7 @@ def test_T6_rescore_kernel_creates_temp_dir_and_remeasures_when_unstable(tmp_pat
 
     calls = []
 
-    def fake_series(app, kernel_name, kernel_text, gcd, m, temp_dir, overrides, rfb):
+    def fake_series(app, kernel_name, kernel_text, gcd, m, temp_dir, overrides, rfb, sha=None):
         assert temp_dir.is_dir()  # created by rescore_kernel (the caller may pass a fresh path)
         calls.append(m)
         fn = _period2 if len(calls) == 1 else (lambda pos: 15.66)
@@ -311,7 +362,7 @@ def test_T6_rescore_kernel_remeasures_a_marginal_g_cpu_miss_like_the_runner(tmp_
 
     calls = []
 
-    def fake_series(app, kernel_name, kernel_text, gcd, m, temp_dir, overrides, rfb):
+    def fake_series(app, kernel_name, kernel_text, gcd, m, temp_dir, overrides, rfb, sha=None):
         calls.append(m)
         b, o = _series(lambda pos: 15.66, m, "abba")
         if len(calls) == 1:  # first series: one +2.5 s CPU spike in the optimized arm
@@ -336,3 +387,59 @@ def test_needs_remeasure_rule():
     assert not needs_remeasure({"ok": False, "failures": [g, {"code": "G-wall"}],
                                 "cpu": {"marginal": True}})
     assert not needs_remeasure({"ok": True, "j0": {"unstable": False}, "failures": []})
+
+
+# ---------------------------------------------------------------- K2: one credit rule everywhere
+
+NW2 = json.loads((GPA_ROOT / "tests/fixtures/j0/nw_two_regime_pooled.json").read_text())
+
+
+def test_K2_rule_module_is_stdlib_only():
+    import ast
+
+    src = (GPA_ROOT / "gpa_bench_driver/driver_src/driver_j0_rule.py").read_text()
+    mods = {n.module if isinstance(n, ast.ImportFrom) else a.name
+            for n in ast.walk(ast.parse(src)) if isinstance(n, (ast.Import, ast.ImportFrom))
+            for a in (n.names if isinstance(n, ast.Import) else [None])}
+    assert mods <= {"__future__", "math", "typing"}
+
+
+@pytest.mark.parametrize(("s", "u", "lb", "want"), [
+    (1.02, False, 0.9, True), (1.02, True, 1.006, True), (1.02, True, 1.005, False),
+    (1.005, False, 1.1, False), (None, False, None, False), (1.3, True, None, False)])
+def test_K2_j0_credited(s, u, lb, want):
+    from gpa_bench_driver.driver_src.driver_j0_rule import j0_credited
+
+    assert j0_credited(s, u, lb) is want
+
+
+def test_K2_nw_two_regime_pooled_series_is_credited_by_the_rule_and_by_score_frontier():
+    from gpa_bench_driver.driver_src.driver_j0_rule import j0_decision, j0_estimate
+
+    j = j0_estimate(NW2["baseline_scored_ns"], NW2["optimized_scored_ns"])
+    assert j["unstable"] and j["n_pairs"] == 20
+    assert j["lower_bound"] > 1.02 and j["credited"]
+    assert j["speedup"] == pytest.approx(NW2["recorded_j0"]["speedup"], rel=1e-9)
+    assert j0_decision(NW2["recorded_j0"])[0] is True
+    # the same runs as driver samples (two series of 10 ABBA pairs), pooled -> same verdict
+    def samples(scored, other):
+        return [{"target_ns": int(x), "target_dispatches": 2048,
+                 "kernels": {"needle_cuda_shared_1(int)": int(x), "needle_cuda_shared_2(int)": int(y)},
+                 "wall_s": 4.5, "cpu_s": 4.5, "pair": i % 10}
+                for i, (x, y) in enumerate(zip(scored, other))]
+    b = samples(NW2["baseline_scored_ns"], NW2["baseline_other_ns"])
+    o = samples(NW2["optimized_scored_ns"], NW2["optimized_other_ns"])
+    r = score_frontier_pooled([b[:10], b[10:]], [o[:10], o[10:]], r"needle_cuda_shared_1\(",
+                              protocol="j0", cpu_sigma_s=0.119)
+    assert r["ok"] and r["j0"]["credited"] and r["j0"]["remeasured"]
+    assert r["j0"]["speedup"] == pytest.approx(j["speedup"], rel=1e-9)
+
+
+def test_K2_j0_decision_recomputes_the_lower_bound_from_the_pair_ratios():
+    from gpa_bench_driver.driver_src.driver_j0_rule import j0_decision
+
+    ratios = [1.001, 1.002] + [1.03] * 14  # m=16: old fixed j=4 -> 1.03, binomial j=3 -> 1.03
+    rec = {"speedup": 1.03, "unstable": True, "pair_ratios": ratios, "lower_bound": 0.5}
+    assert j0_decision(rec)[0] is True
+    ratios = [1.001, 1.002, 1.003, 1.004] + [1.03] * 12  # j=3 -> 1.004: not credited
+    assert j0_decision({**rec, "pair_ratios": ratios})[0] is False

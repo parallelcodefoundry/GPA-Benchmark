@@ -84,27 +84,30 @@ def test_G1_work_moved_into_existing_runtime_kernel_name_is_charged():
     base = [_sample(560_000, {"findRangeK": 560_000, COPY: 10_000})] * 5
     attack = [_sample(3_000, {"findRangeK": 3_000, COPY: 565_000})] * 5  # same name as a blit
     r = score_frontier(base, attack, RX)
-    assert r["other"]["charge_ns"] == 555_000  # charged on means (fix round 2 F1)
-    assert r["optimized"]["mean_scored_ns"] == 558_000
-    assert r["raw_speedup"] == pytest.approx(560_000 / 558_000)
+    # charged on medians minus the noise tolerance (J0 T2, fix round 5: 1 us floor, no noise here)
+    assert r["other"]["tol_ns"] == 1_000
+    assert r["other"]["charge_ns"] == 555_000 - 1_000
+    assert r["optimized"]["mean_scored_ns"] == 557_000
+    assert r["raw_speedup"] == pytest.approx(560_000 / 557_000)
     assert r["other"]["ratio"] == pytest.approx(56.5)
 
 
 def test_other_kernel_charge_is_on_means():
+    """The legacy protocol="mean" path (fix rounds 1-4); J0's median charge is in test_j0."""
     base = [_sample(100, {"k": 100, "o": 50}), _sample(100, {"k": 100, "o": 70})]
     s = summarize_baseline(base, r"^k$")
     assert s.other_mean_ns == 60
     assert score_terms(base[1], s)["scored_ns"] == 100  # no per-sample charge any more
     # a no-op kernel (same noisy other kernels) is not biased below 1.0
     noop = [_sample(100, {"k": 100, "o": 70}), _sample(100, {"k": 100, "o": 50})]
-    r = score_frontier(base, noop, r"^k$")
+    r = score_frontier(base, noop, r"^k$", protocol="mean")
     assert r["other"]["charge_ns"] == 0 and r["speedup"] == pytest.approx(1.0)
     faster_other = [_sample(80, {"k": 80, "o": 1}), _sample(80, {"k": 80, "o": 1})]
-    r = score_frontier(base, faster_other, r"^k$")
+    r = score_frontier(base, faster_other, r"^k$", protocol="mean")
     assert r["baseline"]["mean_scored_ns"] == 100
     assert r["ok"] and r["speedup"] == pytest.approx(100 / 80)
     slower_other = [_sample(80, {"k": 80, "o": 90}), _sample(80, {"k": 80, "o": 90})]
-    r = score_frontier(base, slower_other, r"^k$")
+    r = score_frontier(base, slower_other, r"^k$", protocol="mean")
     assert r["other"]["charge_ns"] == 30 and r["optimized"]["mean_scored_ns"] == 110
 
 
@@ -605,6 +608,8 @@ def toy_root(tmp_path):
     reset = tools / "vram_reset"
     reset.write_text("#!/bin/bash\necho 'vram_reset allocs=1 GiB=0.00'\n")
     reset.chmod(0o755)
+    (tools / "vram_reset.sha256").write_text(  # K3 build record
+        __import__("hashlib").sha256(reset.read_bytes()).hexdigest() + "  vram_reset\n")
     app = root / "rodinia" / "toy-hip"
     app.mkdir(parents=True)
     (app / "kernel.cu").write_text("MODE=good\n")
@@ -678,4 +683,4 @@ def test_driver_R7_reference_from_baseline(toy_root):
     base, swap = _drive(toy_root, "MODE=bad", rfb=True, args="3")
     assert swap["validate"] is False and "result 127" in swap["vo"]
     out = _drive(toy_root, "MODE=good", rfb=False, args="3")  # stored ref does not fit the variant
-    assert out["error"] == "BaselineError"
+    assert out["error"] == "BaselineInfraError"  # K4: the original's failure is infra (retried)

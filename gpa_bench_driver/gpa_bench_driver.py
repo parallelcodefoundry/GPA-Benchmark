@@ -30,9 +30,7 @@ import contextlib
 import logging
 import os
 import shutil
-import subprocess
 import tempfile
-import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -81,11 +79,13 @@ from gpa_bench_driver.driver_src.driver_check import (
 from gpa_bench_driver.driver_src.driver_gate import check_kernel_source
 from gpa_bench_driver.driver_src.driver_reporting import print_report_table, save_results
 from gpa_bench_driver.driver_src.driver_rocprof import (
+    ProfilerOnlyError,
     RocprofError,
     get_score_regex,
     profile_once,
     rocprof_time_app,
 )
+from gpa_bench_driver.driver_src.driver_t0 import VramResetTool
 from gpa_bench_driver.driver_src.driver_utils import (
     DriverInfraError,
     SubprocessRunner,
@@ -155,6 +155,15 @@ class BaselineError(Exception):
         """
         self.message = message
         super().__init__(self.message)
+
+
+class BaselineInfraError(DriverInfraError, BaselineError):
+    """hip (fix round 5 K4): the ORIGINAL program failed its build/run/output check (baseline pass,
+    warm-up, timed or variant runs). The original is harness-owned, so this is infra (retried);
+    it stays a BaselineError for existing handlers."""
+
+    def __init__(self, message: str) -> None:
+        BaselineError.__init__(self, message)
 
 
 def count_operations_per_pass(config: DriverConfig) -> int:
@@ -408,6 +417,10 @@ def _handle_early_exit(
         elif stage == "validate":
             logger.error("Baseline validation output: %s", result.validation_output)
         msg = f"{stage.capitalize()} failed for baseline ({ctx.app['name']})"
+        if _backend(ctx.config) == "hip":
+            if result.validation_output and stage == "validate":
+                msg += f": {result.validation_output}"
+            raise BaselineInfraError(msg)
         raise BaselineError(msg)
     update_progress_for_skipped_operations(ctx.config, ctx.pbar, stage)
     return result
@@ -466,7 +479,7 @@ def _run_rocprof_phase(
             msg = f"Validate failed for baseline timed run ({ctx.app['name']}): " + (
                 result.validation_output
             )
-            raise BaselineError(msg)
+            raise BaselineInfraError(msg)
 
 
 def _run_profiling_phase(
@@ -809,42 +822,6 @@ def _n_pairs(app: dict, config: DriverConfig) -> int:
     return m + (m % 2)  # ABBA needs an even count
 
 
-def _vram_reset_tool() -> Path:
-    tool = Path(__file__).parent.parent / "frontier_tools" / "vram_reset"
-    if not tool.is_file() or not os.access(tool, os.X_OK):
-        msg = (f"VRAM reset failed: {tool} is missing (run scripts/frontier_prepare.sh build); "
-               "the J0 protocol needs it before every timed process")
-        raise DriverInfraError(msg)
-    recorded = tool.with_name("vram_reset.md5")
-    if recorded.is_file():  # the build records the binary's md5 (the source is md5-pinned)
-        import hashlib
-
-        want = recorded.read_text().split()[0] if recorded.read_text().split() else ""
-        got = hashlib.md5(tool.read_bytes()).hexdigest()  # noqa: S324 - integrity pin
-        if want and got != want:
-            msg = f"VRAM reset failed: {tool} md5 {got} does not match its build record {want}"
-            raise DriverInfraError(msg)
-    return tool
-
-
-def _vram_reset(tool: Path, runner: SubprocessRunner, cwd: Path) -> float:
-    """T0: allocate-and-free all VRAM on the visible GCD. Returns its wall time (s)."""
-    start = time.perf_counter()
-    try:
-        proc = subprocess.run([str(tool)], cwd=cwd, env=runner.env, stdin=subprocess.DEVNULL,  # noqa: S603
-                              capture_output=True, text=True, timeout=30, check=False)
-    except subprocess.TimeoutExpired as exc:
-        msg = "VRAM reset failed: vram_reset timed out after 30 s"
-        raise DriverInfraError(msg) from exc
-    except OSError as exc:
-        msg = f"VRAM reset failed: {exc}"
-        raise DriverInfraError(msg) from exc
-    if proc.returncode != 0:
-        msg = f"VRAM reset failed (exit {proc.returncode}): {(proc.stderr or proc.stdout)[-400:]}"
-        raise DriverInfraError(msg)
-    return time.perf_counter() - start
-
-
 class _SideError(Exception):
     """Wraps a timing-run failure with the side index (0 = original, 1 = swap) so the caller can
     attribute a side-0 (j=0) failure to infra and a side-1 failure to the agent (J2)."""
@@ -886,41 +863,67 @@ def _interleaved_series(
     samples: list[list[dict]] = [[] for _ in roots]
     warm_fail: list[str | None] = [None for _ in roots]
     retain = config.retain_nsys_profiles
-    reset_tool = _vram_reset_tool()
+    # K3: the reset binary is checked against the runner's pre-agent sha256 (or its build record)
+    # and a sealed in-memory copy runs; T0 below uses only that copy
+    reset_tool = VramResetTool(getattr(config, "vram_reset_sha256", None))
     reset_cwd = roots[0]
 
-    def _once(j, path, outdir):
+    def _profiled(j, path, outdir):
         # T0 (J0): VRAM reset right before every timed process (not counted in cpu_s/wall_s).
-        reset_s = _vram_reset(reset_tool, runner, reset_cwd)
-        # J2: a side-0 (original) failure is tagged so the caller treats it as infra, not the agent
-        try:
-            s = profile_once(app, runner, path, outdir, score_regex=score_regex,
-                             rocm_path=rocm, validate=validate, retain_profiles=retain)
-        except (RocprofError, DriverInfraError) as exc:
-            raise _SideError(j, exc) from exc
+        reset_s = reset_tool.run(runner.env, reset_cwd)
+        s = profile_once(app, runner, path, outdir, score_regex=score_regex,
+                         rocm_path=rocm, validate=validate, retain_profiles=retain)
         s["vram_reset_s"] = reset_s
         return s
 
-    for j, path in enumerate(paths):  # warm-ups W_B, W_O, discarded
-        w = _once(j, path, profile_dirs[j] / "rocprof_warmup")
-        if w.get("valid") is False:
-            warm_fail[j] = w.get("validation_output")
-    if len(paths) == 1:  # baseline-only series (no swap): plain repeats
-        for i in range(_n_pairs(app, config)):
-            s = _once(0, paths[0], profile_dirs[0] / f"rocprof_sample_{i}")
-            s.update(order=i, warmup=False, pair=i, pos_in_pair=0, protocol="j0")
-            samples[0].append(s)
+    def _once(j, path, outdir):
+        # K4: a DriverInfraError keeps its class on either side (never the agent's failure by
+        # side). The program's own failure under the profiler (RocprofError) is tagged with its
+        # side: j=0 -> infra, j=1 -> the agent's failure.
+        try:
+            return _profiled(j, path, outdir)
+        except ProfilerOnlyError as exc:
+            if j == 0:  # the original's profiler-only failure: infra
+                msg = f"the original {app['name']} (j=0): {exc}"
+                raise DriverInfraError(msg) from exc
+            # swap side: the profiler never started the program although it runs without it.
+            # Retry once in place (infra); a repeat is the program's own failure.
+            logger.warning("profiler-only failure on the swap side; retrying once: %s", exc)
+            try:
+                return _profiled(j, path, outdir)
+            except ProfilerOnlyError as exc2:
+                msg = ("your program fails under the profiler twice although it runs without "
+                       "it; the scored runs are profiled, so this counts as your program's "
+                       f"failure: {exc2}")
+                raise _SideError(j, RocprofError(msg)) from exc2
+            except RocprofError as exc2:
+                raise _SideError(j, exc2) from exc2
+        except RocprofError as exc:
+            raise _SideError(j, exc) from exc
+
+    try:
+        for j, path in enumerate(paths):  # warm-ups W_B, W_O, discarded
+            w = _once(j, path, profile_dirs[j] / "rocprof_warmup")
+            if w.get("valid") is False:
+                warm_fail[j] = w.get("validation_output")
+        if len(paths) == 1:  # baseline-only series (no swap): plain repeats
+            for i in range(_n_pairs(app, config)):
+                s = _once(0, paths[0], profile_dirs[0] / f"rocprof_sample_{i}")
+                s.update(order=i, warmup=False, pair=i, pos_in_pair=0, protocol="j0")
+                samples[0].append(s)
+            return samples, warm_fail
+        # T1 ABBA: pair k is (B,O) for even k and (O,B) for odd k -> B O O B B O O B ...
+        order = 0
+        for k in range(_n_pairs(app, config)):
+            sides = (0, 1) if k % 2 == 0 else (1, 0)
+            for pos, j in enumerate(sides):
+                s = _once(j, paths[j], profile_dirs[j] / f"rocprof_pair{k}_{j}")
+                s.update(order=order, warmup=False, pair=k, pos_in_pair=pos, protocol="j0")
+                order += 1
+                samples[j].append(s)
         return samples, warm_fail
-    # T1 ABBA: pair k is (B,O) for even k and (O,B) for odd k -> B O O B B O O B ...
-    order = 0
-    for k in range(_n_pairs(app, config)):
-        sides = (0, 1) if k % 2 == 0 else (1, 0)
-        for pos, j in enumerate(sides):
-            s = _once(j, paths[j], profile_dirs[j] / f"rocprof_pair{k}_{j}")
-            s.update(order=order, warmup=False, pair=k, pos_in_pair=pos, protocol="j0")
-            order += 1
-            samples[j].append(s)
-    return samples, warm_fail
+    finally:
+        reset_tool.close()
 
 
 def _first_invalid(label: str, samples: list[dict], warm: str | None) -> str | None:
@@ -973,8 +976,6 @@ def _run_app_hip_interleaved(
                 samples, warm = _interleaved_series(app, runner, config, hip_state, roots)
             except _SideError as se:
                 if se.side == 0:  # J2: the ORIGINAL failed during timing -> infra (retry once)
-                    if isinstance(se.exc, DriverInfraError):
-                        raise se.exc
                     msg = (f"the original {app['name']} failed during the timing loop "
                            f"(j=0): {se.exc}")
                     raise DriverInfraError(msg) from se.exc
@@ -986,9 +987,9 @@ def _run_app_hip_interleaved(
                 res.validation_output = f"the program failed during timing: {se.exc}"
                 continue
             base_problem = _first_invalid("baseline timed", samples[0], warm[0])
-            if base_problem is not None:
+            if base_problem is not None:  # K4: the original's output check -> infra (retry)
                 msg = f"Validate failed for baseline timed run ({app['name']}): {base_problem}"
-                raise BaselineError(msg)
+                raise BaselineInfraError(msg)
             if any(s["target_dispatches"] == 0 for s in samples[0]):
                 logger.warning("No dispatch of the target kernel (score_regex %r) in the %s "
                                "baseline trace", get_score_regex(app), app["name"])

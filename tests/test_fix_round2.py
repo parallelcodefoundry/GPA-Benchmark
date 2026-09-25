@@ -337,6 +337,8 @@ def toy2(tmp_path):
     reset = tools / "vram_reset"
     reset.write_text("#!/bin/bash\necho 'vram_reset allocs=1 GiB=0.00'\n")
     reset.chmod(0o755)
+    (tools / "vram_reset.sha256").write_text(  # K3 build record
+        __import__("hashlib").sha256(reset.read_bytes()).hexdigest() + "  vram_reset\n")
     app = root / "rodinia" / "toy-hip"
     app.mkdir(parents=True)
     (app / "kernel.cu").write_text("MODE=good\n")
